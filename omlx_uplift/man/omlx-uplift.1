@@ -169,6 +169,18 @@ twin of the dashboard's
 .Dq Roll back
 button, and the way to undo a promote that turned out worse.
 Nothing is fetched and no file is touched until that restart.
+.It Xo Ic patch
+.Ic order Ar id Ar N
+.Xc
+Set the patch's apply priority
+.Va N
+(0\(en9999, default 100; lower applies first).
+When two enabled patches change the same lines, the first in
+.Po priority , name Pc
+order lands and the other reports the collision \(em this verb chooses the
+winner instead of leaving it to the patch id.
+Manifest-only; it takes effect at the next restart (runtime scope) or
+Build (dev scope).
 .It Ic patch Ic remove Ar id
 Out-of-band patch-carrier recovery when the dashboard is unreachable:
 the same engine the .pth startup reconcile uses, no re-exec, JSON output.
@@ -534,7 +546,8 @@ Without the flag the choice persisted by
 applies, else
 .Em omlx .
 Store-only verbs
-.Po enable , disable , promote , rollback , approve , adopt , remove ,
+.Po enable , disable , promote , rollback , approve , adopt , order ,
+remove ,
 kill switch
 .Pc
 act on the shared manifest and ignore the target.

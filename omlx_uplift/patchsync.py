@@ -92,7 +92,40 @@ def _stamp_failure(store, tree_root, keg, patch, version, prefix, reason):
         patch["state_changed_at"] = _patches.now_iso()
 
 
-def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
+def _conflict_hint(plist, loser, keg, failed_paths, reverse=False):
+    """P2 (stress harness 2026-10-31): when a strict apply fails, the files
+    almost always changed under this patch because ANOTHER enabled patch
+    already mounted there (same-line conflict, alphabetical winner). The raw
+    'context mismatch' named neither side — say what collides with what and
+    which control resolves it. Best-effort: only applied peers on THIS tree
+    are named; without a match the caller keeps the original reason."""
+    if not failed_paths:
+        return ""
+    hits = []
+    for other in plist or []:
+        if other is loser or not other.get("enabled"):
+            continue
+        for ver in other.get("versions", []):
+            rec = _patches.keg_record(ver, keg)
+            if not rec or rec.get("status") != "applied":
+                continue
+            shared = sorted(failed_paths & {f.get("path")
+                                            for f in rec.get("files", [])})
+            if shared:
+                hits.append((other.get("id", "?"), shared))
+                break
+    if not hits:
+        return ""
+    hits = hits[:2]
+    who = ", ".join(f"'{pid}' ({', '.join(files[:2])})" for pid, files in hits)
+    verb = "reversed" if reverse else "applied"
+    return (f" — collides with enabled patch {who}, which {verb} there "
+            "first; keep only one enabled or set a lower Apply priority "
+            "in Manage")
+
+
+def _apply_patch(store, tree_root, keg, patch, version, deadline,
+                 plist=None) -> dict:
     """Strict-apply one stored version. Returns report dict; mutates patch."""
     pid = patch["id"]
     data = _read(_abs(store, version.get("patch_file", "")))
@@ -114,16 +147,18 @@ def _apply_patch(store, tree_root, keg, patch, version, deadline) -> dict:
     reverse = bool(patch.get("reversal"))
     result = diffapply.apply_diff(data, tree_root, backup_dir, reverse=reverse)
     if not result["ok"]:
+        fails = [f for f in result.get("files", []) if f["status"] == "fail"]
+        reason = result["reason"] + _conflict_hint(
+            plist, patch, keg, {f["path"] for f in fails}, reverse)
         _stamp_failure(store, tree_root, keg, patch, version,
                        "reversal failed" if reverse else "apply failed",
-                       result["reason"])
-        fails = [f for f in result.get("files", []) if f["status"] == "fail"]
+                       reason)
         _log.warning("patch %s v%d %s: %s | %s", pid, version["v"],
                      "reversal FAILED" if reverse else "apply FAILED",
-                     result["reason"],
+                     reason,
                      "; ".join(f"{f['path']}: {f.get('reason')}"
                                for f in fails[:20]))
-        return {"id": pid, "action": "needs_review", "reason": result["reason"],
+        return {"id": pid, "action": "needs_review", "reason": reason,
                 "reversal": reverse}
 
     applied_files = []
@@ -348,7 +383,8 @@ def reconcile(store, tree_root: str, allow_reexec: bool = True,
                         {"id": patch["id"], "action": "needs_review",
                          "reason": patch.get("state_detail")})
                     continue
-                res = _apply_patch(store, tree_root, keg, patch, desired, deadline)
+                res = _apply_patch(store, tree_root, keg, patch, desired,
+                                   deadline, plist=ordered)
                 if res["action"] == "deferred":
                     deferred = True
                 report["changed"] |= bool(res.get("changed_on_disk"))

@@ -23,8 +23,8 @@ COMMANDS = [
                 " 'brew upgrade omlx')"),
     ("uninstall", "remove the mount (.pth) again"),
     ("patch", "status|apply|check|disable-all|enable-all|enable|disable|"
-              "update|update-all|promote|rollback|remove — patch recovery "
-              "without the dashboard ('patches' = legacy alias)"),
+              "update|update-all|promote|rollback|remove|order — patch "
+              "recovery without the dashboard ('patches' = legacy alias)"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
             " dev patches in a separate keg, keg rollback"),
@@ -65,6 +65,8 @@ COMMAND_USAGE = {
               "                 patch approve ID [--approve once|always]\n"
               "                 patch promote ID [--approve once|always]\n"
               "                 patch rollback ID [--to-v N]\n"
+              "                 patch order ID N  (apply priority: lower "
+              "applies first when patches collide)\n"
               "                 patch remove ID\n"
               "                 ('patches' is accepted as a legacy alias)"),
     "skin": ("omlx-uplift skin compile <dir> [-o out.yml]\n"

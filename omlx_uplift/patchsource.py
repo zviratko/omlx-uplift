@@ -1589,6 +1589,62 @@ def request_removal(store, patch_id: str, tree_root: str) -> dict:
     return remove_patch(store, patch_id, tree_root)
 
 
+RETIRED_CAP = 50
+
+
+def _tombstone_build_copies(manifest, store, p) -> set:
+    """P3 (stress harness 2026-10-31): removing a patch the omlx-dev branch
+    carries leaves its materialized commit on the branch until the next
+    Build. With no store entry left, that commit reads as an unexplained
+    HAND edit — the operator who just removed a patch gets told the sources
+    carry changes no patch explains, identical to a real out-of-band edit.
+    A removed-but-committed patch therefore leaves a tombstone: id + stored
+    diff pointers. build_residue_pool honours it, so the build zone says
+    'retired content — next Build drops it' (quiet), and the next successful
+    build clears the tombstones (mark_dev_applied — the re-cut branch no
+    longer carries them). Returns the patch_file paths to KEEP on disk."""
+    if not _patches.scope_touches_dev(_patches.patch_scope(p)):
+        return set()
+    vers = []
+    for v in p.get("versions", []):
+        if not (v.get("dev_applied") or {}).get("sha") or not v.get("patch_file"):
+            continue
+        data = _read_patch_file(store, v)
+        if data is None:
+            continue
+        # RAW file hash (not the pipeline's normalized content_sha256): the
+        # tombstone proves the bytes on disk are still what was materialized
+        v = dict(v, _tombstone_file_sha=hashlib.sha256(data).hexdigest())
+        vers.append(v)
+    if not vers:
+        return set()
+    rec = {"id": p.get("id"), "at": _patches.now_iso(),
+           "scope": _patches.patch_scope(p),
+           "versions": [{"v": v.get("v"),
+                         "patch_file": v.get("patch_file"),
+                         "content_sha256": v.get("content_sha256"),
+                         "file_sha256": v["_tombstone_file_sha"]}
+                        for v in vers]}
+    retired = list(manifest.get("retired") or [])
+    retired = [r for r in retired if r.get("id") != rec["id"]]
+    retired.append(rec)
+    dropped, kept = retired[:-RETIRED_CAP], retired[-RETIRED_CAP:]
+    for d in dropped:                       # cap: oldest falls off with files
+        for rv in d.get("versions", []):
+            try:
+                os.remove(_abs_patch_file(store, rv))
+            except OSError:
+                pass
+    manifest["retired"] = kept
+    return {_abs_patch_file(store, rv) for r in kept if r.get("id") == rec["id"]
+            for rv in r.get("versions", [])}
+
+
+def _abs_patch_file(store, version: dict) -> str:
+    pf = version.get("patch_file") or ""
+    return pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
+
+
 def remove_patch(store, patch_id: str, tree_root: str) -> dict:
     """Remove a patch: restore its pristine files NOW if it is applied, then
     drop manifest entry + stored files (backups included). Unwinds EVERY
@@ -1607,6 +1663,7 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
         # deleting pristine backups whose target tree is currently unreachable
         # turns a repair into permanent data loss - those bytes exist nowhere
         # else. Forget the entry, keep the backups, say exactly that.
+        _tombstone_build_copies(manifest, store, p)   # P3 (files stay anyway)
         manifest["patches"] = [x for x in manifest.get("patches", [])
                               if x.get("id") != patch_id]
         store.save(manifest)
@@ -1681,10 +1738,15 @@ def remove_patch(store, patch_id: str, tree_root: str) -> dict:
                                        f"{p['id']}.v{v.get('v')}"),
                           ignore_errors=True)
         v.pop("kegs", None)
+    # P3: a carried build patch leaves a tombstone; its diff bytes must
+    # survive so the build zone can keep explaining the branch content
+    keep = _tombstone_build_copies(manifest, store, p)
     for ver in p.get("versions", []):
         pf = ver.get("patch_file")
         if pf:
             path = pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
+            if path in keep:
+                continue
             try:
                 os.remove(path)
             except OSError:
@@ -2098,9 +2160,12 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
         v = version["v"]
         store.set_state(p, "update_available", f"v{v} available from source")
         promoted = False
-        if p.get("enabled") and (
-                p.get("auto_update")
-                or (p.get("curated") and not p.get("curated_adopted"))):
+        codes = (version.get("safeguards") or {}).get("codes") or []
+        held_now = _safeguards.held(codes, p.get("safeguard_always"),
+                                    p.get("safeguard_once"), sha)
+        if (p.get("enabled") and not held_now
+                and (p.get("auto_update")
+                     or (p.get("curated") and not p.get("curated_adopted")))):
             # PAT-TABLE: per-patch AUTO UPDATE rides the same rule the
             # curated catalog tracks (validated candidate with no NEW
             # safeguard hold is adopted without a Promote click — the
@@ -2112,16 +2177,28 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
             # not adopted) patch tracks its catalog version — the catalog
             # selected the patch and its upgrade, the human decision was
             # made at publish time.
-            codes = (version.get("safeguards") or {}).get("codes") or []
-            if not _safeguards.held(codes, p.get("safeguard_always"),
-                                    p.get("safeguard_once"), sha):
-                p["desired_version"] = v
-                store.set_state(p, "pending",
-                                f"v{v} auto-promoted — applies on "
-                                f"{applies_phrase(p)}")
-                promoted = True
+            p["desired_version"] = v
+            store.set_state(p, "pending",
+                            f"v{v} auto-promoted — applies on "
+                            f"{applies_phrase(p)}")
+            promoted = True
         reports[pid] = {"check": "update_available", "v": v,
                         "promoted": promoted, "curated": bool(p.get("curated"))}
+        if not promoted:
+            # P1 transparency (stress harness 2026-10-31): a candidate that
+            # is stored but NOT adopted must always say why and what to
+            # press — the bare 'update available (v2)' toast over an unchanged
+            # card read as an error to the operator.
+            if held_now:
+                reports[pid]["reason"] = (
+                    f"v{v} stored, needs your approval "
+                    f"({', '.join(held_now)}) — press Approve")
+            elif not p.get("enabled"):
+                reports[pid]["reason"] = (
+                    f"v{v} stored — enable the patch to pick it up")
+            else:
+                reports[pid]["reason"] = (
+                    f"v{v} is stored but not in use — press Promote")
         changed_any = True
     if changed_any:
         store.save(manifest)
@@ -2263,6 +2340,20 @@ def mark_dev_applied(store, commits: list[dict],
             changed = _dev_absent(
                 p, "disabled — not in the current omlx-dev build",
                 "disabled") or changed
+    # P3: a build RE-CUTS the branch from the base with the enabled set, so
+    # every retired patch's commit is gone from the sources as of this call —
+    # the tombstones (and the diff bytes they kept for the build zone) expire
+    # now. A failed build never reaches here, so the quiet 'retired' verdict
+    # survives exactly as long as the branch still carries the content.
+    for rec in manifest.get("retired") or []:
+        for rv in rec.get("versions", []):
+            try:
+                os.remove(_abs_patch_file(store, rv))
+            except OSError:
+                pass
+    if manifest.get("retired"):
+        manifest["retired"] = []
+        changed = True
     if changed:
         store.save(manifest)
 
@@ -2365,6 +2456,18 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
     excl = {(p.get("id"), p.get("version")) for p in enabled}
     manifest = store.load()
     out: list[dict] = []
+    # P3: tombstones of REMOVED build patches (remove_patch) explain branch
+    # content too — until a tombstone's sha stops matching the file on disk
+    # (a re-added patch under the same id reused the path), the bytes are
+    # trustworthy residue, never a hand edit.
+    for rec in manifest.get("retired") or []:
+        for rv in rec.get("versions", []):
+            data = _read_patch_file(store, rv)
+            if (data is None or not rv.get("file_sha256")
+                    or hashlib.sha256(data).hexdigest() != rv["file_sha256"]):
+                continue
+            out.append({"id": rec.get("id"), "version": rv.get("v", 0),
+                        "diff_bytes": data, "retired": True})
     for p in manifest.get("patches", []):
         ver = _desired_version_entry(store, p)
         if ver is None:
@@ -2390,6 +2493,31 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
                             "alternate_version": p.get("id"),
                             "wanted_version": key[1]})
     return out
+
+
+def set_order(store, patch_id: str, order) -> dict:
+    """P4 (Apply priority, stress harness 2026-10-31): the apply engines
+    (boot mount, build materialize) order patches by (order, id) — with the
+    default 100 everywhere the tie-break is the patch id, so an overlapping
+    pair silently picked an alphabetical winner the operator could not see
+    or steer. This is the store-only verb behind the Manage control; the
+    engines already honour the field, nothing else moves. Takes effect at
+    the next restart (runtime) / Build (dev) via applies_phrase."""
+    try:
+        n = int(order)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "apply priority must be a number"}
+    if not 0 <= n <= 9999:
+        return {"ok": False, "reason": "apply priority must be 0-9999"}
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    old = p.get("order", 100)
+    p["order"] = n
+    store.save(manifest)
+    return {"ok": True, "order": n, "previous": old,
+            "note": f"apply order changes from {applies_phrase(p)}"}
 
 
 def set_config(store, auto_update_check: bool | None = None,

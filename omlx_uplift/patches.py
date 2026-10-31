@@ -187,14 +187,23 @@ TRANSITIONS: dict[str, frozenset[str]] = {
                           "failed", "update_available"}),
     "applied": frozenset({"update_available", "disabled", "needs_review",
                           "obsolete", "failed", "pending"}),
+    "needs_review": frozenset({"pending", "applied", "disabled", "obsolete",
+                               # a patch that LOST a boot conflict must still
+                               # be able to show that its source fixed itself
+                               # (stress harness 2026-10-31: without this edge
+                               # the drift check stored v2, the state update
+                               # was refused, and the Manage candidate row —
+                               # gated on update_available — never appeared)
+                               "update_available"}),
     "update_available": frozenset({"applied", "pending", "disabled",
                                    "needs_review", "obsolete"}),
-    "needs_review": frozenset({"pending", "applied", "disabled", "obsolete"}),
     # 'applied' back: a false-obsolete verdict (clean-base re-gate proves
     # upstream does NOT carry it) must be reversible without faking an
     # intermediate pending state (self-heal class, 2026-10-20).
-    "obsolete": frozenset({"pending", "disabled", "applied"}),
-    "failed": frozenset({"pending", "needs_review", "disabled"}),
+    "obsolete": frozenset({"pending", "disabled", "applied",
+                           "update_available"}),
+    "failed": frozenset({"pending", "needs_review", "disabled",
+                         "update_available"}),
     # disabled stays informational-visible: a drift check re-fetches the
     # source even while disabled (user disabled a broken patch; an upstream
     # fix must surface), so update_available/obsolete must be reachable.

@@ -662,7 +662,8 @@ function patchRow(p, view) {
         const chip = ptChip('v' + v.v + (isApplied ? ' ●'
             : isDevApplied ? ' ▲' : isDesired ? ' ◐' : ''),
             isApplied ? 'pt-st-applied'
-                : (isCandidate && p.state === 'update_available')
+                : (isCandidate && (p.state === 'update_available'
+                    || (p.latest_v || 0) > (p.desired_version || 0)))
                     ? 'pt-st-update' : 'pt-st-dim',
             (v.fetched_at || '') + (v.source_head_sha
                 ? ' · ' + v.source_head_sha.slice(0, 12) : ''));
@@ -915,8 +916,13 @@ function ptManage(p) {
         box.append(sec);
     }
 
-    // candidate waiting -> one honest Apply button (auto does it for you)
-    if (p.state === 'update_available') {
+    // candidate waiting -> one honest Apply button (auto does it for you).
+    // P1 (stress harness 2026-10-31): key on the DATA, not only the chip
+    // state — a needs_review/failed card with a newer stored version used
+    // to hide the row entirely (the state update was refused by the
+    // transition gate), so the operator could not see or press Promote.
+    const waitingCand = (p.latest_v || 0) > (p.desired_version || 0);
+    if (p.state === 'update_available' || waitingCand) {
         const c = document.createElement('div');
         c.className = 'pt-mgr-cand';
         const cs = document.createElement('span');
@@ -937,6 +943,46 @@ function ptManage(p) {
         c.append(cs, ap);
         box.append(c);
     }
+
+    // P4 Apply priority: two enabled patches that change the same lines
+    // apply in (priority, name) order — whoever goes first holds the lines
+    // and the other reports the collision. The engines always sorted this
+    // way; this control is what lets the OPERATOR choose the winner
+    // instead of an alphabetical accident. Lower number applies first;
+    // takes effect at the next restart (runtime) / Build (dev).
+    const ordSec = document.createElement('div');
+    ordSec.className = 'pt-mgr-cand';
+    const ordLbl = document.createElement('span');
+    ordLbl.textContent = ptMsg('uplift.patches.order_label',
+        'Apply priority (lower applies first)');
+    ordLbl.title = ptMsg('uplift.patches.order_hint',
+        'when two enabled patches change the same lines, the lower number '
+        + 'lands first and the other reports the collision');
+    const ordIn = document.createElement('input');
+    ordIn.type = 'number';
+    ordIn.min = '0';
+    ordIn.max = '9999';
+    ordIn.value = String(p.order == null ? 100 : p.order);
+    const ordBtn = document.createElement('button');
+    ordBtn.type = 'button';
+    ordBtn.className = 'btn';
+    ordBtn.textContent = ptMsg('uplift.patches.order_set', 'Set priority');
+    ordBtn.onclick = async () => {
+        if (S.PT_BUSY) return;
+        S.PT_BUSY = true;
+        try {
+            const r = await ptApi('order', { id: p.id,
+                order: parseInt(ordIn.value, 10) });
+            PG.toast(ptMsg('uplift.patches.order_saved',
+                'Apply priority set to {n} — {w}')
+                .replace('{n}', String(r.order))
+                .replace('{w}', r.note || ''), 5500);
+            await pollPatches();
+        } catch (e) { PG.toast(String(e), 5000); }
+        finally { S.PT_BUSY = false; }
+    };
+    ordSec.append(ordLbl, ordIn, ordBtn);
+    box.append(ordSec);
 
     const testBtn = document.createElement('button');
     testBtn.type = 'button';
@@ -1400,7 +1446,10 @@ async function ptCheckNow(quiet) {
                         'auto-applied v{v} — takes effect at the next restart/build')
                           .replace('{v}', rep.v)
                     : ptMsg('uplift.patches.update_avail_toast',
-                        'update available (v{v})').replace('{v}', rep.v));
+                        'update available (v{v})').replace('{v}', rep.v)
+                        // P1: never a bare 'update available' over a card
+                        // that will not move — say why, and what to press
+                        + (rep.reason ? ' — ' + rep.reason : ''));
             if (rep.check === 'obsolete') return id + ': ' + ptMsg('uplift.patches.obsolete', 'obsolete');
             if (rep.check === 'error') return id + ': ' + ptMsg('uplift.patches.check_error', 'check failed') + ' — ' + rep.reason;
             return null;

@@ -569,6 +569,37 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
     raise first_exc
 
 
+def _pass_collision_suffix(patches_to_apply, idx) -> str:
+    """P2 (stress harness 2026-10-31): materialize applies in list order and
+    an overlapping pair aborts blaming only the loser — 'does not apply onto
+    the sync base: omlx/say.py' never said WHO moved the lines. When a patch
+    fails, name the earlier patches of THIS pass that change the same files;
+    they are the only explanation for lines that 'mysteriously' differ."""
+    cur = patches_to_apply[idx]
+    def paths(p):
+        from . import diffapply
+        parsed = diffapply.parse_diff(p.get("diff_bytes") or b"")
+        if not parsed.get("ok"):
+            return set()
+        return {f.get("path") for f in parsed.get("files", [])}
+    mine = paths(cur)
+    if not mine:
+        return ""
+    hits = []
+    for prior in patches_to_apply[:idx]:
+        shared = sorted(mine & paths(prior))
+        if shared:
+            hits.append((prior.get("id", "?"), prior.get("version", 0),
+                         shared))
+    if not hits:
+        return ""
+    who = ", ".join(f"'{pid}' v{v} ({', '.join(files[:2])})"
+                    for pid, v, files in hits[:2])
+    return (f" — collides with {who}, applied earlier in this build; "
+            "keep only one enabled or give this patch a lower Apply "
+            "priority in Manage")
+
+
 def materialize(patches_to_apply: list[dict], cfg: dict,
                 on_patch_failure=None) -> dict:
     """Re-cut the formula branch from the fetched sync ref and apply each
@@ -617,7 +648,7 @@ def materialize(patches_to_apply: list[dict], cfg: dict,
     failed_pid = None   # patch whose apply/commit aborted the pass
     store = _patches_mod.PatchStore()
     try:
-        for p in patches_to_apply:
+        for pidx, p in enumerate(patches_to_apply):
             pid, v = p["id"], p.get("version", 0)
             failed_pid = pid
             try:
@@ -625,8 +656,18 @@ def materialize(patches_to_apply: list[dict], cfg: dict,
                     path, store, pid, v, p["diff_bytes"], base_sha,
                     on_patch_failure)
             except _PatchSkip as sk:
+                # P2: the skip record reads as the operator's decision only
+                # in the resolver case — name the same-build collision when
+                # an earlier patch already took these files
+                sk.record["reason"] = (sk.record.get("reason") or "") + \
+                    _pass_collision_suffix(patches_to_apply, pidx)
                 skipped.append(sk.record)
                 continue           # resolver said 'skip this build'
+            except DevsrcError as exc:
+                hint = _pass_collision_suffix(patches_to_apply, pidx)
+                if hint:
+                    raise DevsrcError(f"{exc}{hint}") from exc
+                raise
             nfiles = len(ares.get("files") or [])
             _git(["add", "-A"], cwd=path)
             if _git(["diff", "--cached", "--quiet"], cwd=path,

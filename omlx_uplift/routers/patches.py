@@ -265,6 +265,26 @@ async def patches_auto(req: PatchAutoRequest,
     return res
 
 
+class PatchOrderRequest(BaseModel):
+    id: str
+    order: int
+
+
+@api_router.post("/patches/order")
+async def patches_order(req: PatchOrderRequest,
+                        is_admin: bool = Depends(require_admin)):
+    """P4 (Apply priority): steer which of two conflicting enabled patches
+    lands first — lower number applies first at the next restart (runtime
+    scope) / Build (dev scope). Store-only: nothing moves on disk now."""
+    from .. import patchsource
+
+    res = await asyncio.to_thread(
+        patchsource.set_order, patch_store(), req.id, req.order)
+    if not res.get("ok"):
+        raise HTTPException(status_code=422, detail=res.get("reason"))
+    return res
+
+
 @api_router.post("/patches/promote")
 async def patches_promote(req: PatchApproveRequest,
                           is_admin: bool = Depends(require_admin)):

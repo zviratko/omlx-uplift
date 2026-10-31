@@ -901,8 +901,8 @@ def cmd_patches(argv=None) -> int:
     'both' runs status/apply/check/
     update-all once per tree). Default: the choice persisted by
     'omlx-uplift install --default-target', else omlx. Store-only verbs
-    (enable/disable/promote/rollback/approve/adopt/remove, kill switch)
-    ignore it — the store is shared by both trees."""
+    (enable/disable/promote/rollback/approve/adopt/order/remove, kill
+    switch) ignore it — the store is shared by both trees."""
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift patch")
@@ -911,9 +911,13 @@ def cmd_patches(argv=None) -> int:
                                        "update", "enable", "disable",
                                        "remove", "approve", "promote",
                                        "rollback", "update-all", "curated",
-                                       "adopt"])
+                                       "adopt", "order"])
     ap.add_argument("id", nargs="?",
-                    help="patch id (add/update/enable/disable/remove/approve)")
+                    help="patch id (add/update/enable/disable/remove/"
+                         "approve/order)")
+    ap.add_argument("value", nargs="?",
+                    help="order: apply priority 0-9999, LOWER applies first "
+                         "when two enabled patches change the same lines")
     ap.add_argument("--to-v", type=int, dest="to_v", default=None,
                     help="rollback: stored version to make desired "
                          "(default: the one before the current desired)")
@@ -957,7 +961,7 @@ def cmd_patches(argv=None) -> int:
                          "choice saved by 'omlx-uplift install "
                          "--default-target', else omlx. Store-only verbs "
                          "(enable/disable/promote/rollback/approve/adopt/"
-                         "remove, kill switch) ignore it.")
+                         "order/remove, kill switch) ignore it.")
     args = ap.parse_args(argv)
 
     from . import patchsource, patches as _patches, patchsync
@@ -1079,6 +1083,16 @@ def cmd_patches(argv=None) -> int:
         if not args.id:
             ap.error("adopt needs a patch id")
         out = curated.adopt(store, args.id)
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
+    if args.action == "order":
+        # P4 Apply priority: manifest-only (KILL-NOTREE lane — works with no
+        # tree). Lower number applies first among enabled patches at the next
+        # restart / build; the engines already sort by (order, id).
+        if not args.id:
+            ap.error("order needs <id> <priority>")
+        out = patchsource.set_order(store, args.id, args.value)
         print(_json.dumps(out, indent=2))
         return 0 if out.get("ok") else 1
 
