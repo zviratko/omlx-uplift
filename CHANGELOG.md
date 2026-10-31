@@ -13,7 +13,9 @@ users never see.
 
 ## Unreleased
 
-- **A dev build can no longer ship an engine that fails at boot.** `omlx-uplift dev install` now compares the dependency commits in our formula, in the tap's `omlx.rb` and in the source tree it is about to build, refuses the build when they disagree (naming the line to bump or the `brew update` that fixes it), and after building runs the new keg's own interpreter against the engine's imports plus the tap's self-checks before that keg is allowed to go live. `--force` still builds anyway, with the findings printed. This is the 2026-10-29 wall: a lagging tap installed mlx-audio 0.4.3 over the 0.6.3 the source asked for, the build reported success, and the server died on `ImportError`.
+## [3.0] - 2026-10-31
+
+- **A dev build can no longer ship an engine that fails at boot.** `omlx-uplift dev install` now compares the dependency commits in our formula, in the tap's `omlx.rb` and in the source tree it is about to build, and refuses the build when they disagree instead of letting a lagging tap overwrite what the source asked for. After a build it runs the new keg's own interpreter against the engine's imports and the tap's self-checks before that keg is allowed to go live; `--force` still builds anyway, with the findings printed.
 
 ## [2.9] — 2026-10-29
 
