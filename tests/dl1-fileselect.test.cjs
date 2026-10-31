@@ -160,23 +160,31 @@ test('toggle: locked files untouchable; group toggles together; mmproj pulled in
     p = H.toggle(detail, p, detail.files[3]);
     assert.strictEqual(JSON.stringify(p), before);
 });
-test('sizes: rowSize sums the group; allSize matches the download-all rule; fits guards disk', () => {
+test('sizes: rowSize sums the group; allSize is the server figure; fits guards disk', () => {
     const { seam } = load();
     const H = seam.HFS;
-    const detail = { layout: 'gguf', disk_free: 100, download_all_size: 0, files: [
+    // 73e5465 (#4967): the server computes download_all_size as a whole-repo
+    // download minus local files; classic hfDownloadAllSize reads it verbatim,
+    // so uplift does too. Fixtures carry the server figures.
+    const detail = { layout: 'gguf', disk_free: 100, download_all_size: 110, files: [
         { ...st('a'), group: 'g', size: 40 }, { ...st('b'), group: 'g', size: 60 },
         { ...st('c'), size: 5, local: true }, st('d'),
     ] };
     assert.strictEqual(H.rowSize(detail, detail.files[0]), 100);
     assert.strictEqual(H.rowSize(detail, detail.files[3]), 10, 'no group: own size');
-    assert.strictEqual(H.allSize(detail), 110, 'gguf: every non-local file (40+60+10)');
-    const sf = { layout: 'safetensors', files: [
+    assert.strictEqual(H.allSize(detail), 110, 'server figure wins over any client walk');
+    const sf = { layout: 'safetensors', download_all_size: 50, files: [
         { ...st('r'), required: true, preselected: true, size: 50 },
         { ...st('l'), preselected: true, local: true, size: 900 },
         st('x'),
     ] };
-    assert.strictEqual(H.allSize(sf), 50, 'safetensors: preselected minus local');
+    assert.strictEqual(H.allSize(sf), 50, 'safetensors: server figure');
     assert.strictEqual(H.allSize({ files: [], download_all_size: 77 }), 77, 'no rows -> server figure');
+    assert.strictEqual(H.allSize({ layout: 'gguf', files: detail.files }), 0,
+        'no server figure -> 0: the client-side preselected walk is gone');
+    const src = require('fs').readFileSync(__dirname + '/../omlx_uplift/static/uplift_downloader.js', 'utf8');
+    assert.ok(!/f\.preselected\)\s*:\s*\(\(\)\s*=>\s*true\)/.test(src),
+        'negative pin: hfDownloadAllSize client recompute removed (73e5465)');
     assert.ok(H.fits(detail, 100) && !H.fits(detail, 101));
     assert.ok(H.fits({ disk_free: 0 }, 1e12), 'unknown free space never blocks');
     assert.strictEqual(H.memFit(1000, 951), 'danger');

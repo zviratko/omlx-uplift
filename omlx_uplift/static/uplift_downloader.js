@@ -246,13 +246,14 @@ const HFS = {
         return (detail.files || []).filter(f => f.group === file.group)
             .reduce((total, f) => total + (f.size || 0), 0);
     },
-    // What "download all" still has to fetch: its files not downloaded yet.
+    // What "download all" still has to fetch: a whole-repo download minus
+    // local files. 73e5465 (#4967) moved the rule to the server:
+    // download_all_size now sums exactly those rows, and multi-precision
+    // repos need the server's checkpoint scoping to get it right - the old
+    // client-side preselected walk would keep counting sibling-precision
+    // folders. classic hfDownloadAllSize is now this same pass-through.
     allSize(detail) {
-        const files = (detail && detail.files) || [];
-        if (!files.length) return (detail && detail.download_all_size) || 0;
-        const fetched = detail.layout === 'safetensors' ? (f => f.preselected) : (() => true);
-        return files.filter(f => fetched(f) && !f.local)
-            .reduce((total, f) => total + (f.size || 0), 0);
+        return (detail && detail.download_all_size) || 0;
     },
     // UP-64 dialog lane (classic hfShowsUpdate, 78f00e4 #4949): a downloaded
     // non-GGUF checkpoint with Hub changes offers UPDATE instead of the
