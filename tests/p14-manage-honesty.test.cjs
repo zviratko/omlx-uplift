@@ -253,13 +253,18 @@ test('the uplift.patches.order_* keys exist in every locale with equal placehold
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
     assert.equal(files.length, 10, 'all ten locale files are checked');
     const en = JSON.parse(fs.readFileSync(path.join(dir, 'en.json'), 'utf8'));
+    const ph = (s) => (s.match(/\{(\w+)\}/g) || []).sort().join(',');
     for (const f of files) {
         const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
         for (const k of keys) {
             assert.ok(d[k] && d[k].trim().length, `${k} missing in ${f}`);
+            assert.equal(ph(d[k]), ph(en[k]), `${k} placeholders diverge in ${f}`);
+            if (f === 'cs.json' && d[k].includes('{w}')) {
+                assert.notEqual(ph(d[k].replace('{w}', '')), ph(en[k]),
+                    'the comparator must catch a dropped placeholder in memory');
+            }
         }
     }
-    const ph = (s) => (s.match(/\{(\w+)\}/g) || []).sort().join(',');
     assert.equal(ph(en['uplift.patches.order_saved']), '{n},{w}',
         'EN keeps both placeholders the JS substitutes');
     // the shipped JS fallbacks must match EN verbatim (ptMsg(key, fallback))
