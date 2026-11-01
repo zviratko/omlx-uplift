@@ -35,7 +35,7 @@ Design notes:
 
 import json
 
-VERSION = "5"   # v5: GS-TAB — server settings ALL/section tab strip (classic #4364)
+VERSION = "6"   # v6: KV format, SpecPrefill auto row, tabbed voices, audio gate note
 
 # viewport widths the editor must be correct at; 782 is the pair-grid
 # breakpoint, 1232 the rail flow/overlay breakpoint
@@ -65,12 +65,14 @@ KEY_SECT = {
 
 # (master toggle key, dependent knob key) — must share a line at >=782px
 PAIRED = [
-    ("turboquant_kv_enabled", "turboquant_kv_bits"),
+    ("turboquant_kv_enabled", "turboquant_kv_scheme"),
     ("enableThinkingBudget", "thinking_budget_tokens"),
 ]
-# probe order = visual band order: [toggle | draft] / [keep | threshold]
-SPEC = ("specprefill_enabled", "specprefill_draft_model",
-        "specprefill_keep_pct", "specprefill_threshold")
+# probe order = visual band order: master + automatic activation, then
+# draft + keep rate, with threshold on the third line.
+SPEC = ("specprefill_enabled", "specprefill_auto_enabled",
+        "specprefill_draft_model", "specprefill_keep_pct",
+        "specprefill_threshold")
 
 
 class Suite:
@@ -191,14 +193,25 @@ class Suite:
             .filter(p => !p.closest('.row-editor'))
             .map(p => getComputedStyle(p).gridTemplateColumns.split(' ').length);
           const sp = %(spec)s.map(k => R(q(k)));
-          const se = sp[0], sk = sp[1], st = sp[2], sd = sp[3];
-          // SPEC order = band order: se=toggle sk=draft st=keep sd=threshold
-          // 2x2: line1 = toggle|draft, line2 = keep|threshold below it.
-          // Null when any key is absent (model without specprefill).
-          const sp2x2 = se && sk && st && sd
-            ? (Math.abs(se.top - sk.top) < 8 && Math.abs(st.top - sd.top) < 8
-               && st.top > se.bottom - 8 && se.left < sk.left - 20)
+          const se = sp[0], sa = sp[1], sk = sp[2], st = sp[3], sd = sp[4];
+          // SpecPrefill: master + automatic activation on line 1, draft +
+          // keep rate on line 2, threshold on line 3.
+          const spLayout = se && sa && sk && st && sd
+            ? (Math.abs(se.top - sa.top) < 8
+               && Math.abs(sk.top - st.top) < 8
+               && sk.top > se.bottom - 8 && sd.top > sk.bottom - 8
+               && Math.abs(sd.left - sk.left) < 8)
             : null;
+          const tqBits = (() => {
+            const master = q('turboquant_kv_enabled');
+            const scheme = q('turboquant_kv_scheme');
+            const bits = q('turboquant_kv_bits');
+            if (!master || !scheme || !bits) return {state: 'missing'};
+            if (bits.hidden) return {state: 'hidden'};
+            const rm = R(master), rs = R(scheme), rb = R(bits);
+            return {state: 'shown',
+                    below: rb.top > rs.bottom - 8 && Math.abs(rb.left - rm.left) < 8};
+          })();
           const gg = q('guided_grammar');
           let grammar = null;
           if (gg) {
@@ -215,7 +228,7 @@ class Suite:
             } : null;
           }
           return JSON.stringify({modal, scroll, railHidden: rail.hidden,
-                  pairs, grids, sp2x2, grammar,
+                  pairs, grids, spLayout, tqBits, grammar,
                   sections: [...f.querySelectorAll('h5.se-section')]
                      .map(h => h.textContent.trim())});
         })()""" % {"paired": paired, "spec": spec_js})
@@ -268,14 +281,26 @@ class Suite:
             else:
                 ok = p["state"] == "same"
             self.check("pair %s (%s)" % (p["m"], tag), ok, p["state"])
+        self.t_tq_bits(data, tag, w)
+
+    def t_tq_bits(self, data, tag, w):
+        bits = data["tqBits"]
+        if bits["state"] == "missing":
+            self.check("KV bits placement (%s)" % tag, None, "skip: key absent")
+        elif bits["state"] == "hidden":
+            self.check("KV bits placement (%s)" % tag, None,
+                       "skip: affine format pins bit depth")
+        else:
+            self.check("KV bits placement (%s)" % tag, bits["below"] is True,
+                       "bits must follow Format on the left track")
 
     def t_spec(self, data, w):
-        if data["sp2x2"] is None:
-            self.check("specprefill 2x2 @%d" % w, None, "skip: keys absent")
+        if data["spLayout"] is None:
+            self.check("specprefill rows @%d" % w, None, "skip: keys absent")
             return
         if w < PAIR_TWO_COL_MIN:
-            return  # one column by design; the 2x2 band cannot exist
-        self.check("specprefill 2x2 @%d" % w, data["sp2x2"] is True)
+            return  # one column by design; row pairing does not apply
+        self.check("specprefill rows @%d" % w, data["spLayout"] is True)
 
     def t_grammar(self, data):
         g = data["grammar"]
@@ -590,7 +615,8 @@ class Suite:
                    "%s leaks %s" % (self.model, hidden))
         self.check("non-llm keeps TTL+type", inv["has_ttl"] and inv["has_type"], str(inv))
         self.check("non-llm explains the gate", "EMBEDDING" in inv["note"].upper()
-                   or "does not apply" in inv["note"] or "RERANKER" in inv["note"].upper(),
+                   or "does not apply" in inv["note"] or "do not apply" in inv["note"]
+                   or "RERANKER" in inv["note"].upper(),
                    inv["note"][:80])
         llm_secs = {"Generation Defaults", "Acceleration", "Memory Saving",
                     "Advanced Settings", "Experimental Features"}
@@ -809,17 +835,23 @@ class Suite:
           if (!host) return JSON.stringify({err: 'no #vc-body'});
           const visible = host.closest('.page-card');
           return JSON.stringify({
-            form: !!host.querySelector('.vc-add'),
             list: !!host.querySelector('.vc-list'),
             shown: visible ? !visible.hidden : false,
             sub: document.documentElement.dataset.sub});
         })()""")
         b = json.loads(body)
         self.check("voices route renders the page",
-                   not b.get("err") and b["form"] and b["list"] and b["shown"],
-                   str(b))
+                   not b.get("err") and b["list"] and b["shown"], str(b))
         self.check("voices hash lands on the sub", b.get("sub") == "voices",
                    str(b.get("sub")))
+        self._eval("""(() => {
+          const tab = document.querySelector('#vc-body [data-i18n="uplift.voices.tab_clone"]');
+          if (tab) tab.click();
+          return !!tab;
+        })()""")
+        self._wait(500)
+        form = self._eval("!!document.querySelector('#vc-body .vc-add')")
+        self.check("voices clone tab renders the form", form is True)
         self._eval("location.hash = '#'; 'home'")
         self._wait(400)
 
