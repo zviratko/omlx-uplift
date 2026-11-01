@@ -1235,7 +1235,7 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .pager .pinfo { margin-left: auto; }
 /* model listing (suggested / search): rank + name + params + size + dl +
    likes + action; header reuses the house .urow.head, sortable columns */
-#dl-results { max-width: 1180px; }
+#dl-results { max-width: 1180px; margin-inline: auto; }
 #dl-results .urow.usage { grid-template-columns: 34px minmax(0,1fr) 90px 92px 96px 64px auto; }
 /* head labels sit over their values: rank + model left (body cells are left),
    the numeric columns right like .admin-table aligns them */
@@ -1786,6 +1786,7 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
    fixed slot (qzGate), so picking another model cannot re-stack the form. */
 .qz-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px 18px; align-items: start; padding: 8px 0 4px; max-width: 1180px;
+    margin-inline: auto;
     grid-template-areas:
         "src  sens lvl"
         "enh  enh  enh"
@@ -1859,12 +1860,17 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 /* uploader model list: capped so the row band does not span the page */
 #up-form .qz-list { max-width: 680px; }
 /* the queue tables under these forms ride the same capped column as the
-   form above them (one vertical reading line, no edge-to-edge row rules) */
-#qz-tasks, #up-tasks, #dl-tasks, #hm-list { max-width: 1180px; }
+   form above them (one vertical reading line, no edge-to-edge row rules),
+   and the column sits centered in the page (user 2026-11-01: capped-left
+   reads as lopsided once every form page carries the cap) */
+#qz-tasks, #up-tasks, #dl-tasks, #hm-list { max-width: 1180px; margin-inline: auto; }
 /* ABOUT page: short readout rows (label | value). Uncapped they stretch a
    1000px dead band between a name and its value on wide screens (WIDE-QA
-   2026-11-01) - cap the whole body to reading width, values follow. */
-#about-page .card-body { max-width: 900px; }
+   2026-11-01) - cap the whole body to reading width, values follow. The
+   page section carries data-id, NOT an id attribute - a #about-page
+   selector matches nothing (the first cap shipped dead; fixed + centered
+   per user 2026-11-01). */
+section[data-id="about-page"] .card-body { max-width: 1180px; margin-inline: auto; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.06em; }
@@ -2372,7 +2378,7 @@ label.se-row.pending-restart > .se-ctl > select {
    flat), deterministic field columns and control widths sized to their
    content - a two-digit number must not get a 280px well. */
 .mk-box { border: 1px solid var(--ink); padding: 14px; display: flex;
-    flex-direction: column; gap: 12px; margin-bottom: 14px; max-width: 1180px; }
+    flex-direction: column; gap: 12px; margin: 0 auto 14px; max-width: 1180px; }
 .mk-head { display: flex; align-items: center; gap: 12px;
     border-bottom: 1px solid var(--rule); padding: 10px 14px;
     margin: -14px -14px 0; background: var(--panel); }
@@ -2901,6 +2907,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
    stub cards are placeholders until REPL/NAT-4 modules fill the host. */
 .native-host { display: flex; flex-direction: column; gap: 10px; padding: 10px;
   min-height: calc(100vh - 210px); }
+/* WIDE-QA round 2 (user 2026-11-01): the native bench column rides the same
+   capped, centered reading line as the model pages - every sub-panel
+   (Throughput, Intelligence, Context, ANE Tune, ...) narrows with the
+   column; tables keep their own overflow for the wide results. */
+#bench-native .native-subtabs,
+#bench-native .native-subpanel { max-width: 1180px; margin-inline: auto;
+  width: 100%; box-sizing: border-box; }
+/* STATUS board: the board itself follows the same capped column, centered
+   (GridStack sizes cells as fractions of the container, so the saved
+   layout is untouched - the whole board simply shrinks with the sides). */
+main#grid.grid-stack { max-width: 1180px; margin-inline: auto; }
 .native-stub.card { border: 1px dashed var(--edge); padding: 12px 14px; }
 .native-stub h2 { margin: 0 0 4px; font-size: 13px; }
 .native-stub-note { margin: 0; color: var(--dim); font-size: 11px; }
@@ -3153,6 +3170,17 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
   outline-offset: -2px; }   /* U51 focus-ring language */
 .acc-extras-count { margin-left: auto; color: var(--dim); font-weight: 400;
   font-size: 10px; letter-spacing: 0; text-transform: none; }
+/* BIG expand affordance (user 2026-11-01: a bare '▾' at the far edge read
+   as dead text): the chevron rides the LEFT end of the strip as a bordered
+   round chip - the house 'looks like a control' idiom. Rotation stays
+   CSS-side, keyed on the [open] attribute the fold already toggles. */
+.acc-extras-head .bench-adv-chev { order: -1; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; box-sizing: border-box;
+  border: 1px solid var(--accent); border-radius: 50%;
+  color: var(--accent); background: var(--panel);
+  font-size: 15px; line-height: 1; }
+.acc-extras-head:hover .bench-adv-chev { background: var(--field); }
 /* .bench-adv-chev is already the transition owner; the rotation is scoped
    to each fold that uses it, so an [open] section reads as open */
 .acc-extras[open] > .acc-extras-head .bench-adv-chev { transform: rotate(180deg); }
@@ -3915,28 +3943,31 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .gs-box-title.gs-adv-closed .gs-advchev { transform: rotate(-90deg); }
 .gs-box-title.gs-adv-closed { border-bottom-color: transparent; }
 
-/* --- UP-26(2): Applications launch-command rows (helper page) ---------- */
-.up-appcmds {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--edge);
-}
+/* --- UP-26(2) ROUND 2 (user 2026-11-01): assistants grouped - one row
+   per assistant: name | its settings | its command(s), each with its own
+   copy button. The separate split-list block (wrapper + name column) is
+   retired; the command line keeps the .up-appcmd shape. --- */
+.cli-rows { display: flex; flex-direction: column; }
+.cli-row { display: grid; align-items: start; gap: 4px 16px;
+    grid-template-columns: 170px minmax(0, 340px) minmax(0, 1fr);
+    padding: 10px 2px; }
+.cli-row + .cli-row { border-top: 1px solid var(--rule); }
+.cli-name { font: 500 12px/1 var(--sans); padding-top: 9px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cli-ctl { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cli-ctl > input[type="text"], .cli-ctl select {
+    width: 100%; max-width: 340px; box-sizing: border-box; }
+.cli-ctl .field input[type="text"], .cli-ctl .field select {
+    width: 100%; max-width: 340px; box-sizing: border-box; }
+.cli-dash { color: var(--dim); padding-top: 7px; }
+.cli-cmds { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+@media (max-width: 900px) { .cli-row { grid-template-columns: 1fr; gap: 6px; }
+    .cli-name { padding-top: 0; } }
 .up-appcmd {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-}
-.up-appcmd-name {
-    flex: 0 0 128px;
-    font-size: 11px;
-    color: var(--dim);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 .up-appcmd code {
     flex: 1 1 auto;

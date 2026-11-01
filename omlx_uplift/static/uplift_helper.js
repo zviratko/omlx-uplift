@@ -311,86 +311,26 @@ async function renderHelperModels() {
     cliHint.className = 'dim';
     cliHint.textContent = 'Model each launched CLI assistant defaults to (blank = ask every launch).';
     cliHead.append(cliTitle, cliHint);
-    const cliGrid = document.createElement('div');
-    cliGrid.className = 'mk-grid';
-    const cliModel = (key, label) => {
+    /* UP-26(2) ROUND 2, grouped (user 2026-11-01: "coding assistants should
+       be grouped with their settings and the copy button; current layout
+       makes no sense"): ONE row per assistant - name | its model default
+       (+ OpenClaw's tools profile) | its ready-to-paste command(s), each
+       with its own copy button. The old split (a picker grid here, an
+       'Applications' command list below) made the reader correlate two
+       lists by hand. Pure templating stays in uplift_gspec.js
+       (launchCommand / claudeCodeCommand). */
+    const GSPEC = window.UpliftGSpec;
+    const cliPick = (key) => {
         const inp = document.createElement('input');
         inp.type = 'text'; inp.spellcheck = false;
         inp.setAttribute('list', 'cli-models');
         inp.value = integ[key] || '';
         inp.placeholder = 'Ask every launch';
         inp.onchange = async () => { await saveIntegration({ [key]: inp.value || null }); };
-        return integField(label, '', inp);
+        return inp;
     };
-    cliGrid.append(
-        cliModel('copilot_model', 'GitHub Copilot'),
-        cliModel('codex_model', 'Codex'),
-        cliModel('opencode_model', 'OpenCode'),
-        cliModel('openclaw_model', 'OpenClaw'),
-        integField('OpenClaw tools profile', 'Tool set the launcher passes to openclaw.',
-            integSelect([['minimal','Minimal'],['coding','Coding'],['messaging','Messaging'],['full','Full']],
-                        integ.openclaw_tools_profile || 'coding',
-                        v => saveIntegration({ openclaw_tools_profile: v }))),
-        cliModel('hermes_model', 'Hermes Agent'),
-        cliModel('pi_model', 'Pi'),
-        cliModel('vibe_model', 'Mistral Vibe'),
-        cliModel('dsh_model', 'DeepSeek Harness'));
-    // model datalist for the assistant pickers
-    const cliDl = document.createElement('datalist'); cliDl.id = 'cli-models';
-    for (const m of modelList) {
-        const o2 = document.createElement('option'); o2.value = m.id || m.name || ''; cliDl.append(o2);
-    }
-    cliCard.append(cliHead, cliDl, cliGrid);
-    /* UP-26(2): classic's Applications block (_applications.html +
-       dashboard.js:3826/4230-4281): ready-to-paste launch commands built
-       from the CLI prefix, host/port and the assigned models above, one
-       copy button per row. Pure templating lives in uplift_gspec.js
-       (launchCommand / claudeCodeCommand); the row shape mirrors classic
-       (app name | <code>command</code> | copy). */
-    const GSPEC = window.UpliftGSpec;
-    const cmdRows = [
-        [C.tf('status.integrations.claude_code', 'Claude Code'),
-         GSPEC.claudeCodeCommand(ccSec, { host: stats.host, port: stats.port,
-                                          apiKey: stats.api_key })],
-        [C.tf('status.integrations.claude_code', 'Claude Code') + ' (launch)',
-         GSPEC.launchCommand('claude', { cliPrefix: stats.cli_prefix })],
-        ['Codex CLI', GSPEC.launchCommand('codex', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.app', 'App') + ' (Codex)',
-         GSPEC.launchCommand('codex_app', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.opencode', 'OpenCode'),
-         GSPEC.launchCommand('opencode', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.openclaw', 'OpenClaw'),
-         GSPEC.launchCommand('openclaw', { cliPrefix: stats.cli_prefix,
-             toolsProfile: integ.openclaw_tools_profile })],
-        [C.tf('status.integrations.hermes_agent', 'Hermes Agent'),
-         GSPEC.launchCommand('hermes', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.pi', 'Pi'),
-         GSPEC.launchCommand('pi', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.vibe', 'Mistral Vibe'),
-         GSPEC.launchCommand('vibe', { cliPrefix: stats.cli_prefix,
-             model: integ.vibe_model })],
-        [C.tf('status.integrations.copilot_cli', 'Copilot CLI'),
-         GSPEC.launchCommand('copilot', { cliPrefix: stats.cli_prefix })],
-        [C.tf('status.integrations.dsh', 'DeepSeek Harness'),
-         GSPEC.launchCommand('dsh', { cliPrefix: stats.cli_prefix })],
-    ];
-    const cmds = document.createElement('div');
-    cmds.className = 'up-appcmds';
-    const cHead = document.createElement('div');
-    cHead.className = 'mk-head';
-    const cTitle = document.createElement('div');
-    cTitle.className = 'mk-title';
-    cTitle.textContent = C.tf('status.integrations.section_label', 'Applications');
-    const cHint = document.createElement('small');
-    cHint.className = 'dim';
-    cHint.textContent = C.tf('uplift.helper.launch_hint',
-        'Ready-to-paste commands (classic parity): env-prefix form points Claude Code at this server; the launch form loads the assistant with its assigned model.');
-    cHead.append(cTitle, cHint);
-    cmds.append(cHead);
-    for (const [name, cmd] of cmdRows) {
-        const row = document.createElement('div'); row.className = 'up-appcmd';
-        const nm = document.createElement('span'); nm.className = 'up-appcmd-name';
-        nm.textContent = name;
+    const cmdLine = (cmd) => {
+        const line = document.createElement('div'); line.className = 'up-appcmd';
         const code = document.createElement('code'); code.textContent = cmd;
         code.title = cmd;
         const cp = document.createElement('button');
@@ -404,10 +344,66 @@ async function renderHelperModels() {
                 navigator.clipboard.writeText(cmd).then(flash).catch(flash);
             else flash();
         };
-        row.append(nm, code, cp);
-        cmds.append(row);
+        line.append(code, cp);
+        return line;
+    };
+    const cliRows = document.createElement('div');
+    cliRows.className = 'cli-rows';
+    const cliRow = (name, ctls, cmds) => {
+        const row = document.createElement('div'); row.className = 'cli-row';
+        const nm = document.createElement('div'); nm.className = 'cli-name';
+        nm.textContent = name;
+        const ctl = document.createElement('div'); ctl.className = 'cli-ctl';
+        if (ctls && ctls.length) ctl.append(...ctls);
+        else {   // an assistant with nothing to configure: an honest dash
+            const d = document.createElement('div'); d.className = 'cli-dash';
+            d.textContent = '\u2014'; ctl.append(d);
+        }
+        const cb = document.createElement('div'); cb.className = 'cli-cmds';
+        for (const c of cmds) cb.append(cmdLine(c));
+        row.append(nm, ctl, cb);
+        cliRows.append(row);
+    };
+    // model datalist for the assistant pickers
+    const cliDl = document.createElement('datalist'); cliDl.id = 'cli-models';
+    for (const m of modelList) {
+        const o2 = document.createElement('option'); o2.value = m.id || m.name || ''; cliDl.append(o2);
     }
-    cliCard.append(cmds);
+    cliRow(C.tf('status.integrations.claude_code', 'Claude Code'), null,
+        [GSPEC.claudeCodeCommand(ccSec, { host: stats.host, port: stats.port,
+                                          apiKey: stats.api_key }),
+         GSPEC.launchCommand('claude', { cliPrefix: stats.cli_prefix })]);
+    cliRow('GitHub Copilot', [cliPick('copilot_model')],
+        [GSPEC.launchCommand('copilot', { cliPrefix: stats.cli_prefix })]);
+    cliRow('Codex', [cliPick('codex_model')],
+        [GSPEC.launchCommand('codex', { cliPrefix: stats.cli_prefix }),
+         GSPEC.launchCommand('codex_app', { cliPrefix: stats.cli_prefix })]);
+    cliRow(C.tf('status.integrations.opencode', 'OpenCode'), [cliPick('opencode_model')],
+        [GSPEC.launchCommand('opencode', { cliPrefix: stats.cli_prefix })]);
+    cliRow(C.tf('status.integrations.openclaw', 'OpenClaw'),
+        [cliPick('openclaw_model'),
+         integField('Tools profile', 'Tool set the launcher passes to openclaw.',
+             integSelect([['minimal','Minimal'],['coding','Coding'],['messaging','Messaging'],['full','Full']],
+                         integ.openclaw_tools_profile || 'coding',
+                         v => saveIntegration({ openclaw_tools_profile: v })))],
+        [GSPEC.launchCommand('openclaw', { cliPrefix: stats.cli_prefix,
+            toolsProfile: integ.openclaw_tools_profile })]);
+    cliRow(C.tf('status.integrations.hermes_agent', 'Hermes Agent'), [cliPick('hermes_model')],
+        [GSPEC.launchCommand('hermes', { cliPrefix: stats.cli_prefix })]);
+    cliRow(C.tf('status.integrations.pi', 'Pi'), [cliPick('pi_model')],
+        [GSPEC.launchCommand('pi', { cliPrefix: stats.cli_prefix })]);
+    cliRow(C.tf('status.integrations.vibe', 'Mistral Vibe'), [cliPick('vibe_model')],
+        [GSPEC.launchCommand('vibe', { cliPrefix: stats.cli_prefix,
+            model: integ.vibe_model })]);
+    cliRow(C.tf('status.integrations.dsh', 'DeepSeek Harness'), [cliPick('dsh_model')],
+        [GSPEC.launchCommand('dsh', { cliPrefix: stats.cli_prefix })]);
+    const cliNote = document.createElement('p');
+    cliNote.className = 'native-stub-note';
+    cliNote.textContent = C.tf('uplift.helper.launch_hint',
+        'Ready-to-paste commands (classic parity): env-prefix form points Claude Code at this server; the launch form loads the assistant with its assigned model.');
+    cliNote.dataset.i18n = 'uplift.helper.launch_hint';
+    cliNote.dataset.en = cliNote.textContent;             // U59 repair
+    cliCard.append(cliHead, cliDl, cliNote, cliRows);
     box.append(cliCard);
 
     /* ---- Web Search ---- */

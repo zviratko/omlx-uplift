@@ -14,6 +14,7 @@ const { STATIC_DIR } = require('./static-src.cjs');
 
 const G = require(path.join(STATIC_DIR, 'uplift_gspec.js'));
 const helper = fs.readFileSync(path.join(STATIC_DIR, 'uplift_helper.js'), 'utf8');
+const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
 
 /* ---- item 2: shellQuote / launch templating (classic 3816/4230) ------- */
 test('shellQuote is POSIX-safe (classic verbatim)', () => {
@@ -96,11 +97,42 @@ test('helper renders per-row copy commands for the classic app set', () => {
         assert.ok(helper.includes(`launchCommand('${tool}'`), tool + ' row');
     assert.ok(helper.includes('claudeCodeCommand(ccSec'), 'env-form row');
     assert.ok(helper.includes("C.tf('status.integrations.copy_command_tooltip'"));
-    assert.ok(helper.includes("C.tf('status.integrations.section_label'"));
     // the model-assignment half already existed; commands feed off it
     assert.ok(helper.includes('cliPrefix: stats.cli_prefix'));
     assert.ok(helper.includes('toolsProfile: integ.openclaw_tools_profile'));
     assert.ok(helper.includes('model: integ.vibe_model'));
+});
+/* GROUPED (user 2026-11-01): "coding assistants should be grouped with
+   their settings and the copy button, current layout makes no sense". The
+   pickers and the commands used to be two lists to correlate by eye; every
+   assistant is now ONE row carrying its settings and its command(s).
+   Parent-edge chain pinned with order - a wired-but-never-appended row is
+   invisible to every other gate here (see the append-omission lesson). */
+test('each assistant row is built and appended in the order name, settings, command', () => {
+    assert.match(helper, /const cliRows = document\.createElement\('div'\);/,
+        'the grouped container exists');
+    assert.match(helper, /cliRows\.className = 'cli-rows';/, 'cli-rows class');
+    assert.match(helper, /row\.className = 'cli-row';/, 'cli-row class');
+    assert.match(helper, /row\.append\(nm, ctl, cb\);/,
+        'name, then settings, then the command column');
+    assert.match(helper, /cliCard\.append\(cliHead, cliDl, cliNote, cliRows\);/,
+        'the grouped rows are appended to the card');
+    assert.match(helper, /cb\.append\(cmdLine\(c\)\);/,
+        'every command rides its own line inside the row');
+});
+test('the split Applications strip is retired and stays retired', () => {
+    // negative pins: the dead shape must not come back through a future
+    // 'parity port'
+    assert.ok(!helper.includes('up-appcmds'), 'no Applications wrapper node');
+    assert.ok(!helper.includes('up-appcmd-name'), 'no name column in a cmd row');
+    assert.ok(!helper.includes("'status.integrations.section_label'"),
+        'the standalone Applications caption is gone');
+    assert.ok(!helper.includes('cliGrid'), 'the picker-only grid is gone');
+    assert.ok(!css.includes('.up-appcmds'), 'the retired Applications CSS is gone');
+    assert.ok(!css.includes('.up-appcmd-name'), 'the retired name-column CSS is gone');
+    // the command line itself survives with code + copy only
+    assert.ok(/\.up-appcmd \{/.test(css), 'the cmd row keeps its rule');
+    assert.ok(/\.up-appcmd code \{/.test(css), 'its code cell keeps its rule');
 });
 test('helper fetches the command inputs from the classic endpoints', () => {
     assert.match(helper, /HG\.fetchJson\(`\$\{API\}\/admin\/api\/stats`\)/);

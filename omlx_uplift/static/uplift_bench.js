@@ -3821,6 +3821,7 @@ var EXTRAS = {
             } else {
                 delete st.selected[key]; delete st.sizes[key];
             }
+            accSavePicks(st);              // REMEMBER (user 2026-11-01)
             acc.applyEngineLabels();   // U68: totals hint counts the pick
         });
         card.dataset.key = key;
@@ -3865,6 +3866,66 @@ var EXTRAS = {
    arrives through the stream or a full replay. */
 var ACC_POLL_MS = 4000;
 var ACC_STALL_MS = 90000;
+/* REMEMBER (user 2026-11-01): the Intelligence panel keeps the last suite
+   picks (and their sample sizes) per browser - the same localStorage
+   pattern as the extras fold (EXTRAS.KEY). Server state is untouched; a
+   pick whose suite left the catalog is dropped when the catalog lands. */
+var ACC_PICKS_KEY = 'uplift.bench.acc.picks.v1';
+function accLoadPicks() {
+    var out = { selected: {}, sizes: {} };
+    try {
+        var raw = localStorage.getItem(ACC_PICKS_KEY);
+        var d = raw ? JSON.parse(raw) : null;
+        if (!d || typeof d !== 'object') return out;
+        (d.selected || []).forEach(function (k) {
+            if (typeof k === 'string' && k) out.selected[k] = true;
+        });
+        Object.keys(d.sizes || {}).forEach(function (k) {
+            var n = Number(d.sizes[k]);
+            if (typeof k === 'string' && k && isFinite(n) && n >= 0)
+                out.sizes[k] = n;
+        });
+    } catch (_) { /* a broken pref is no pref (EXTRAS doctrine) */ }
+    return out;
+}
+function accSavePicks(st) {
+    try {
+        if (!st) return;
+        var sel = [], sizes = {};
+        Object.keys(st.selected || {}).forEach(function (k) {
+            if (!st.selected[k]) return;
+            sel.push(k);
+            if (st.sizes && st.sizes[k] != null) sizes[k] = st.sizes[k];
+        });
+        localStorage.setItem(ACC_PICKS_KEY,
+            JSON.stringify({ selected: sel, sizes: sizes }));
+    } catch (_) { /* private mode / quota: picks simply do not persist */ }
+}
+function accValidatePicks(acc) {
+    // Runs on the STATE sources (groups / harness tasks / extra suites),
+    // never on painted DOM, so it can prune BEFORE the grid renders - a
+    // stale pick must neither paint 'on' nor reach collect().
+    var st = acc && acc.state;
+    if (!st || !st.groups) return;
+    var known = {};
+    st.groups.forEach(function (g) {
+        (g.tasks || []).forEach(function (tk) {
+            if (!tk || !tk.key) return;
+            known[tk.key] = true;
+            if ((st.harnessTasks || []).indexOf(tk.key) >= 0)
+                known[tk.key + '|h'] = true;
+        });
+    });
+    (st.extraSuites || []).forEach(function (s) {
+        if (s && s.key) known[s.key + '|h'] = true;
+    });
+    var dirty = false;
+    Object.keys(st.selected).forEach(function (k) {
+        if (known[k]) return;
+        delete st.selected[k]; delete st.sizes[k]; dirty = true;
+    });
+    if (dirty) accSavePicks(st);
+}
 // A restart RESETS the accumulators and REPLAYS the whole log. While that
 // replay lands, the consumed counter is legitimately behind the server's
 // event_count — a second restart racing in here would interleave TWO
@@ -3906,9 +3967,11 @@ var ACC = {
     state: null,
 
     render: function (panel) {
+        var picks = accLoadPicks();       // REMEMBER (user 2026-11-01)
         this.state = { running: false, benchId: null, queue: [],
                        progress: null, groups: null,
-                       selected: {}, sizes: {}, results: [],
+                       selected: picks.selected, sizes: picks.sizes,
+                       results: [],
                        // ACC-STALL: stream bookkeeping (consumed events, the
                        // previous poll's event_count, last visible activity)
                        seenN: 0, pollN: null, lastAct: 0, lastMsg: '',
@@ -4182,6 +4245,9 @@ var ACC = {
             // empty list both mean: render nothing, ever)
             ACC._extrasCache = data.extra_suites || [];
             self.state.extraSuites = ACC._extrasCache;
+            // REMEMBER: prune saved picks the catalog no longer offers
+            // BEFORE the grid and the extras fold paint from them
+            accValidatePicks(self);
             self.renderGrid();
             EXTRAS.render(self);
             self.applyEngineLabels();   // ACC-2a: totals see the extras cache
@@ -4243,6 +4309,12 @@ var ACC = {
             sizeSel.appendChild(fullOpt);
         }
         sizeSel.value = String(tk.sizes[Math.min(2, tk.sizes.length - 1)]);
+        // REMEMBER: a saved size re-arms the select when the catalog still
+        // offers that exact option (classic 'Full' lives as value '0')
+        var sz0 = self.state.sizes[key];
+        if (sz0 != null && [].some.call(sizeSel.children, function (o) {
+                return o.value === String(sz0); }))
+            sizeSel.value = String(sz0);
         // U51: keyboard-operable card (was a click-only div). The
         // size select lives inside as its own focus target; a
         // click that lands on it must not double-toggle the card.
@@ -4250,9 +4322,16 @@ var ACC = {
             tk.desc ? t(tk.desc, tk.desc_literal || tk.key) : (tk.desc_literal || ''),
             null, function (on) {
                 self.state.selected[key] = on;
+                accSavePicks(self.state); // REMEMBER (user 2026-11-01)
                 self.applyEngineLabels();   // U68: totals hint
             }, { d: tk.desc || null });
         card.dataset.key = key;
+        // REMEMBER: a restored pick paints its card; its saved size rides
+        // along only while the catalog still offers that option
+        if (self.state.selected[key]) {
+            card.classList.add('on');
+            card.setAttribute('aria-pressed', 'true');
+        }
         // U69: engine caption inside the card — the list must read the
         // engine per benchmark (classic doctrine: oMLX Classic vs the
         // community lm-eval harness)
@@ -4276,6 +4355,7 @@ var ACC = {
                 self.state.selected[key] = true;
             }
             self.state.sizes[key] = Number(sizeSel.value);
+            accSavePicks(self.state);     // REMEMBER (user 2026-11-01)
             self.applyEngineLabels();       // U68: totals hint
         });
         return card;
@@ -5881,6 +5961,11 @@ return { mount: mount, isMounted: function () { return _mounted; },
          // asserted directly; the section itself is proven through the
          // mount harness in tests/acc2a-extras.test.cjs)
          _extras: EXTRAS,
+         // REMEMBER (user 2026-11-01) test seam: the accuracy-picks
+         // persistence helpers (pure; drive them with a map-backed
+         // localStorage stub)
+         _accPicks: { KEY: ACC_PICKS_KEY, load: accLoadPicks,
+                      save: accSavePicks, validate: accValidatePicks },
          _u49: { resultsHead: resultsHead, buildTableText: buildTableText,
                  buildAccuracyText: buildAccuracyText,
                  ctxResultPairs: ctxResultPairs,
