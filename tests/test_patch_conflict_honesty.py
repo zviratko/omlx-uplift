@@ -287,6 +287,54 @@ class RemovedBuildPatchIsNotHandContent(unittest.TestCase):
             else:
                 os.environ["UPLIFT_HOME"] = old
 
+    def test_successful_build_preserves_readded_live_diff(self):
+        old = os.environ.get("UPLIFT_HOME")
+        os.environ["UPLIFT_HOME"] = os.path.join(self.tmp, "uplift")
+        try:
+            patchsource.remove_patch(self.store, "say-a", "")
+            pf = self.store.patch_file("say-a", 1)
+            live = entry("say-a", [diff_say("sayB")], scope="both")
+            man = self.store.load()
+            man["patches"] = [live]
+            self.store.save(man)
+            with open(pf, "wb") as fh:
+                fh.write(diff_say("sayB"))
+            patchsource.mark_dev_applied(self.store, [])
+            self.assertEqual(self.store.load().get("retired"), [])
+            self.assertTrue(os.path.exists(pf),
+                            "tombstone cleanup must not delete a live re-add")
+            with open(pf, "rb") as fh:
+                self.assertEqual(fh.read(), diff_say("sayB"))
+        finally:
+            if old is None:
+                del os.environ["UPLIFT_HOME"]
+            else:
+                os.environ["UPLIFT_HOME"] = old
+
+    def test_retired_cap_preserves_live_path(self):
+        man = self.store.load()
+        retired = []
+        for i in range(patchsource.RETIRED_CAP):
+            pid = f"old-{i}"
+            retired.append({"id": pid, "versions": [
+                {"v": 1, "patch_file": f"patches/{pid}.v1.diff"}]})
+        # The oldest tombstone points at the same v1 path as the LIVE patch.
+        retired[0]["versions"][0]["patch_file"] = "patches/say-a.v1.diff"
+        retired[0]["versions"].append({"v": 2, "patch_file": "patches/old-0.v2.diff"})
+        man["retired"] = retired
+        with open(self.store.patch_file("old-0", 2), "wb") as fh:
+            fh.write(b"old")
+        new = entry("new-build", [diff_say("sayB")], scope="both")
+        new["versions"][0]["dev_applied"] = {"sha": "1" * 40}
+        with open(self.store.patch_file("new-build", 1), "wb") as fh:
+            fh.write(diff_say("sayB"))
+        patchsource._tombstone_build_copies(man, self.store, new)
+        self.assertEqual(len(man["retired"]), patchsource.RETIRED_CAP)
+        self.assertTrue(os.path.exists(self.store.patch_file("say-a", 1)),
+                        "cap eviction must not delete a live manifest path")
+        self.assertFalse(os.path.exists(self.store.patch_file("old-0", 2)),
+                         "unreferenced old bytes still expire")
+
 
 class StoredCandidateMustBeVisible(unittest.TestCase):
     """P1: a patch stuck in needs_review/failed after a losing boot must

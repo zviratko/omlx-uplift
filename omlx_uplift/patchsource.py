@@ -1629,12 +1629,10 @@ def _tombstone_build_copies(manifest, store, p) -> set:
     retired = [r for r in retired if r.get("id") != rec["id"]]
     retired.append(rec)
     dropped, kept = retired[:-RETIRED_CAP], retired[-RETIRED_CAP:]
+    live_paths = _live_patch_paths(manifest, store)
     for d in dropped:                       # cap: oldest falls off with files
         for rv in d.get("versions", []):
-            try:
-                os.remove(_abs_patch_file(store, rv))
-            except OSError:
-                pass
+            _unlink_retired(store, rv, live_paths)
     manifest["retired"] = kept
     return {_abs_patch_file(store, rv) for r in kept if r.get("id") == rec["id"]
             for rv in r.get("versions", [])}
@@ -1643,6 +1641,24 @@ def _tombstone_build_copies(manifest, store, p) -> set:
 def _abs_patch_file(store, version: dict) -> str:
     pf = version.get("patch_file") or ""
     return pf if os.path.isabs(pf) else os.path.join(store.base_dir, pf)
+
+
+def _live_patch_paths(manifest, store) -> set:
+    """Absolute diff paths still referenced by live manifest entries."""
+    return {os.path.abspath(_abs_patch_file(store, rv))
+            for p in manifest.get("patches", [])
+            for rv in p.get("versions", []) if rv.get("patch_file")}
+
+
+def _unlink_retired(store, version: dict, live_paths: set) -> None:
+    """Delete only unreferenced bytes; remove/re-add reuses v1 filenames."""
+    path = os.path.abspath(_abs_patch_file(store, version))
+    if path in live_paths:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def remove_patch(store, patch_id: str, tree_root: str) -> dict:
@@ -2345,12 +2361,10 @@ def mark_dev_applied(store, commits: list[dict],
     # the tombstones (and the diff bytes they kept for the build zone) expire
     # now. A failed build never reaches here, so the quiet 'retired' verdict
     # survives exactly as long as the branch still carries the content.
+    live_paths = _live_patch_paths(manifest, store)
     for rec in manifest.get("retired") or []:
         for rv in rec.get("versions", []):
-            try:
-                os.remove(_abs_patch_file(store, rv))
-            except OSError:
-                pass
+            _unlink_retired(store, rv, live_paths)
     if manifest.get("retired"):
         manifest["retired"] = []
         changed = True
