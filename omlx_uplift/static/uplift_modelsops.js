@@ -172,6 +172,7 @@ function renderQuantizer() {
         const rowNgram = qzCheck(advBody, 'Keep original Engram tables',
             "Copy the Engram tables in their original FP8 storage instead of quantizing them to 4 bits. The output takes more disk space, but memory use stays the same with SSD N-gram Offload. Output name gets a -ngram suffix.", 'eng');
         const cbNgram = rowNgram._cb;
+        rowNgram._hint.classList.add('h3');   // 3-line copy holds its slot
         const selCombine = qzSelect('None');
         const rowCombine = qzField(advBody, 'Combine other model\u2019s MTP head', selCombine,
             'Graft the MTP head from a same-architecture donor checkpoint (e.g. the base model of a fine-tune).', 'comb');

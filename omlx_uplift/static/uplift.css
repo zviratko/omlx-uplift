@@ -1242,6 +1242,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 #dl-results .urow.head span:nth-child(2) { text-align: left; }
 #dl-results .urow.head span { cursor: pointer; user-select: none; }
 #dl-results .urow.head span:hover, #dl-results .urow.head span.sorted { color: var(--ink); }
+/* direct-download row: the two inputs sized so their placeholders stop
+   mid-word (they took UA default width inside the flex filterbar) */
+#dl-repo { min-width: 300px; }
 .filterbar input[type="search"] {
     background: transparent; border: 1px solid var(--edge); color: var(--ink);
     border-radius: var(--radius); height: 32px; padding: 0 10px; font: 400 12px/1 var(--mono);
@@ -1793,8 +1796,8 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
     grid-template-areas: "tok tok" "eo eo" "adv adv" "run run"; }
 @media (max-width: 1100px) { .qz-form:not(.up-form) { grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas: "src sens" "lvl lvl" "enh enh" "eo eo" "adv adv" "run run"; } }
-@media (max-width: 720px)  { .qz-form { grid-template-columns: 1fr;
-    grid-template-areas: "src" "sens" "lvl" "enh" "eo" "tok" "adv" "run"; } }
+@media (max-width: 720px)  { .qz-form:not(.up-form) { grid-template-columns: 1fr;
+    grid-template-areas: "src" "sens" "lvl" "enh" "eo" "adv" "run"; } }
 .qz-form .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* Author display beats the UA [hidden] rule (same trap documented at
    .se-row and .dd-menu): the oQe sub-block folds via el.hidden. Model-
@@ -1802,7 +1805,12 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 .qz-form .field[hidden] { display: none; }
 .qz-form .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.06em; }
-.qz-form .field small { color: var(--dim); font: 300 10px/1.35 var(--sans); }
+/* hint lines reserve 2 lines (3 for the Engram copy): a gated row swaps a
+   1-line reason for a 2-line description, and without the reserve every
+   field BELOW it slides 13px - the same reflow in miniature */
+.qz-form .field small { color: var(--dim); font: 300 10px/1.35 var(--sans);
+    min-height: 27px; }
+.qz-form .field small.h3 { min-height: 41px; }
 .qz-form input[type="text"], .qz-form input[type="password"], .qz-form select {
     background: var(--field); border: 1px solid var(--edge); color: var(--ink);
     border-radius: var(--radius); height: 32px; padding: 0 8px;
@@ -1850,6 +1858,13 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 .qz-inline input { flex: 1; min-width: 0; }
 /* uploader model list: capped so the row band does not span the page */
 #up-form .qz-list { max-width: 680px; }
+/* the queue tables under these forms ride the same capped column as the
+   form above them (one vertical reading line, no edge-to-edge row rules) */
+#qz-tasks, #up-tasks, #dl-tasks, #hm-list { max-width: 1180px; }
+/* ABOUT page: short readout rows (label | value). Uncapped they stretch a
+   1000px dead band between a name and its value on wide screens (WIDE-QA
+   2026-11-01) - cap the whole body to reading width, values follow. */
+#about-page .card-body { max-width: 900px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.06em; }
@@ -2875,7 +2890,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .req-search .rs-q { flex: 1 1 140px; min-width: 120px; background: var(--panel); border: 1px solid var(--edge); color: var(--ink); padding: 3px 6px; font: inherit; font-size: 11px; }
 .req-search .rs-model { background: var(--panel); border: 1px solid var(--edge); color: var(--ink); padding: 3px; font: inherit; font-size: 11px; }
 .req-search .rs-timechips { display: inline-flex; }
-#dl-token.tok-w240 { max-width: 240px; }
+#dl-token.tok-w240 { max-width: 300px; }
 .chart-box.h200 { height: 200px; }
 .flex-1 { flex: 1; }
 /* req-live-btn keeps its inline display toggle: uplift_reqsearch.js sets
