@@ -403,6 +403,7 @@
  "uplift.metric.therm.gpu_temp_c": "GPU °C",
  "uplift.metric.therm.temp": "温度",
  "uplift.mm.api_unreachable": "APIに接続できません",
+ "uplift.mm.age_sort_title": "モデルフォルダのファイル日付で並び替え（新しい順）",
  "uplift.mm.load_fail": "読み込み失敗: ",
  "uplift.mm.missing_on_disk": "見つかりません — 設定は保存済み、モデルはディスク上にありません",
  "uplift.mm.no_match": "一致なし",

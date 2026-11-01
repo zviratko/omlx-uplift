@@ -43,15 +43,46 @@ function oqMtpFamily(t) {
     if (t.startsWith('qwen3_5')) return 'qwen3_5';
     return null;
 }
-function qzField(host, label, ctl, hint) {
+function qzField(host, label, ctl, hint, area) {
     const row = document.createElement('label');
     row.className = 'field';
+    if (area) row.style.gridArea = area;
     const t = document.createElement('span'); t.textContent = label;
     row.append(t);
     if (ctl) row.append(ctl);
-    if (hint) { const h = document.createElement('small'); h.textContent = hint; row.append(h); }
+    if (hint) {
+        const h = document.createElement('small'); h.textContent = hint;
+        row.append(h);
+        row._hint = h; row._hintEn = hint;    // gated rows swap this text
+    }
     host.append(row);
     return row;
+}
+/* Checkboxes ride the same 32px control band as selects/inputs so the
+   label line, the control line and the hint line of every column land on
+   the same y (the naked 18px box under a label was the 'unaligned lines'). */
+function qzCheck(host, label, hint, area) {
+    const row = qzField(host, label, null, hint, area);
+    const wrap = document.createElement('span');
+    wrap.className = 'chk32';
+    const cb = document.createElement('input'); cb.type = 'checkbox';
+    wrap.append(cb);
+    row.insertBefore(wrap, row.querySelector('small'));
+    row._cb = cb;
+    return row;
+}
+/* Model selection must never reflow the form (user 2026-11-01):
+   model-dependent rows keep their fixed grid slot and switch to a dimmed,
+   disabled state with the REASON in the hint line — the seGate shape the
+   model editor already established, not display:none. */
+function qzGate(row, ok, reason) {
+    row.classList.toggle('qz-off', !ok);
+    for (const c of row.querySelectorAll('select,input,button')) c.disabled = !ok;
+    const h = row._hint;
+    if (h) {
+        h.textContent = ok ? row._hintEn : reason;
+        h.classList.toggle('warn-text', !ok);
+    }
 }
 function qzSelect(placeholder) {
     const sel = document.createElement('select');
@@ -72,9 +103,9 @@ function renderQuantizer() {
 
         const st = { all: [], models: [] };
         const selModel = qzSelect('Select a model...');
-        qzField(g, 'Source Model', selModel, 'full precision only');
+        qzField(g, 'Source Model', selModel, 'full precision only', 'src');
         const rowSens = qzField(g, 'Sensitivity Model', null,
-            'Use a quantized version of the source model to analyze layer sensitivity with ~4x less memory.');
+            'Use a quantized version of the source model to analyze layer sensitivity with ~4x less memory.', 'sens');
         const selSens = qzSelect('None (use source model)');
         rowSens.insertBefore(selSens, rowSens.querySelector('small'));
         const selLevel = qzSelect(null);
@@ -84,15 +115,16 @@ function renderQuantizer() {
             o.value = l; selLevel.append(o);
         }
         selLevel.value = '4';
-        const rowLevel = qzField(g, 'oQ Level', selLevel);
+        qzField(g, 'oQ Level', selLevel, null, 'lvl');
         const start = document.createElement('button');
         start.className = 'se-btn'; start.textContent = 'Start';
-        g.append(rowLevel);
 
-        // enhanced (oQe) block
-        const cbEnh = document.createElement('input'); cbEnh.type = 'checkbox';
-        qzField(g, 'Enhanced quantization (oQe)', cbEnh,
-            'Use imatrix calibration to weight affine quantization by activation importance.');
+        // enhanced (oQe) block — the only fold left on display:none: it is
+        // driven by the user's own click, so growing the form there reads
+        // as feedback, not as the panel rearranging itself.
+        const rowEnh = qzCheck(g, 'Enhanced quantization (oQe)',
+            'Use imatrix calibration to weight affine quantization by activation importance.', 'enh');
+        const cbEnh = rowEnh._cb;
         const rowEnhOnly = document.createElement('div');
         rowEnhOnly.className = 'qz-enh-only'; rowEnhOnly.hidden = true;
         const cbReuse = document.createElement('input'); cbReuse.type = 'checkbox'; cbReuse.checked = true;
@@ -106,12 +138,17 @@ function renderQuantizer() {
             'Fail when a quantized tensor has no matching imatrix entry instead of falling back.');
         g.append(rowEnhOnly);
 
-        // advanced block
+        // advanced block: framed panel with an inset header strip (the old
+        // bare 1px box read as flat); fixed two-row area grid, gated rows
+        // always hold their slot
         const adv = document.createElement('div');
         adv.className = 'qz-adv';
+        adv.style.gridArea = 'adv';
         const advT = document.createElement('div');
         advT.className = 'qz-adv-title'; advT.textContent = 'Advanced Settings';
-        adv.append(advT);
+        const advBody = document.createElement('div');
+        advBody.className = 'qz-adv-body';
+        adv.append(advT, advBody);
         const dtypes = document.createElement('div');
         dtypes.className = 'qz-toggle';
         const dtype = { v: 'bfloat16' };
@@ -125,33 +162,37 @@ function renderQuantizer() {
             };
             dtypes.append(b);
         }
-        qzField(adv, 'Non-quant weight dtype', dtypes,
-            'float16 gives ~20% faster prefill on M1/M2 Apple Silicon (native fp16). bfloat16 is safer for newer models.').dataset.k = 'dtype';
-        const cbMtp = document.createElement('input'); cbMtp.type = 'checkbox';
-        const rowMtp = qzField(adv, 'Preserve MTP weights', cbMtp,
-            'Keep mtp.* tensors and config fields in the output model so the Lightning MTP drafter still works.');
-        const mtpNa = document.createElement('small');
-        mtpNa.className = 'warn-text'; mtpNa.textContent = 'Source model has no MTP heads.';
-        mtpNa.hidden = true; rowMtp.append(mtpNa);
+        const rowDtype = qzField(advBody, 'Non-quant weight dtype', dtypes,
+            'float16 gives ~20% faster prefill on M1/M2 Apple Silicon (native fp16). bfloat16 is safer for newer models.', 'dt');
+        rowDtype.dataset.k = 'dtype';
+        const rowMtp = qzCheck(advBody, 'Preserve MTP weights',
+            'Keep mtp.* tensors and config fields in the output model so the Lightning MTP drafter still works.', 'mtp');
+        const cbMtp = rowMtp._cb;
         // DeepSeek V4.1 only: keep Engram tables at source FP8 (-ngram suffix)
-        const cbNgram = document.createElement('input'); cbNgram.type = 'checkbox';
-        const rowNgram = qzField(adv, 'Keep original Engram tables', cbNgram,
-            "Copy the Engram tables in their original FP8 storage instead of quantizing them to 4 bits. The output takes more disk space, but memory use stays the same with SSD N-gram Offload. Output name gets a -ngram suffix.");
-        rowNgram.hidden = true;
+        const rowNgram = qzCheck(advBody, 'Keep original Engram tables',
+            "Copy the Engram tables in their original FP8 storage instead of quantizing them to 4 bits. The output takes more disk space, but memory use stays the same with SSD N-gram Offload. Output name gets a -ngram suffix.", 'eng');
+        const cbNgram = rowNgram._cb;
         const selCombine = qzSelect('None');
-        const rowCombine = qzField(adv, 'Combine other model\u2019s MTP head', selCombine,
-            'Graft the MTP head from a same-architecture donor checkpoint (e.g. the base model of a fine-tune).');
-        const cbText = document.createElement('input'); cbText.type = 'checkbox';
-        const rowText = qzField(adv, 'Text only', cbText);
-        const vlmWarn = document.createElement('small');
-        vlmWarn.className = 'warn-text';
-        vlmWarn.textContent = C.tf('uplift.ui.selected_model_is_a_vlm_vision_tower_will_be_ski', 'Selected model is a VLM — vision tower will be skipped.');
-        vlmWarn.hidden = true; rowText.append(vlmWarn);
+        const rowCombine = qzField(advBody, 'Combine other model\u2019s MTP head', selCombine,
+            'Graft the MTP head from a same-architecture donor checkpoint (e.g. the base model of a fine-tune).', 'comb');
+        const rowText = qzCheck(advBody, 'Text Only',
+            'Excludes vision encoder weights. Output is a text-only model (~2-3% smaller).', 'txt');
+        const cbText = rowText._cb;
+        const setTextHint = warn => {
+            rowText._hint.textContent = warn
+                ? C.tf('uplift.ui.selected_model_is_a_vlm_vision_tower_will_be_ski', 'Selected model is a VLM — vision tower will be skipped.')
+                : rowText._hintEn;
+            rowText._hint.classList.toggle('warn-text', !!warn);
+        };
         g.append(adv);
 
+        // estimate reads as an instrument well; Start shares the line
+        const run = document.createElement('div');
+        run.className = 'qz-run'; run.style.gridArea = 'run';
         const est = document.createElement('div');
         est.className = 'qz-est dim'; est.textContent = '\u2014';
-        g.append(est, start);
+        run.append(est, start);
+        g.append(run);
 
         const levelLabel = l => 'oQ' + l + (cbEnh.checked ? 'e' : '');
         const refreshLevelLabels = () => {
@@ -201,33 +242,41 @@ function renderQuantizer() {
             const sens = m ? st.all.filter(x => x.path !== m.path && x.is_quantized &&
                 x.model_type === m.model_type) : [];
             fill(selSens, sens, x => `${x.name} (${x.size_formatted})`);
-            rowSens.hidden = sens.length === 0;
-            // preserve MTP availability
+            qzGate(rowSens, sens.length > 0, m
+                ? 'No quantized build of this model to reuse.'
+                : 'Select a source model first.');
+            if (!sens.length) selSens.value = '';
+            // preserve MTP availability (reason takes the hint line,
+            // replacing the old free-floating mtp-na warning)
             const hasMtp = !!(m && m.has_mtp_heads);
-            cbMtp.disabled = !hasMtp;
+            qzGate(rowMtp, hasMtp, m
+                ? 'Source model has no MTP heads.'
+                : 'Select a source model first.');
             if (!hasMtp) cbMtp.checked = false;
-            mtpNa.hidden = hasMtp || !m;
             // Engram-tables switch: deepseek_v41 only (mirror classic x-show)
             const isV41 = !!(m && m.model_type === 'deepseek_v41');
-            rowNgram.hidden = !isV41;
+            qzGate(rowNgram, isV41, 'DeepSeek V4.1 models only.');
             if (!isV41) cbNgram.checked = false;
             // MTP donor / gemma4 assistant candidates (mirror the classic filter)
             let comb = [];
             if (m && m.model_type === 'gemma4') {
                 comb = st.all.filter(x => x.model_type === 'gemma4_assistant');
                 rowCombine.querySelector('span').textContent = 'Combine assistant model as MTP head';
-                rowCombine.querySelector('small').textContent =
+                rowCombine._hintEn =
                     'Merge a separate gemma4_assistant checkpoint into the output as a Lightning MTP head.';
             } else if (m && oqMtpFamily(m.model_type) && !(hasMtp && cbMtp.checked)) {
                 comb = st.all.filter(x => x.path !== m.path && x.has_mtp_heads &&
                     oqMtpFamily(x.model_type) === oqMtpFamily(m.model_type) &&
                     (!x.hidden_size || !m.hidden_size || x.hidden_size === m.hidden_size));
                 rowCombine.querySelector('span').textContent = 'Combine other model\u2019s MTP head';
-                rowCombine.querySelector('small').textContent =
+                rowCombine._hintEn =
                     'Graft the MTP head from a same-architecture donor checkpoint (e.g. the base model of a fine-tune).';
             }
             fill(selCombine, comb, x => `${x.name} (${x.size_formatted})`);
-            rowCombine.hidden = comb.length === 0;
+            qzGate(rowCombine, comb.length > 0, m
+                ? 'No matching donor checkpoints found for this model.'
+                : 'Select a source model first.');
+            if (!comb.length) selCombine.value = '';
             // V4.1 policy (mirror classic oqApplyModelPolicy +
             // oqAvailableLevels): level list per model type, forced
             // bfloat16 output, text-only off, no sensitivity model at oQ4
@@ -252,8 +301,9 @@ function renderQuantizer() {
                 cbText.checked = false;
                 if (selLevel.value === '4') selSens.value = '';
             }
-            // VLM text-only warning
-            vlmWarn.hidden = !(m && m.is_vlm && cbText.checked);
+            // VLM text-only warning: hint swap in the reserved line, never
+            // an inserted node (insertion is what moved everything below)
+            setTextHint(!!(m && m.is_vlm && cbText.checked));
             refreshEst();
         }
 
@@ -332,7 +382,7 @@ function renderUploader() {
     host.innerHTML = '';
     const st = { validated: false, ns: '', models: [] };
     const g = document.createElement('div');
-    g.className = 'qz-form';
+    g.className = 'qz-form up-form';
     host.append(g);
     const tokWrap = document.createElement('div');
     tokWrap.className = 'qz-inline';
@@ -346,12 +396,15 @@ function renderUploader() {
     vbtn.textContent = C.tf('uplift.action.validate', 'Validate');
     vbtn.dataset.i18n = 'uplift.action.validate';
     vbtn.dataset.en = 'Validate';
-    const vmsg = document.createElement('span');
-    vmsg.className = 'stat-sub';
-    tokWrap.append(tok, vbtn, vmsg);
-    qzField(g, 'HuggingFace Token', tokWrap);
+    tokWrap.append(tok, vbtn);
+    // the status line rides the field's own hint slot (the old third flex
+    // child inside .qz-inline starved the password input to ~20px)
+    const rowTok = qzField(g, 'HuggingFace Token', tokWrap,
+        C.tf('uplift.ui.enter_a_token_to_list_uploadable_oq_models',
+            'Enter a token to list uploadable oQ models.'), 'tok');
+    const vmsg = rowTok._hint;
     const list = document.createElement('div');
-    list.className = 'admin-table';
+    list.className = 'admin-table qz-list';
     const listT = document.createElement('div');
     listT.className = 'se-hint'; listT.textContent = 'oQ Models';
     host.append(listT, list);
@@ -441,7 +494,6 @@ function renderUploader() {
         document.body.append(overlay);
     }
 
-    vmsg.textContent = C.tf('uplift.ui.enter_a_token_to_list_uploadable_oq_models', 'Enter a token to list uploadable oQ models.');
     MO.tasks('up-tasks', 'upload');
 }
 

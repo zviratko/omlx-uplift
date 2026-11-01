@@ -65,3 +65,16 @@ test('quantizer fold rows have [hidden] guards', () => {
     assert.match(css, /\.qz-form \.field\[hidden\]\s*\{\s*display:\s*none;/);
     assert.match(css, /\.qz-enh-only\[hidden\]\s*\{\s*display:\s*none;/);
 });
+
+/* WIDE-QA 2026-11-01 (user: "it shouldn't reflow with a selected model but
+   it should have enough space for all the information already"): the model-
+   dependent rows hold fixed grid slots and gate dim in place. Only the
+   user-clicked oQe sub-block may still fold via hidden. */
+test('model-conditional rows never fold via hidden (no-reflow contract)', () => {
+    assert.doesNotMatch(src, /rowSens\.hidden|rowCombine\.hidden/,
+        'sensitivity/combine rows must gate with qzGate, not hidden');
+    assert.match(src, /qzGate\(rowSens, sens\.length > 0,/,
+        'sensitivity row gates on candidate presence');
+    assert.match(src, /qzGate\(rowCombine, comb\.length > 0,/,
+        'combine row gates on donor presence');
+});

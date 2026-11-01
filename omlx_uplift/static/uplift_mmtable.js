@@ -93,6 +93,11 @@ function sortModels(rows) {
         type: (a, b) => (a.model_type || '').toLowerCase().localeCompare((b.model_type || '').toLowerCase()) || nameCmp(a, b),
         state: (a, b) => stateRank(a) - stateRank(b) || nameCmp(a, b),
         size: (a, b) => ((a.actual_size || a.estimated_size || 0) - (b.actual_size || b.estimated_size || 0)),
+        // AGE-SORT: the overlay's folder mtime (dir stat = when the files
+        // landed). Unknown mtimes (vanilla server, path gone) sink to one
+        // end as a group instead of scrambling the dated rows.
+        age: (a, b) => ((a.folder_mtime ?? -Infinity) - (b.folder_mtime ?? -Infinity))
+            || nameCmp(a, b),
     }[sortKey] || nameCmp;
     const favFirst = (a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0);
     return rows.sort((a, b) => favFirst(a, b) || (cmp(a, b) || 0) * sortDir || key(a, b));
@@ -106,7 +111,14 @@ async function renderModelAdmin(force) {
     // POLL-BATCH side-load clocks (see the idx gate below): soft 8 s ticks
     // ride these caches; force = tab entry or any local write.
     let models;
-    try { models = (await MM_GLUE.fetchJson(`${API}/admin/api/models`)).models; }
+    try {
+        // AGE-SORT: prefer the uplift overlay — it adds folder_mtime (+ the
+        // used_by the helper page ships); fall back to the vanilla list on
+        // an older server (same seam as uplift_helper.js DEAD-1). Age rows
+        // without mtime sink via the comparator, never a fabricated date.
+        try { models = (await MM_GLUE.fetchJson(`${API}/uplift/api/models`)).models; }
+        catch (_) { models = (await MM_GLUE.fetchJson(`${API}/admin/api/models`)).models; }
+    }
     catch (_) { D.emptyMsg($('model-admin'), C.t('uplift.mm.api_unreachable')); return; }
     S.adminModels = models;
     // expire/apply optimistic flag overrides against the fresh snapshot
@@ -198,7 +210,8 @@ async function renderModelAdmin(force) {
             c.classList.add('sortable');
             c.onclick = () => {
                 if (sortKey === key) sortDir = -sortDir;
-                else { sortKey = key; sortDir = key === 'size' ? -1 : 1; }
+                // size and age read best big/newest first; the rest A→Z
+                else { sortKey = key; sortDir = (key === 'size' || key === 'age') ? -1 : 1; }
                 saveTableSort();
                 renderModelAdmin(true);
             };
@@ -206,7 +219,10 @@ async function renderModelAdmin(force) {
         return c;
     };
     leftChips.append(chip('model', 'name'), chip('type', 'type'));
-    rightChips.append(chip('size', 'size'), chip('state', 'state'));
+    const ageChip = chip('age', 'age');
+    ageChip.title = C.tf('uplift.mm.age_sort_title',
+        'Sort by the model folder file date (newest first)');
+    rightChips.append(ageChip, chip('size', 'size'), chip('state', 'state'));
     hcL.append(leftChips, rightChips);
     const hcR = document.createElement('span');
     head.append(hcL, hcR);
@@ -216,7 +232,11 @@ async function renderModelAdmin(force) {
         const row = document.createElement('div'); row.className = 'urow admin';
         row.dataset.mid = m.id;
         const name = document.createElement('span');
-        name.className = 'uname'; name.title = m.model_path || m.id;
+        name.className = 'uname';
+        name.title = (m.model_path || m.id)
+            + (m.folder_mtime
+                ? '\nfolder date: ' + new Date(m.folder_mtime * 1000)
+                    .toISOString().slice(0, 10) : '');   // AGE-SORT visibility
         /* CARD-1 (user 2026-10-09) row order: line 1 = model NAME (top-left,
            bigger) with the type badge to its right and the copy icon after the
            badge; line 2 = the lamps (FAVOURITE/PINNED/DEFAULT/ALIAS) below the

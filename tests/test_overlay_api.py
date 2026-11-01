@@ -368,3 +368,32 @@ def test_api_endpoints_advertise_no_store():
         assert r.status_code == 200, (path, r.status_code)
         assert r.headers.get("cache-control") == "no-store", (
             path, dict(r.headers))
+
+
+# ---------------------------------------------------------------------------
+# AGE-SORT (user 2026-11-01): Manager's age sort rides folder_mtime, stamped
+# by the models overlay. Missing/unreadable path -> None, never a fabricated
+# age; the used_by contract (helper page) must keep working.
+# ---------------------------------------------------------------------------
+
+async def test_models_overlay_stamps_folder_mtime(tmp_path):
+    from omlx.admin import routes as admin_routes
+    live = tmp_path / "live-model"
+    live.mkdir()
+    rows = {"models": [
+        {"id": "live-model", "model_path": str(live)},
+        {"id": "gone-model", "model_path": str(tmp_path / "missing")},
+        {"id": "no-path"},
+    ]}
+
+    async def fake_list(is_admin):
+        return rows
+
+    with patch.object(admin_routes, "list_models", fake_list), \
+         patch.object(up_s, "settings_manager", return_value=_mgr({})):
+        out = await up_s.models_overlay(is_admin=True)
+    by = {r["id"]: r for r in out["models"]}
+    assert by["live-model"]["folder_mtime"] == live.stat().st_mtime
+    assert by["gone-model"]["folder_mtime"] is None
+    assert by["no-path"]["folder_mtime"] is None
+    assert by["live-model"]["used_by"] == []

@@ -69,6 +69,19 @@ async def models_overlay(is_admin: bool = Depends(require_admin)):
         users |= helper_users.get(row.get("source_repo_id") or "", set())
         users.discard(row.get("id"))
         row["used_by"] = sorted(users)
+        # AGE-SORT (user 2026-11-01): folder mtime as the model's age key.
+        # A directory's mtime moves when its files are added/removed, i.e.
+        # download/quantize completion time - exactly the "newest first"
+        # reading the Manager chip needs. Missing/unreadable path -> None
+        # (the client sorts those last, never fabricates an age).
+        path = row.get("model_path")
+        mtime = None
+        if path:
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                mtime = None
+        row["folder_mtime"] = mtime
     return data
 
 

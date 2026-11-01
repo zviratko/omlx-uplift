@@ -35,11 +35,17 @@ test('start payload sends preserve_ngram_table gated by model type', () => {
         'POST /oq/start body must carry the type-gated boolean');
 });
 
-test('row is hidden for non-deepseek_v41 sources and the switch resets', () => {
+test('row gates off for non-deepseek_v41 sources and the switch resets', () => {
+    // WIDE-QA 2026-11-01: the fold moved from display:none (which re-stacked
+    // the whole grid when a model was picked) to a gated slot: dimmed and
+    // disabled in place, reason in the hint line. Gate OFF + stale-check
+    // clear is the same contract, pinned on the new shape.
     assert.match(
         src,
-        /const isV41 = !!\(m && m\.model_type === 'deepseek_v41'\);\s*rowNgram\.hidden = !isV41;\s*if \(!isV41\) cbNgram\.checked = false;/,
-        'updateConditional must fold the row by model type and clear a stale check');
+        /const isV41 = !!\(m && m\.model_type === 'deepseek_v41'\);\s*qzGate\(rowNgram, isV41, 'DeepSeek V4\.1 models only\.'\);\s*if \(!isV41\) cbNgram\.checked = false;/,
+        'updateConditional must gate the row by model type and clear a stale check');
+    assert.doesNotMatch(src, /rowNgram\.hidden/,
+        'negative pin: the Engram row must never go back to hidden (reflow)');
 });
 
 test('toggling the switch re-arms the estimate (classic x-effect parity)', () => {

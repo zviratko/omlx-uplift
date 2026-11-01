@@ -403,6 +403,7 @@
  "uplift.metric.therm.gpu_temp_c": "GPU °C",
  "uplift.metric.therm.temp": "teplota",
  "uplift.mm.api_unreachable": "API nedostupné",
+ "uplift.mm.age_sort_title": "Řadit podle data souboru modelu (nejnovější první)",
  "uplift.mm.load_fail": "Načtení selhalo: ",
  "uplift.mm.missing_on_disk": "Chybí — uložená nastavení, model není na disku",
  "uplift.mm.no_match": "Žádná shoda",

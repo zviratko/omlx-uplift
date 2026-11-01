@@ -403,6 +403,7 @@
  "uplift.metric.therm.gpu_temp_c": "GPU °C",
  "uplift.metric.therm.temp": "溫度",
  "uplift.mm.api_unreachable": "API 不可達",
+ "uplift.mm.age_sort_title": "依模型資料夾檔案日期排序（最新優先）",
  "uplift.mm.load_fail": "載入失敗: ",
  "uplift.mm.missing_on_disk": "缺失 — 有已存設定，模型不在磁碟上",
  "uplift.mm.no_match": "無比對",

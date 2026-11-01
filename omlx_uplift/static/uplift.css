@@ -1235,7 +1235,11 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .pager .pinfo { margin-left: auto; }
 /* model listing (suggested / search): rank + name + params + size + dl +
    likes + action; header reuses the house .urow.head, sortable columns */
-#dl-results .urow.usage { grid-template-columns: 34px minmax(0,5fr) minmax(0,1.1fr) 86px 92px 58px auto; }
+#dl-results { max-width: 1180px; }
+#dl-results .urow.usage { grid-template-columns: 34px minmax(0,1fr) 90px 92px 96px 64px auto; }
+/* head labels sit over their values: rank + model left (body cells are left),
+   the numeric columns right like .admin-table aligns them */
+#dl-results .urow.head span:nth-child(2) { text-align: left; }
 #dl-results .urow.head span { cursor: pointer; user-select: none; }
 #dl-results .urow.head span:hover, #dl-results .urow.head span.sorted { color: var(--ink); }
 .filterbar input[type="search"] {
@@ -1770,53 +1774,82 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
 
 [data-theme="enhanced"] .se-btn.danger { color: #ff5f5f; border-color: #ff5f5f; }
 
-/* ---- Quantizer / uploader forms: same 3-col well geometry as the
-   settings panels (label above square field) ---- */
+/* ---- Quantizer / uploader forms (WIDE-QA 2026-11-01) -------------------
+   A capped named-area well: label/control/hint stacks land on one row
+   rhythm (align-items:start, every control exactly 32px tall), inputs sit
+   in recessed --field wells so the form is not flat line-work on the card
+   ground, and the advanced block is a framed panel with an inset header
+   strip. Conditional rows never display:none - they gate dim IN their
+   fixed slot (qzGate), so picking another model cannot re-stack the form. */
 .qz-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px; align-items: end; padding: 4px 0; }
-@media (max-width: 1100px) { .qz-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px)  { .qz-form { grid-template-columns: 1fr; } }
-.qz-form .field { display: flex; flex-direction: column; gap: 4px; }
+    gap: 14px 18px; align-items: start; padding: 8px 0 4px; max-width: 1180px;
+    grid-template-areas:
+        "src  sens lvl"
+        "enh  enh  enh"
+        "eo   eo   eo"
+        "adv  adv  adv"
+        "run  run  run"; }
+.qz-form.up-form { grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "tok tok" "eo eo" "adv adv" "run run"; }
+@media (max-width: 1100px) { .qz-form:not(.up-form) { grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "src sens" "lvl lvl" "enh enh" "eo eo" "adv adv" "run run"; } }
+@media (max-width: 720px)  { .qz-form { grid-template-columns: 1fr;
+    grid-template-areas: "src" "sens" "lvl" "enh" "eo" "tok" "adv" "run"; } }
+.qz-form .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* Author display beats the UA [hidden] rule (same trap documented at
-   .se-row and .dd-menu): every conditional quantizer row — sensitivity
-   (no candidates), combine-MTP (no donors), Keep-Engram (non-V4.1) —
-   folds via el.hidden and rendered anyway until this guard existed. */
+   .se-row and .dd-menu): the oQe sub-block folds via el.hidden. Model-
+   conditional rows must NOT hide - they gate dim in place (qzGate). */
 .qz-form .field[hidden] { display: none; }
 .qz-form .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.06em; }
-.qz-form .field small { color: var(--dim); font: 300 10px/1.3 var(--sans); }
+.qz-form .field small { color: var(--dim); font: 300 10px/1.35 var(--sans); }
 .qz-form input[type="text"], .qz-form input[type="password"], .qz-form select {
-    background: transparent; border: 1px solid var(--edge); color: var(--ink);
-    border-radius: var(--radius); height: 32px; padding: 0 8px; font: 400 12px/1 var(--mono); }
+    background: var(--field); border: 1px solid var(--edge); color: var(--ink);
+    border-radius: var(--radius); height: 32px; padding: 0 8px;
+    font: 400 12px/1 var(--mono); width: 100%; box-sizing: border-box; }
 .qz-form input:focus, .qz-form select:focus { outline: 1px solid var(--ink); }
-.qz-form input[type="checkbox"] { margin: 8px 0; }
-.qz-est { grid-column: 1 / -1; font: 400 12px/1.4 var(--mono); padding-top: 4px; }
-/* R10-12: estimate and Start ride their own full-width row, Start flush right */
-.qz-form > .se-btn { grid-column: 1 / -1; justify-self: end; min-width: 140px; }
-.qz-adv { grid-column: 1 / -1; border: 1px solid var(--edge); padding: 12px;
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px; align-items: end; }
-@media (max-width: 1100px) { .qz-adv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px)  { .qz-adv { grid-template-columns: 1fr; } }
-.qz-adv-title { grid-column: 1 / -1; font: 500 11px/1 var(--sans);
-    text-transform: uppercase; letter-spacing: 0.1em; }
-.qz-enh-only { grid-column: 1 / -1; display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
-    align-items: end; border-left: 2px solid var(--accent); padding-left: 10px; }
-/* the oQe block starts folded (checkbox off) — same [hidden] guard */
+/* checkbox control band: the same 32px line the selects occupy, tick left-aligned */
+.qz-form .chk32 { display: flex; align-items: center; height: 32px; }
+/* gated slot: dimmed + disabled, geometry frozen (the no-reflow contract) */
+.qz-form .qz-off { opacity: 0.45; }
+.qz-adv { grid-area: adv; border: 1px solid var(--edge); border-radius: var(--radius);
+    background: var(--panel); display: flex; flex-direction: column; }
+.qz-adv-title { font: 500 11px/1 var(--sans);
+    text-transform: uppercase; letter-spacing: 0.1em; padding: 10px 12px;
+    border-bottom: 1px solid var(--edge); }
+.qz-adv-body { padding: 14px 12px; display: grid; gap: 14px 18px;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start;
+    grid-template-areas: "dt mtp txt" "eng comb comb"; }
+@media (max-width: 1100px) { .qz-adv-body { grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "dt mtp" "txt txt" "eng eng" "comb comb"; } }
+@media (max-width: 720px)  { .qz-adv-body { grid-template-columns: 1fr;
+    grid-template-areas: "dt" "mtp" "txt" "eng" "comb"; } }
+/* the oQe block starts folded (checkbox off) - same [hidden] guard */
+.qz-enh-only { grid-area: eo; display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px;
+    align-items: start; border-left: 2px solid var(--accent); padding-left: 10px; }
 .qz-enh-only[hidden] { display: none; }
 @media (max-width: 1100px) { .qz-enh-only { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px)  { .qz-enh-only { grid-template-columns: 1fr; } }
+/* estimate + Start share the run line: the estimate reads as an
+   instrument well (recessed field, mono), Start flush right */
+.qz-run { grid-area: run; display: flex; gap: 12px; align-items: center; }
+.qz-est { flex: 1; min-width: 0; font: 400 12px/1.2 var(--mono);
+    padding: 9px 12px; background: var(--field); border: 1px solid var(--edge);
+    border-radius: var(--radius); }
+.qz-run .se-btn { flex: 0 0 auto; min-width: 140px; }
 .qz-toggle { display: flex; }
 .qz-toggle button { background: transparent; border: 1px solid var(--edge);
-    color: var(--dim); border-radius: var(--radius); padding: 7px 12px;
-    font: 400 11px/1 var(--mono); cursor: pointer; }
+    color: var(--dim); border-radius: var(--radius); height: 32px; padding: 0 12px;
+    box-sizing: border-box; font: 400 11px/1 var(--mono); cursor: pointer; }
 .qz-toggle button + button { border-left: 0; }
 .qz-toggle button.on { background: var(--ink); color: var(--bg); }
 .warn-text { color: var(--accent) !important; }
 [data-theme="light"] .warn-text { color: var(--red) !important; }
-.qz-inline { display: flex; gap: 8px; align-items: center; }
+.qz-inline { display: flex; gap: 8px; align-items: center; width: 100%; }
 .qz-inline input { flex: 1; min-width: 0; }
+/* uploader model list: capped so the row band does not span the page */
+#up-form .qz-list { max-width: 680px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.06em; }
@@ -2319,11 +2352,15 @@ label.se-row.pending-restart > .se-ctl > select {
 .modal.editor .editor-bar .savebtn.queued { background: var(--accent);
     border-color: var(--accent); color: var(--ink-on-accent-soft); }
 
-/* ---- MarkItDown special box (its own zone above the helper list) --------- */
+/* ---- MarkItDown special box (its own zone above the helper list) ---------
+   WIDE-QA 2026-11-01: capped width, inset header strip (the bare box read
+   flat), deterministic field columns and control widths sized to their
+   content - a two-digit number must not get a 280px well. */
 .mk-box { border: 1px solid var(--ink); padding: 14px; display: flex;
-    flex-direction: column; gap: 12px; margin-bottom: 14px; }
+    flex-direction: column; gap: 12px; margin-bottom: 14px; max-width: 1180px; }
 .mk-head { display: flex; align-items: center; gap: 12px;
-    border-bottom: 1px solid var(--rule); padding-bottom: 8px; }
+    border-bottom: 1px solid var(--rule); padding: 10px 14px;
+    margin: -14px -14px 0; background: var(--panel); }
 .mk-title { font: 500 12px/1 var(--sans); text-transform: uppercase;
     letter-spacing: 0.1em; flex: 1; }
 /* integration fields: even grid, aligned controls */
@@ -2333,7 +2370,18 @@ label.se-row.pending-restart > .se-ctl > select {
 .mk-fields .field input[type="text"], .mk-fields .field input[type="number"],
 .mk-fields .field input[type="password"], .mk-fields .field input[type="url"],
 .mk-fields .field select { width: 100%; box-sizing: border-box; }
-.mk-fields .field input[type="checkbox"] { align-self: flex-start; margin: 2px 0; }
+.mk-fields .field input[type="number"] { max-width: 120px; }
+.mk-fields .field select { max-width: 340px; }
+/* checkbox rides the same 32px control band as the inputs beside it */
+.mk-fields .field input[type="checkbox"] { align-self: flex-start; margin: 7px 0; }
+/* CLI-assistant pickers: content-sized tracks, never edge-to-edge inputs */
+.mk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 340px));
+    gap: 12px 18px; }
+.mk-grid .field { display: flex; flex-direction: column; gap: 4px; }
+.mk-grid .field > span { font: 300 11px/1.3 var(--sans); color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.06em; }
+.mk-grid .field input[type="text"], .mk-grid .field select {
+    width: 100%; box-sizing: border-box; }
 .mk-row { display: flex; align-items: center; gap: 12px;
     border-top: 1px solid var(--rule); padding-top: 10px; }
 

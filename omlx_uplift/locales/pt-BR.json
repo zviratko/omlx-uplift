@@ -407,6 +407,7 @@
  "uplift.metric.therm.gpu_temp_c": "GPU °C",
  "uplift.metric.therm.temp": "temperatura",
  "uplift.mm.api_unreachable": "API inacessível",
+ "uplift.mm.age_sort_title": "Classificar pela data do arquivo da pasta do modelo (mais recentes primeiro)",
  "uplift.mm.load_fail": "Falha ao carregar: ",
  "uplift.mm.missing_on_disk": "Ausente — configurações salvas, modelo não está no disco",
  "uplift.mm.no_match": "Nenhuma correspondência",

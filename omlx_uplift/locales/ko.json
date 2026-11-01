@@ -418,6 +418,7 @@
  "uplift.metric.therm.gpu_temp_c": "GPU °C",
  "uplift.metric.therm.temp": "온도",
  "uplift.mm.api_unreachable": "API에 연결할 수 없음",
+ "uplift.mm.age_sort_title": "모델 폴더 파일 날짜로 정렬 (최신 순)",
  "uplift.mm.load_fail": "불러오기 실패: ",
  "uplift.mm.missing_on_disk": "없음 — 설정만 저장됨, 모델이 디스크에 없음",
  "uplift.mm.no_match": "일치 항목 없음",
