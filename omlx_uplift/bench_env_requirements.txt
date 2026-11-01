@@ -28,9 +28,9 @@ dill==0.4.1
 evaluate==0.4.6
 filelock==4.2.4
 frozenlist==1.8.0
-fsspec==2026.7.0
+fsspec==2026.9.0
 h11==0.16.0
-hf-xet==1.7.0
+hf-xet==1.7.1
 httpcore2==2.16.0
 httpx2==2.16.0
 huggingface_hub==2.3.0
@@ -59,7 +59,7 @@ numpy==2.5.4
 packaging==26.3
 pandas==3.1.0
 pathvalidate==3.3.1
-portalocker==4.4.1
+portalocker==4.4.2
 propcache==0.5.4
 pyarrow==26.0.0
 pytablewriter==1.2.1
