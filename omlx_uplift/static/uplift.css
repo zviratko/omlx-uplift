@@ -509,6 +509,9 @@ option { background: var(--card); color: var(--ink); }
    align-items/align-self — never resize by padding (it skews the box). */
 input[type="checkbox"] { width: 18px; height: 18px; padding: 0; margin: 0;
     flex: 0 0 auto; accent-color: var(--ink); cursor: pointer; }
+/* Disabled controls are not action targets, including native selects and
+   checkboxes whose enabled rules otherwise keep the pointer cursor. */
+:is(button, select, input, textarea):disabled { cursor: default; }
 
 /* Layout settings popover — framed rectangle, no shadow */
 .popover {
