@@ -1797,7 +1797,7 @@ section.card[data-id^="met-"] h2 > span[data-i18n] { cursor: zoom-in; }
         "adv  adv  adv"
         "run  run  run"; }
 .qz-form.up-form { grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-areas: "tok tok" "eo eo" "adv adv" "run run"; }
+    grid-template-areas: "tok tok"; }
 @media (max-width: 1100px) { .qz-form:not(.up-form) { grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas: "src sens" "lvl lvl" "enh enh" "eo eo" "adv adv" "run run"; } }
 @media (max-width: 720px)  { .qz-form:not(.up-form) { grid-template-columns: 1fr;

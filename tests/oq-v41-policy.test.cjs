@@ -78,3 +78,10 @@ test('model-conditional rows never fold via hidden (no-reflow contract)', () => 
     assert.match(src, /qzGate\(rowCombine, comb\.length > 0,/,
         'combine row gates on donor presence');
 });
+
+test('uploader declares only the token row it constructs', () => {
+    const rule = /\.qz-form\.up-form\s*\{[^}]*grid-template-areas:\s*"tok tok";\s*\}/.exec(css);
+    assert.ok(rule, 'the uploader grid must end after its token field');
+    assert.doesNotMatch(rule[0], /"eo eo"|"adv adv"|"run run"/,
+        'quantizer-only areas leave empty rows and gaps in the uploader');
+});
