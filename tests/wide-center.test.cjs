@@ -42,9 +42,16 @@ test('About narrows via the markup that EXISTS (data-id, not a dead #id)', () =>
         'the dead #about-page selector must stay retired');
 });
 
-test('the STATUS board and the native bench column narrow with the pages', () => {
-    centered('main#grid.grid-stack');
-    assert.match(css, /main#grid\.grid-stack \{[^}]*max-width: 1180px/);
+test('the native bench column narrows; the STATUS BOARD NEVER DOES', () => {
+    /* User ruling 2026-11-01 (same day as the caps): "you shouldn't have
+       resized the status dashboards - using the display estate there
+       makes sense, there's lots of information. Only forms that needlessly
+       stretch the information make sense to be narrowed." The board rides
+       the .wrap column; capping it is RETIRED - negative pin. */
+    assert.ok(!/main#grid[^{]*\{[^}]*max-width/.test(css),
+        'the status board must not carry a max-width again');
+    assert.ok(!/#grid\b[^{]*\{[^}]*margin-inline:[^}]*auto/.test(css),
+        'and no centering rule for a cap that must not exist');
     // Bench: sub-tab strip AND panels ride the same capped column
     const m = css.match(/#bench-native \.native-subtabs,\s*\n#bench-native \.native-subpanel \{([^}]*)\}/);
     assert.ok(m, 'the bench column rule exists');

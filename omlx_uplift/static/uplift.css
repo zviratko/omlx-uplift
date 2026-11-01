@@ -2914,10 +2914,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 #bench-native .native-subtabs,
 #bench-native .native-subpanel { max-width: 1180px; margin-inline: auto;
   width: 100%; box-sizing: border-box; }
-/* STATUS board: the board itself follows the same capped column, centered
-   (GridStack sizes cells as fractions of the container, so the saved
-   layout is untouched - the whole board simply shrinks with the sides). */
-main#grid.grid-stack { max-width: 1180px; margin-inline: auto; }
+
 .native-stub.card { border: 1px dashed var(--edge); padding: 12px 14px; }
 .native-stub h2 { margin: 0 0 4px; font-size: 13px; }
 .native-stub-note { margin: 0; color: var(--dim); font-size: 11px; }
