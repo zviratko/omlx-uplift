@@ -13,6 +13,13 @@ users never see.
 
 ## Unreleased
 
+## [3.1] - 2026-11-01
+
+- **Models subpages are tidier on wide screens.** Quantizer, Uploader, Downloader and Helper Models forms and result tables ride capped centered columns, each CLI assistant collapsed to one row with its default model and launch command, and the quantizer form no longer restacks when you select a model.
+- **Model manager can sort by AGE.** Newest folder first, with the folder's age in the row's tooltip.
+- **The Intelligence benchmark remembers your suite picks and sample sizes per browser**, and prunes picks whose suite left the catalog.
+- **The Patches page says what happened when patches collide.** The losing patch names the one that took its lines, an unused candidate says which approval it waits for, and a new order control - on the page and in the CLI (`patch order`) - decides which patch wins.
+
 ## [3.0] - 2026-10-31
 
 - **A dev build can no longer ship an engine that fails at boot.** `omlx-uplift dev install` now compares the dependency commits in our formula, in the tap's `omlx.rb` and in the source tree it is about to build, and refuses the build when they disagree instead of letting a lagging tap overwrite what the source asked for. After a build it runs the new keg's own interpreter against the engine's imports and the tap's self-checks before that keg is allowed to go live; `--force` still builds anyway, with the findings printed.
