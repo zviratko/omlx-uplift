@@ -218,7 +218,7 @@ const HFS = {
         return picked;
     },
     locked(file) { return !!file.required || !!file.local; },
-    selected(file, picked) { return !file.local && (!!file.required || !!file.outdated || !!picked[file.name]); },
+    selected(file, picked) { return !file.local && (!!file.required || !!picked[file.name]); },
     // A split GGUF's parts toggle together; a GGUF brings its vision projector.
     toggle(detail, picked, file) {
         if (HFS.locked(file)) return picked;

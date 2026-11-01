@@ -137,6 +137,21 @@ test('locked/selected: required always in, local never re-sent, optional follows
     assert.ok(H.selected(st('opt'), { opt: true }));
     assert.ok(!H.selected(st('opt'), {}));
 });
+test('changed optional files pre-pick once, then stay deselected', () => {
+    const { seam } = load();
+    const H = seam.HFS;
+    const detail = { layout: 'safetensors', files: [
+        { ...st('optional-change.safetensors'), outdated: true },
+    ] };
+    const file = detail.files[0];
+    let picked = H.initial(detail);
+    assert.ok(picked[file.name] && H.selected(file, picked),
+        'the changed file starts selected');
+    picked = H.toggle(detail, picked, file);
+    assert.ok(!H.selected(file, picked), 'outdated must not override the toggle');
+    assert.deepEqual([...H.names(detail, picked)], [], 'the deselected file leaves the payload');
+    assert.equal(H.selSize(detail, picked), 0, 'the deselected file leaves the size total');
+});
 test('toggle: locked files untouchable; group toggles together; mmproj pulled in', () => {
     const { seam } = load();
     const H = seam.HFS;
