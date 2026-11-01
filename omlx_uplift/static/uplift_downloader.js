@@ -1662,7 +1662,7 @@ function initDownloader() {
                 }
             } else {
                 const b = document.createElement('button');
-                b.className = 'se-btn act'; b.textContent = 'download';
+                b.className = 'se-btn act'; b.textContent = C.tf('uplift.action.download', 'Download');
                 b.onclick = () => openModelFiles(m.repo_id);   // UP-14: pick files first (classic)
                 act.append(b);
             }
@@ -1747,7 +1747,7 @@ function initDownloader() {
         const sort = D.$('dl-sort').value || 'trending';
         const mlx = D.$('dl-mlx') ? D.$('dl-mlx').checked : true;
         DL.q = q; DL.busy = true;
-        const sub = D.$('dl-sub'); if (sub) sub.textContent = 'searching…';
+        const sub = D.$('dl-sub'); if (sub) sub.textContent = C.tf('uplift.dl.searching', 'Searching huggingface.co…');
         const host = D.$('dl-results'); if (host) D.emptyMsg(host, C.t('uplift.dl.searching'));
         DG.fetchJson(`${API}/admin/api/hf/search?q=${encodeURIComponent(q)}&limit=100&sort=${sort}&mlx_only=${mlx}`).then(d => {
             DL.search = (d.models || []).map((m, i) => ({ ...m, rank: i + 1 }));

@@ -87,7 +87,7 @@ async function openPruneDialog() {
     none.textContent = C.tf('uplift.ui.select_none', 'Select none');
     none.onclick = () => checks.forEach(c => c.checked = false);
     const cancel = document.createElement('button');
-    cancel.textContent = 'Cancel';
+    cancel.textContent = C.tf('uplift.layout.cancel', 'Cancel');
     cancel.onclick = () => overlay.remove();
     const doIt = document.createElement('button');
     doIt.className = 'danger';
@@ -501,7 +501,7 @@ async function renderHelperModels() {
     const testOut = HG.cell('');
     testOut.className = 'dim';
     testBtn.onclick = async () => {
-        testBtn.disabled = true; testBtn.textContent = 'Testing…';
+        testBtn.disabled = true; testBtn.textContent = C.tf('uplift.patches.testing', 'Testing…');
         try {
             // Classic contract (dashboard.js testWebSearch): the endpoint tests
             // the PENDING form values and 422s without a JSON body. This page

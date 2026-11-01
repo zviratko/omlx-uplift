@@ -385,7 +385,7 @@ function renderPatches() {
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = ptMsg('uplift.patches.none',
-            'No patches yet. Add a GitHub PR, URL, or upload a .diff below.');
+            'No runtime patches yet. Add a GitHub PR, URL, or upload a .diff below.');
         list.append(empty);
     }
     for (const p of d.patches) list.append(patchRow(p, d));

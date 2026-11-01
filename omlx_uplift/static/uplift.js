@@ -228,7 +228,7 @@ window.Uplift._usageGlue = {
         const host = $('api-engines'); if (!host) return;
         const eng = (d && d.engines) || {};
         const keys = Object.keys(eng);
-        if (!keys.length) { D.emptyMsg(host, C.tf('uplift.status.no_engines', 'No engines loaded')); return; }
+        if (!keys.length) { D.emptyMsg(host, C.tf('uplift.status.no_engines', 'No models loaded')); return; }
         host.replaceChildren();
         for (const k of keys) {
             const e = eng[k] || {};

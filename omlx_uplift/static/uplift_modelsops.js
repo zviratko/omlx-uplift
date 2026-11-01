@@ -436,7 +436,7 @@ function renderUploader() {
 
     vbtn.onclick = () => {
         if (!tok.value.trim()) { vmsg.textContent = C.tf('uplift.ui.invalid_token_ensure_it_has_write_access', 'Invalid token. Ensure it has write access.'); return; }
-        vbtn.disabled = true; vmsg.textContent = 'Validating...';
+        vbtn.disabled = true; vmsg.textContent = C.tf('uplift.ui.validating', 'Validating…');
         QG.postJson(`${API}/admin/api/upload/validate-token`, { hf_token: tok.value.trim() })
             .then(d => {
                 st.validated = true; st.ns = d.username || 'you';
@@ -462,7 +462,7 @@ function renderUploader() {
         rdSel.append(readme);   // only auto-README is meaningful in the sandbox
         const cbRe = document.createElement('input'); cbRe.type = 'checkbox';
         const cbPr = document.createElement('input'); cbPr.type = 'checkbox';
-        const bCancel = document.createElement('button'); bCancel.textContent = 'Cancel';
+        const bCancel = document.createElement('button'); bCancel.textContent = C.tf('uplift.layout.cancel', 'Cancel');
         const bGo = document.createElement('button'); bGo.className = 'danger'; bGo.textContent = 'Upload';
         bCancel.onclick = () => overlay.remove();
         bGo.onclick = () => {

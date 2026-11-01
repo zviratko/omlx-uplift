@@ -601,7 +601,7 @@ function confirmDialog(title, msg, act, okMsg) {
     const sub = document.createElement('div'); sub.className = 'se-hint';
     sub.textContent = msg;
     const bar = document.createElement('div'); bar.className = 'row buttons';
-    const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    const cancel = document.createElement('button'); cancel.textContent = C.tf('uplift.layout.cancel', 'Cancel');
     cancel.onclick = () => overlay.remove();
     const ok = document.createElement('button');
     ok.className = 'danger'; ok.textContent = 'Confirm';
