@@ -157,18 +157,16 @@ test('MODEL_TYPE_OPTIONS mirrors the classic model-type <option> list', { skip: 
 // P1A-7 interop: Uplift-style global-settings round-trip against the REAL
 // oMLX must leave settings.json untouched. Skips (exit 2) when no local
 // oMLX answers, so CI without a running server stays green.
-test('global-settings round-trip is a no-op on the real server', { timeout: 30000 }, () => {
+test('global-settings round-trip is a no-op on the real server', { timeout: 30000 }, (t) => {
     const { spawnSync } = require('child_process');
-    // CI-4: ROOT is null without a classic checkout (GitHub runner) —
-    // path.join(null, …) threw BEFORE the intended graceful skip. Candidate
-    // #1 only exists when classic is there; the repo-local copy below is
-    // what CI runs (it self-skips exit 2 when no oMLX answers).
-    const script = [ROOT && require('path').join(ROOT, 'tests', 'ui', 'p1a7_interop.py'),
-                    require('path').join(__dirname, '..', 'tests', 'ui', 'p1a7_interop.py'),
+    // Prefer this repo's adapter: it knows the dev-only settings fallback.
+    // The upstream copy is only a compatibility fallback for older checkouts.
+    const script = [require('path').join(__dirname, '..', 'tests', 'ui', 'p1a7_interop.py'),
+                    ROOT && require('path').join(ROOT, 'tests', 'ui', 'p1a7_interop.py'),
                     require('path').join(__dirname, '..', '..', '..', 'tests', 'ui', 'p1a7_interop.py')].find(fs.existsSync);
-    if (!script) { console.log('interop SKIP: p1a7_interop.py not found'); return; }
+    assert.ok(script, 'p1a7_interop.py fixture must exist in the checkout or repo');
     const r = spawnSync('python3', [script], { encoding: 'utf8', timeout: 25000 });
     const out = (r.stdout || '') + (r.stderr || '');
-    if (r.status === 2) { console.log('interop SKIP:', out.trim()); return; }
+    if (r.status === 2) { t.skip(out.trim()); return; }
     assert.strictEqual(r.status, 0, 'interop round-trip failed:\n' + out);
 });
