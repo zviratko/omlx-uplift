@@ -3881,8 +3881,8 @@ function accLoadPicks() {
             if (typeof k === 'string' && k) out.selected[k] = true;
         });
         Object.keys(d.sizes || {}).forEach(function (k) {
-            var n = Number(d.sizes[k]);
-            if (typeof k === 'string' && k && isFinite(n) && n >= 0)
+            var n = d.sizes[k];
+            if (typeof k === 'string' && k && typeof n === 'number' && isFinite(n) && n >= 0)
                 out.sizes[k] = n;
         });
     } catch (_) { /* a broken pref is no pref (EXTRAS doctrine) */ }

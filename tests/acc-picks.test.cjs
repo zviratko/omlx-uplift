@@ -43,12 +43,15 @@ test('junk in the stored pref collapses to no pref, never a throw', () => {
     map.set(P.KEY, '{not json');
     assert.deepEqual(P.load(), { selected: {}, sizes: {} });
     map.set(P.KEY, JSON.stringify({ selected: [7, null, 'mmlu'],
-                                    sizes: { mmlu: 'x', arc: -3, bb: 50 } }));
+                                    sizes: { mmlu: 'x', arc: -3, bb: 50,
+                                             nil: null, no: false, yes: true,
+                                             empty: '', str: '25', full: 0 } }));
     const d = P.load();
     assert.deepEqual(Object.keys(d.selected), ['mmlu'], 'only real keys');
-    assert.deepEqual(d.sizes, { bb: 50 },
-        'non-numeric and negative sizes dropped; an orphan numeric survives '
-        + 'but can never reach the request (collect reads SIZES of SELECTED)');
+    assert.deepEqual(d.sizes, { bb: 50, full: 0 },
+        'non-number and negative sizes dropped; numeric zero stays a real Full size. '
+        + 'An orphan numeric survives but cannot reach the request '
+        + '(collect reads SIZES of SELECTED)');
 });
 
 test('validate keeps keys the catalog offers and prunes the rest', () => {
