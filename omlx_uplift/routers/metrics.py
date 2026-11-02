@@ -163,14 +163,17 @@ async def metrics_series(
 
 
 @api_router.get("/metrics/live")
-async def metrics_live(is_admin: bool = Depends(require_admin)):
+async def metrics_live(request: Request, is_admin: bool = Depends(require_admin)):
     """FAST-1: the 2 Hz in-memory ring snapshot (no SQLite). Fallback for
     clients without EventSource and the health probe for the stream —
     `live: false` tells the dashboard the fast sampler is not running so
-    it falls back to the 5 s stored cadence instead of waiting."""
+    it falls back to the 5 s stored cadence instead of waiting.
+    LIVE-GZ (user 2026-11-02): the full ring is ~250 KB of JSON; it rides
+    gzip like /metrics/series (serialize + compress off the event loop)."""
     from ..fast_sampler import get_fast_sampler
 
-    return get_fast_sampler().snapshot()
+    return await asyncio.to_thread(
+        gzip_or_json, get_fast_sampler().snapshot(), request)
 
 
 @api_router.get("/metrics/stream")

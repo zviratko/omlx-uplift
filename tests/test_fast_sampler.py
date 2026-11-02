@@ -198,3 +198,28 @@ def test_live_routes_registered():
     assert '@api_router.get("/metrics/stream")' in src
     assert callable(rt.metrics_live) and callable(rt.metrics_stream)
     # facade re-exports keep the /admin/api alias mount complete
+
+
+def test_live_snapshot_is_gzipped_when_the_client_accepts_it(monkeypatch):
+    """LIVE-GZ (user 2026-11-02): the full ring is ~250 KB of JSON and went
+    out uncompressed; it now rides gzip_or_json like /metrics/series."""
+    import asyncio
+    import gzip
+    import json
+    import types
+
+    import omlx_uplift.fast_sampler as fs
+    from omlx_uplift.routers import metrics as mr
+
+    big = {"live": True, "tick_s": 0.5, "at": 1.0,
+           "metrics": {"k": {"ts": 1.0, "v": 1.0,
+                             "samples": [[float(i), 1.0] for i in range(5000)]}}}
+    monkeypatch.setattr(fs, "get_fast_sampler",
+                        lambda: types.SimpleNamespace(snapshot=lambda: big))
+    req = types.SimpleNamespace(headers={"accept-encoding": "gzip, br"})
+    resp = asyncio.run(mr.metrics_live(req, True))
+    assert resp.headers["content-encoding"] == "gzip"
+    assert json.loads(gzip.decompress(resp.body)) == big
+    plain = asyncio.run(mr.metrics_live(types.SimpleNamespace(headers={}), True))
+    assert "content-encoding" not in plain.headers
+    assert json.loads(plain.body) == big

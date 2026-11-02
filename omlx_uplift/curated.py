@@ -55,6 +55,10 @@ CURATED_REPO = "zviratko/omlx-uplift"
 CURATED_DIR = "curated_patches"
 TIERS = ("default", "optional")
 INDEX_NAME = "index.json"
+# CAT-TO (user 2026-11-02): catalog files are tiny; a stalled socket must
+# not hold the sync worker (and the page's busy flag) until the OS gives up.
+# Patch DIFF downloads keep the PAT-0 no-timeout default.
+CATALOG_FETCH_TIMEOUT_S = 20.0
 
 _PKG = os.path.dirname(os.path.abspath(__file__))
 # first hit wins: the copy installed inside the package (wheel, keg), then the
@@ -267,7 +271,7 @@ def list_remote(fetch=None) -> dict:
         from .patchsource import fetch_bytes as _fb
 
         def fetch(url):
-            return _fb(url)
+            return _fb(url, timeout=CATALOG_FETCH_TIMEOUT_S)
     out, errors, origins, degraded = {}, {}, {}, {}
     for tier in TIERS:
         r = _list_tier(tier, fetch)
@@ -320,7 +324,7 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
         if fetch is not None:
             return fetch(url)
         from .patchsource import fetch_bytes
-        return fetch_bytes(url)
+        return fetch_bytes(url, timeout=CATALOG_FETCH_TIMEOUT_S)
 
     listing = list_remote(_f)
     report, notes = {}, []

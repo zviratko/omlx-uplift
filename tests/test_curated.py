@@ -631,3 +631,50 @@ class ShippedCatalogIntegrity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatalogFetchTimeoutTest(unittest.TestCase):
+    """CAT-TO (user 2026-11-02): the catalog listing runs once per patches
+    page load in a worker thread. Its files are tiny, so a stalled socket
+    gets a timeout instead of holding the thread until the OS gives up.
+    Patch DIFF downloads keep the PAT-0 no-timeout default."""
+
+    def test_default_catalog_fetch_passes_a_timeout(self):
+        from unittest import mock
+
+        from omlx_uplift import patchsource
+
+        seen = []
+
+        def fake(url, insecure_tls=False, timeout=None):
+            seen.append(timeout)
+            return {"ok": False, "status": 404, "reason": "HTTP 404"}
+
+        with mock.patch.object(patchsource, "fetch_bytes", fake):
+            curated.list_remote()
+        self.assertTrue(seen, "list_remote made no fetch at all")
+        self.assertTrue(all(t == curated.CATALOG_FETCH_TIMEOUT_S for t in seen), seen)
+
+    def test_fetch_bytes_gives_up_on_a_silent_server(self):
+        import socket
+        import threading
+        import time
+
+        from omlx_uplift import patchfetch
+
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        held = []
+        t = threading.Thread(target=lambda: held.append(srv.accept()), daemon=True)
+        t.start()
+        try:
+            t0 = time.monotonic()
+            r = patchfetch.fetch_bytes(
+                "http://127.0.0.1:%d/index.json" % srv.getsockname()[1], timeout=0.5)
+            self.assertFalse(r["ok"])
+            self.assertLess(time.monotonic() - t0, 5.0)
+        finally:
+            for conn, _addr in held:
+                conn.close()
+            srv.close()

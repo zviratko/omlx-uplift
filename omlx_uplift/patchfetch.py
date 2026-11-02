@@ -71,9 +71,13 @@ def _opener(insecure_tls: bool):
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
 
 
-def fetch_bytes(url: str, insecure_tls: bool = False) -> dict:
-    """GET url. NO explicit socket timeout (HTTP client / OS defaults are
-    generous by nature — PAT-0). Returns {ok, data?, status?, reason?}."""
+def fetch_bytes(url: str, insecure_tls: bool = False,
+                timeout: float | None = None) -> dict:
+    """GET url. NO explicit socket timeout by default (HTTP client / OS
+    defaults are generous by nature — PAT-0). Returns {ok, data?, status?,
+    reason?}. TIMEOUT (seconds) is opt-in for callers fetching small files
+    where a stalled socket must not hold a worker thread for good (the
+    curated catalog listing, CAT-TO)."""
     if not url.startswith(("http://", "https://")):
         return {"ok": False, "reason": "only http(s) schemes are supported"}
     req = urllib.request.Request(
@@ -81,7 +85,8 @@ def fetch_bytes(url: str, insecure_tls: bool = False) -> dict:
                       "Accept": "*/*"})
     try:
         opener = _opener(insecure_tls)
-        with opener.open(req) as resp:  # noqa: S310 (scheme checked above)
+        kw = {"timeout": timeout} if timeout is not None else {}
+        with opener.open(req, **kw) as resp:  # noqa: S310 (scheme checked above)
             status = getattr(resp, "status", resp.getcode())
             data = resp.read(SIZE_CAP + 1)
     except urllib.error.HTTPError as exc:

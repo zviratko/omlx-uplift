@@ -251,8 +251,11 @@ LF.onFrame(() => {
     });
 });
 if (layout.liveFeed) {
-    LF.probe(fetchJson);
+    // LIVE-GZ (user 2026-11-02): the stream's first frame already replays
+    // the whole ring, so the one-shot /metrics/live snapshot is only for
+    // browsers without EventSource - fetching both loaded ~500 KB twice.
     if (window.EventSource) LF.connect();
+    else LF.probe(fetchJson);
 }
 setInterval(pollGatewayInfo, 10000);
 /* FEED-1 fallback + ACT-SLEEP-1 watchdog, slowed by POLL-BATCH-2 (user:

@@ -2011,7 +2011,13 @@ $('opt-live-feed').checked = layout.liveFeed;
 $('opt-live-feed').onchange = e => {
     layout.liveFeed = e.target.checked; C.saveLayout(localStorage, layout);
     const LF = window.Uplift.livefeed;
-    if (layout.liveFeed) { LF.probe(fetchJson); LF.connect(); }
+    if (layout.liveFeed) {
+        // re-arm the feed disable() latched, then the same source choice
+        // as boot: the stream (its first frame replays the ring), or the
+        // one-shot snapshot when EventSource is missing
+        LF.enable();
+        if (window.EventSource) LF.connect(); else LF.probe(fetchJson);
+    }
     else { LF.disable(); }
     CH.redrawCharts(); CH.drawAllMetricCharts();
 };
