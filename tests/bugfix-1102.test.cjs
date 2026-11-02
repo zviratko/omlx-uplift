@@ -229,6 +229,43 @@ test('BUG1: a retired catalog patch shows RETIRED, not a silent DISABLED', () =>
         'a sync that retired a patch repaints the table');
 });
 
+/* Run the card's delisted branch for real: slice the shipped block out of
+   uplift_patches.js and execute it against a stub cell, with ptMsg reading
+   the SHIPPED en.json (not the JS fallback) - so this pins what the operator
+   actually reads on the card, not just that a string appears in the source. */
+test('BUG1: the retired card renders the shipped chip text', () => {
+    const en = JSON.parse(fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'locales', 'en.json'), 'utf8'));
+    const start = psrc.indexOf('if (p.delisted) {');
+    assert.ok(start > 0, 'the card has a delisted branch');
+    let depth = 0, end = start;
+    for (let i = psrc.indexOf('{', start); i < psrc.length; i++) {
+        if (psrc[i] === '{') depth++;
+        else if (psrc[i] === '}') { depth--; if (!depth) { end = i + 1; break; } }
+    }
+    const block = psrc.slice(start, end);
+    const appended = [];
+    const scell = { append: x => appended.push(x) };
+    const ptChip = (label, cls, title) => ({ label, cls, title });
+    const ptMsg = (key, fallback) => en[key] || fallback;
+    const run = new Function('p', 'scell', 'ptChip', 'ptMsg', block);
+
+    run({ delisted: '2026-11-02T20:00:00+00:00',
+          delisted_reason: 'the catalog no longer serves this patch (HTTP 404)' },
+        scell, ptChip, ptMsg);
+    assert.equal(appended.length, 1, 'one chip');
+    assert.equal(appended[0].label, 'RETIRED');
+    assert.equal(appended[0].cls, 'pt-st-warn', 'a warning, not a fault red');
+    assert.match(appended[0].title, /catalog no longer serves/, 'says why: ' + appended[0].title);
+    assert.match(appended[0].title, /until you remove it/,
+        'names the one action left, which stays the operator\'s: ' + appended[0].title);
+
+    appended.length = 0;
+    run({ delisted: true }, scell, ptChip, ptMsg);   // no reason stamped
+    assert.match(appended[0].title, /removed from the curated catalog/,
+        'falls back to the shipped default wording');
+});
+
 test('BUG1: the retirement strings exist in every locale', () => {
     const keys = ['uplift.patches.retired_chip', 'uplift.patches.retired_default',
                   'uplift.patches.retired_hint', 'uplift.patches.retired_toast',
