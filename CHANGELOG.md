@@ -58,6 +58,11 @@ users never see.
 ## [2.7] — 2026-10-22
 
 - Several fixes based on clean-slate E2E tests — new users get a better experience.
+- **The labelless row under "Skip API key verification" is now the keyless-inference switch you were looking for.** The "Allow inference without API key" row shipped in a drift sync without its label text - it rendered as a bare toggle and, worse, its enable-confirmation dialog silently did nothing. Both fixed, and a new guard test fails whenever any settings row references a label that does not exist.
+- **First run no longer dead-ends at the login card.** On a server without an API key yet, `/uplift/login` now shows a create-key form (with a random-key button) and completes the same one-time loopback setup the classic page uses, instead of answering every attempt with "Invalid API key".
+- **The quantizer tells the truth about DeepSeek V4.1.** The engine only supports oQ2-oQ4 (five calibrated levels, bfloat16 output) for V4.1 models and rejects the rest; the quantizer form now hides the unsupported levels and applies the same policy as the classic page (dtype pinned to bfloat16, text-only off, sensitivity model cleared at oQ4) instead of letting you pick a level that can only fail at start.
+- **Quantizer rows now hide when they have nothing to offer.** The sensitivity-model, combine-MTP, Engram-tables rows and the enhanced (oQe) block stayed visible even when folded - the form's own CSS beat the browser's hidden rule. They now appear only when they apply (candidates exist / oQe checked / V4.1 model selected).
+- **`dev bootstrap` asks how to build.** Custom Metal kernels are presented as the answer you almost certainly want (fastest engine; skip only if this Mac cannot run Xcode); xgrammar is offered, and free formula flags can be typed in. If the Metal compiler is missing, the flow offers to install it. The answer is stored in `dev.json` and used by every `dev install`; explicit `--with-*` flags override it and are remembered. No vanilla omlx install is needed anywhere in this path.
 - Board panels got fast: heavy chart queries that took seconds now return in milliseconds, long windows arrive bucketed, and answers are compressed. Drag a range on any time-series chart to zoom.
 - Voices gained a per-voice switch that makes one available to the Uplift web chat.
 
