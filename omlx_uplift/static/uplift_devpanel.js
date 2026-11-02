@@ -657,8 +657,13 @@ async function dvStartBuild(restartAfter) {
    to guess whether it was coming back. Now a dialog watches the round trip and
    reloads only once the board answers again.
 
-   Probe: GET /uplift/api/dev/status through the kit (no raw fetch — the FE-2
-   gate owns that). The kit stamps `.status` onto its error, which is what tells
+   Probe: GET /uplift/api/dev/build-info through the kit (no raw fetch — the
+   FE-2 gate owns that). DEVSTAT-1 (user 2026-11-02): it used /dev/status,
+   which costs seconds of git and brew work per call - every 1.5 s, with the
+   calls overlapping, against a server that is busy coming back up. The
+   watcher only asks 'does the port answer', so it takes the cheapest admin
+   route, and a tick never starts while the previous probe is still out.
+   The kit stamps `.status` onto its error, which is what tells
    'the port answered' (any HTTP code, 401 included — a login page is a live
    server) apart from 'nothing is listening'. Two phases on purpose: a restart
    that has not begun yet answers perfectly normally, and reloading then would
@@ -700,7 +705,7 @@ function dvWatchRestart() {
     line.textContent = WAITING;
 
     const t0 = Date.now();
-    let sawDown = false, timer = null, done = false;
+    let sawDown = false, timer = null, done = false, probing = false;
     const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
     const shut = () => { stop(); done = true; DV_RS = null; overlay.remove(); };
     close.onclick = shut;
@@ -708,15 +713,18 @@ function dvWatchRestart() {
     reloadBtn.onclick = () => location.reload();
 
     const tick = async () => {
-        if (done) return;
+        if (done || probing) return;          // one probe out at a time
         const secs = Math.round((Date.now() - t0) / 1000);
         let answered = false;
+        probing = true;
         try {
-            await PG.fetchJson(`${API}/uplift/api/dev/status?_=${Date.now()}`);
+            await PG.fetchJson(`${API}/uplift/api/dev/build-info?_=${Date.now()}`);
             answered = true;
         } catch (e) {
             answered = !!(e && e.status);      // any HTTP reply = it is alive
             if (!answered) sawDown = true;     // refused / no route = it is down
+        } finally {
+            probing = false;
         }
         if (answered && sawDown) {
             stop(); done = true;

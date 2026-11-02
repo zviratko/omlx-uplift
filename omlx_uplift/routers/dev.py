@@ -90,7 +90,58 @@ def _iso_to_epoch(s: str) -> float:
 def _dev_service_info(formula: str = "omlx-dev") -> dict:
     """Single `brew services info <formula> --json` probe returning the raw
     service dict (or {} on failure). Replaces the back-to-back `brew
-    services list` + `brew services info` pair in _dev_status_sync."""
+    services list` + `brew services info` pair in _dev_status_sync.
+
+    DEVSTAT-1 (user 2026-11-02): each brew call costs ~0.4 s and one
+    /dev/status answer needs both services (omlx-dev and omlx), so the two
+    ride ONE call whose answer is kept for _SVC_TTL_S - back-to-back polls
+    share it. A machine where the batch call fails (brew refuses the whole
+    call when one formula name is unknown) falls back to single calls."""
+    if formula in _SVC_FORMULAS:
+        snap = _brew_services_snapshot()
+        if formula in snap:
+            return dict(snap[formula])
+    return _brew_service_info_one(formula)
+
+
+_SVC_FORMULAS = ("omlx-dev", "omlx")
+_SVC_TTL_S = 3.0
+_svc_lock = threading.Lock()
+_svc_cache: dict = {"at": 0.0, "data": None, "batch_ok": True}
+
+
+def _brew_services_snapshot() -> dict:
+    """{formula: service dict} for _SVC_FORMULAS from ONE brew call,
+    cached for _SVC_TTL_S. Empty when brew is missing or the batch call
+    fails (then callers fall back to single calls)."""
+    import subprocess
+
+    with _svc_lock:
+        now = time.monotonic()
+        if (_svc_cache["data"] is not None
+                and now - _svc_cache["at"] < _SVC_TTL_S):
+            return _svc_cache["data"]
+        data: dict = {}
+        if _svc_cache["batch_ok"]:
+            try:
+                info = subprocess.run(
+                    ["brew", "services", "info", *_SVC_FORMULAS, "--json"],
+                    capture_output=True, text=True, timeout=30)
+                rows = json.loads(info.stdout or "[]")
+                if isinstance(rows, list):
+                    for row in rows:
+                        if isinstance(row, dict) and row.get("name"):
+                            data[row["name"]] = row
+                if info.returncode != 0 and not data:
+                    _svc_cache["batch_ok"] = False   # stop retrying the batch
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        _svc_cache["at"] = now
+        _svc_cache["data"] = data
+        return data
+
+
+def _brew_service_info_one(formula: str) -> dict:
     import subprocess
 
     try:

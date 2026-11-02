@@ -13,6 +13,8 @@ no Homebrew, no network needed by tests. Never fetch a URL not in config.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -21,6 +23,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -741,7 +745,70 @@ def ensure_formula_branch(cfg: dict) -> str | None:
 def expected_tip(patches_to_apply: list[dict], cfg: dict) -> dict:
     """Dry-run materialize into a throwaway worktree sharing the clone's
     object store. Commits use a fixed --date + identical tree/parent/message,
-    so shas match a real materialize: {ok, tip} or {ok: False, reason}."""
+    so shas match a real materialize: {ok, tip} or {ok: False, reason}.
+
+    DEVSTAT-1 (user 2026-11-02): the dry run checks out the whole omlx tree
+    (~1.7k files, ~130 MiB) and replays every build patch - ~2 s of the
+    ~3 s /dev/status answer, paid on every patches-page open, after every
+    patch action and every 5 s during a build. Its result is a pure
+    function of the inputs (same base, same diffs, same stored versions
+    -> same shas), so a SUCCESSFUL answer is memoised on exactly those
+    inputs. Failures are never cached: they can be transient (a git lock
+    held by a running build)."""
+    try:
+        key = _expected_tip_key(patches_to_apply, cfg)
+    except Exception:          # no base yet / unreadable input: just run
+        key = None
+    if key is not None:
+        with _EXP_LOCK:
+            hit = _EXP_CACHE.get(key)
+            if hit is not None:
+                _EXP_CACHE.move_to_end(key)
+                return copy.deepcopy(hit)
+    r = _expected_tip_run(patches_to_apply, cfg)
+    if key is not None and r.get("ok"):
+        with _EXP_LOCK:
+            _EXP_CACHE[key] = copy.deepcopy(r)
+            while len(_EXP_CACHE) > _EXP_CACHE_MAX:
+                _EXP_CACHE.popitem(last=False)
+    return r
+
+
+_EXP_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_EXP_CACHE_MAX = 8
+_EXP_LOCK = threading.Lock()
+
+
+def _expected_tip_key(patches_to_apply: list[dict], cfg: dict) -> tuple | None:
+    """Everything a dry-run materialize reads: the clone, the base commit,
+    each patch's id/version/diff content in order, and the patch store
+    manifest (the version ladder may fall back to other stored versions,
+    and adding a version rewrites the manifest)."""
+    base = base_sha_of(cfg)
+    if not base:
+        return None
+    try:
+        st = os.stat(_patches.PatchStore().manifest_path)
+        store_fp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        store_fp = None
+    pats = []
+    for p in patches_to_apply:
+        raw = p.get("diff_bytes") or b""
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8", "surrogateescape")
+        pats.append((p["id"], p.get("version", 0),
+                     hashlib.sha256(raw).hexdigest()))
+    return (os.path.realpath(src_path(cfg)), base, tuple(pats), store_fp)
+
+
+def expected_tip_cache_clear() -> None:
+    """Test seam: drop every memoised expected_tip answer."""
+    with _EXP_LOCK:
+        _EXP_CACHE.clear()
+
+
+def _expected_tip_run(patches_to_apply: list[dict], cfg: dict) -> dict:
     path = src_path(cfg)
     tmp = tempfile.mkdtemp(prefix="uplift-devsrc-exp-")
     exp_branch = f"{DEV_BRANCH_DEFAULT}-exp-{os.path.basename(tmp)}"

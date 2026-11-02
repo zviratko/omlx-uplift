@@ -161,3 +161,30 @@ test('no blind timed reload survives anywhere in the panel', () => {
         assert.ok(src.includes(site), `lost a wiring site: ${site}`);
     assert.ok(!/(?<![.\w$])fetch\s*\(/.test(src), 'raw fetch in the panel — use the kit (FE-2)');
 });
+
+test('DEVSTAT-1: the probe asks the cheap build-info route and never overlaps', async () => {
+    // /dev/status replays every build patch in a temporary checkout (seconds
+    // per call); the watcher only needs 'does the port answer'. A slow probe
+    // must not let the 1.5 s interval stack a second request behind it.
+    const urls = [];
+    let release = null;
+    const sb = makeSandbox((u) => {
+        urls.push(u);
+        return new Promise((res) => { release = () => res({ ok: true }); });
+    });
+    const DP = mount(sb);
+    DP.dvWatchRestart();           // its own first tick: probe in flight
+    const tick = [...sb.__timers.interval.values()][0];
+    tick(); tick();                // interval fires while that probe is out
+    await new Promise(r => setImmediate(r));
+    assert.equal(urls.length, 1, 'a tick started a second probe while one was out: ' + urls.join(' '));
+    assert.ok(/\/uplift\/api\/dev\/build-info\?_=/.test(urls[0]), 'probe must use build-info, got ' + urls[0]);
+    assert.ok(!urls.some(u => /\/dev\/status/.test(u)), 'the watcher must not poll /dev/status');
+    release();
+    await new Promise(r => setImmediate(r));   // let the first probe settle
+    const second = tick();         // previous probe finished: the next tick probes again
+    assert.equal(urls.length, 2, 'the probe must resume once the previous one is back');
+    release(); await second;
+    const close = flat(sb.document.body).find(e => e.className === 'icon-btn');
+    close.onclick();
+});

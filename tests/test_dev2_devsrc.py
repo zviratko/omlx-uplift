@@ -172,6 +172,43 @@ class DevsrcFixture(unittest.TestCase):
                                cwd=devsrc.src_path(self.cfg)).stdout.strip()
         self.assertEqual(branches, "", "throwaway exp branch must be cleaned up")
 
+    def test_expected_tip_memo_skips_the_replay_for_same_inputs(self):
+        """DEVSTAT-1 (user 2026-11-02): the dry run checks out the whole
+        tree per call. Same inputs must reuse the answer; any input change
+        must replay; a failed replay is never remembered."""
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        devsrc.expected_tip_cache_clear()
+        one = [{"id": "p-one", "version": 1,
+                "diff_bytes": self._patch_diff("one")}]
+        calls = []
+        real = devsrc._expected_tip_run
+
+        def counting(p, c):
+            calls.append(1)
+            return real(p, c)
+
+        with mock.patch.object(devsrc, "_expected_tip_run", counting):
+            a = devsrc.expected_tip(one, self.cfg)
+            b = devsrc.expected_tip(one, self.cfg)
+            self.assertTrue(a["ok"], a)
+            self.assertEqual(a, b)
+            self.assertEqual(len(calls), 1, "same inputs replayed again")
+            b["tip"] = "x" * 40           # a caller's copy must not leak back
+            self.assertEqual(devsrc.expected_tip(one, self.cfg)["tip"], a["tip"])
+            two = one + [{"id": "p-two", "version": 1,
+                          "diff_bytes": self._patch_diff("two")}]
+            c = devsrc.expected_tip(two, self.cfg)
+            self.assertEqual(len(calls), 2, "a new patch set must replay")
+            self.assertNotEqual(c["tip"], a["tip"])
+            bad = [{"id": "p-bad", "version": 1,
+                    "diff_bytes": b"diff --git a/nope b/nope\n--- a/nope\n"
+                                  b"+++ b/nope\n@@ -1 +1 @@\n-x\n+y\n"}]
+            n = len(calls)
+            self.assertFalse(devsrc.expected_tip(bad, self.cfg)["ok"])
+            self.assertFalse(devsrc.expected_tip(bad, self.cfg)["ok"])
+            self.assertEqual(len(calls) - n, 2, "a failed replay was cached")
+
     def test_disable_patch_then_rematerialize_drops_commit(self):
         devsrc.ensure_clone(self.cfg)
         devsrc.fetch_sync_ref(self.cfg)

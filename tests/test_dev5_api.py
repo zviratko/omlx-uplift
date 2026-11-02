@@ -397,3 +397,52 @@ def test_vanilla_service_probe_never_raises(monkeypatch):
         return {"status": "started", "pid": 42}
     monkeypatch.setattr(dev_mod, "_dev_service_info", up)
     assert dev_mod._dev_service_up("omlx") is True
+
+
+def test_both_service_lines_ride_one_brew_call(monkeypatch):
+    # DEVSTAT-1 (user 2026-11-02): `brew services info` costs ~0.4 s per call
+    # and one /dev/status answer asks for omlx-dev AND omlx. Both must come
+    # from ONE call, and a poll right after must reuse it.
+    import subprocess
+
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        rows = [{"name": "omlx-dev", "running": True, "status": "started", "pid": 7},
+                {"name": "omlx", "running": False, "status": "none", "pid": None}]
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(dev_mod, "_svc_cache", {"at": 0.0, "data": None, "batch_ok": True})
+    assert dev_mod._dev_service_info("omlx-dev")["pid"] == 7
+    assert dev_mod._dev_service_info("omlx")["status"] == "none"
+    assert dev_mod._dev_service_info()["running"] is True
+    assert len(calls) == 1, calls
+    assert calls[0][:3] == ["brew", "services", "info"]
+    assert set(calls[0]) >= {"omlx-dev", "omlx", "--json"}
+
+
+def test_batch_brew_call_failure_falls_back_to_single_calls(monkeypatch):
+    # brew refuses the whole batch when one formula name is unknown on this
+    # machine; the omlx-dev line must still answer from its own call.
+    import subprocess
+
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(list(argv))
+        if "omlx" in argv and "omlx-dev" in argv:
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="Error")
+        rows = [{"name": argv[3], "running": True, "status": "started", "pid": 9}]
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(dev_mod, "_svc_cache", {"at": 0.0, "data": None, "batch_ok": True})
+    assert dev_mod._dev_service_info("omlx-dev")["pid"] == 9
+    n = len(calls)
+    monkeypatch.setattr(dev_mod, "_svc_cache",
+                        dict(dev_mod._svc_cache, at=0.0, data=None))
+    dev_mod._dev_service_info("omlx-dev")
+    batch = [c for c in calls[n:] if "omlx" in c and "omlx-dev" in c]
+    assert batch == [], "a failed batch must not be retried on every poll"
