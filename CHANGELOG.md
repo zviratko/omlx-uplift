@@ -14,6 +14,9 @@ users never see.
 ## Unreleased
 
 - **Chat history rows are compact and carry a "..." menu.** Rename and delete now sit in a per-row menu next to the pin, and you can delete any chat from its row, not only the open one.
+- **Metrics history keeps 7 days by default (was 30), and the metrics store is much smaller.** Expired samples are also removed at every server start. Beyond 7 days, the token-rate, request-rate and cache-efficiency charts keep hourly history from omlx's own usage data; the other charts show 7 days. Change the period under Layout settings (gear icon, "Metrics history (days)") if you want more.
+- **The patches page shows the omlx-dev build status in under a second (was about 3 s).** The restart dialog no longer loads the server while it comes back up.
+- **The Status board uses less browser CPU.** Metric cards outside the visible area, and cards with no new data, are no longer redrawn every second.
 
 ## [3.2] - 2026-11-02
 
