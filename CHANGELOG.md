@@ -13,6 +13,11 @@ users never see.
 
 ## Unreleased
 
+## [3.2] - 2026-11-02
+
+- **Chat switching to a thinking model works end to end.** The switch stopped halfway: remembered sampling values never reached their inputs and the context ring stayed stale.
+- **The model downloader lets you deselect changed optional files.** Outdated optional files are no longer force-checked into the download; required files stay locked.
+
 ## [3.1] - 2026-11-01
 
 - **Models subpages are tidier on wide screens.** Quantizer, Uploader, Downloader and Helper Models forms and result tables ride capped centered columns, each CLI assistant collapsed to one row with its default model and launch command, and the quantizer form no longer restacks when you select a model.
