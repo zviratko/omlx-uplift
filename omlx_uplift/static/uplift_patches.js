@@ -98,8 +98,11 @@ async function ptAutoSyncCurated(force) {
     try {
         const r = await ptApi('curated/sync', {});
         const rep = r.report || {};
+        // a retirement repaints the card too (RETIRED chip + switched-off
+        // lamps), exactly like an add does
         const changed = Object.values(rep)
-            .filter(x => String(x.sync).startsWith('added') || x.rescope_failed).length;
+            .filter(x => String(x.sync).startsWith('added') || x.rescope_failed
+                         || x.sync === 'delisted').length;
         const notesEl = $('pt-curated-notes');
         if (notesEl) {
             const notes = r.notes || [];
@@ -497,6 +500,21 @@ function patchRow(p, view) {
     scell.append(origin);
     scell.append(ptChip((p.state || '').replace(/_/g, ' ').toUpperCase(),
         PT_STATE_CLASS[p.state] || 'pt-st-dim', p.state_detail || ''));
+    if (p.delisted) {
+        // RETIRED (user report 2026-11-02): the catalog no longer publishes
+        // this patch, so uplift switched it off. Say that plainly - a bare
+        // DISABLED chip read as a fault when the source URL started 404ing -
+        // and name the one action left, which stays the operator's.
+        scell.append(ptChip(ptMsg('uplift.patches.retired_chip', 'RETIRED'),
+            'pt-st-warn',
+            (p.delisted_reason
+                || ptMsg('uplift.patches.retired_default',
+                         'removed from the curated catalog'))
+            + ' - '
+            + ptMsg('uplift.patches.retired_hint',
+                    'switched off automatically; the stored version stays '
+                    + 'until you remove it')));
+    }
     if (p.reversal) {
         scell.append(ptChip(ptMsg('uplift.patches.reversal_chip', 'REVERSAL'),
             'pt-st-reversal',
@@ -1451,6 +1469,11 @@ async function ptCheckNow(quiet) {
                         // that will not move — say why, and what to press
                         + (rep.reason ? ' — ' + rep.reason : ''));
             if (rep.check === 'obsolete') return id + ': ' + ptMsg('uplift.patches.obsolete', 'obsolete');
+            if (rep.check === 'delisted')
+                return id + ': ' + ptMsg('uplift.patches.retired_toast',
+                    'retired from the catalog - switched off; the stored '
+                    + 'version stays until you remove it')
+                    + (rep.reason ? ' (' + rep.reason + ')' : '');
             if (rep.check === 'error') return id + ': ' + ptMsg('uplift.patches.check_error', 'check failed') + ' — ' + rep.reason;
             return null;
         }).filter(Boolean);

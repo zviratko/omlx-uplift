@@ -495,6 +495,16 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                 store.save(manifest)
     for tier, reason in listing["errors"].items():
         notes.append(f"tier {tier}: {reason}")
+    # RETIRED ENTRIES (user report 2026-11-02): a patch we deleted from the
+    # catalog keeps its store row on every machine that installed it, and its
+    # source starts 404ing. Decide it here, where the listing proves what is
+    # published, and only when BOTH tiers answered - a tier that failed to
+    # list would make its patches look retired. Never a delete.
+    if _listing_trustworthy(listing):
+        for pid in sweep_delisted(store, listing):
+            report[pid] = {"sync": "delisted", "disabled": True}
+            notes.append(f"{pid}: retired from the catalog - disabled; the "
+                         "stored version stays until you remove it")
     for tier, reason in (listing.get("degraded") or {}).items():
         # served, just not from the repository: the operator must be able to
         # tell "older than upstream" from "catalog unavailable" (mruu
@@ -529,3 +539,126 @@ def adopt(store, patch_id: str) -> dict:
     p["curated_adopted"] = True
     store.save(manifest)
     return {"ok": True, "id": patch_id}
+
+
+# ------------------------------------------------------- retired (delisted)
+# Retiring a curated patch means deleting its manifest from the catalog.
+# That does NOT uninstall it anywhere: every machine that installed it keeps
+# its own store row, still enabled, and its source URL starts answering
+# 404. The drift pass then printed "source re-gate failed - HTTP 404 ...
+# (stored version unchanged)" (user report 2026-11-02, audio-deps-in-base):
+# true, but it reads as a gate fault, and the card stayed green 'applied'
+# forever because a patch superseded by a DIFFERENT upstream fix (that one
+# landed in the formula, not in pyproject) can never gate 'already'.
+# Retiring now also DISABLES the entry, which is the only honest automatic
+# consequence of a source the catalog no longer publishes. Deleting it is
+# never automatic: the row, its stored diff bytes and its backups stay, the
+# operator removes it in the dashboard when they agree.
+DELISTED_DETAIL = ("retired from the patch catalog - disabled; the stored "
+                   "version stays until you remove it")
+
+
+def _listed_keys(listing: dict) -> tuple:
+    """(ids, normalized sources) of everything the catalog currently lists."""
+    ids, srcs = set(), set()
+    for tier in TIERS:
+        for e in listing.get("tiers", {}).get(tier, []):
+            if e.get("id"):
+                ids.add(e["id"])
+            n = norm_source(e.get("source"))
+            if n:
+                srcs.add(n)
+    return ids, srcs
+
+
+def is_delisted(p: dict) -> bool:
+    return bool(p.get("delisted"))
+
+
+def _listing_trustworthy(listing: dict) -> bool:
+    """May a sweep act on this listing? Only when BOTH tiers actually
+    enumerated the catalog through a source that distinguishes 'empty' from
+    'unknown': the remote index or this version's bundled seed. The legacy
+    contents API answers a 404 with an EMPTY tier, so a catalog that moved
+    (the published-coordinate incident) would read as 'every curated patch is
+    retired' and switch the machine's whole patch set off. Absence of
+    evidence is not evidence of retirement."""
+    if listing.get("errors"):
+        return False
+    origins = listing.get("origins") or {}
+    return all(origins.get(t) in ("remote", "bundled") for t in TIERS)
+
+
+def retire(store, patch_id: str, reason: str = "") -> dict:
+    """Mark a catalog patch as no longer published and switch it off.
+    Idempotent, and it never deletes anything (see the block comment)."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    if p.get("delisted"):
+        return {"ok": True, "id": patch_id, "already": True}
+    # disable FIRST: set_enabled saves its own reload, so anything stamped on
+    # this copy afterwards would be discarded (store-write ordering rule)
+    if p.get("enabled"):
+        patchsource.set_enabled(store, patch_id, False)
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {patch_id}"}
+    p["delisted"] = patches.now_iso()
+    p["delisted_reason"] = reason or "the catalog no longer lists this patch"
+    p["state"] = "disabled"
+    p["state_detail"] = DELISTED_DETAIL
+    store.save(manifest)
+    _log.info("patch %s retired from the catalog: %s", patch_id,
+              p["delisted_reason"])
+    return {"ok": True, "id": patch_id, "disabled": True}
+
+
+def unretire(store, patch_id: str) -> dict:
+    """The entry is back in the catalog: drop the retirement stamp so sync
+    and the drift check treat it as an ordinary catalog patch again. The
+    enabled flag is NOT touched - re-enabling is the operator's call."""
+    manifest = store.load()
+    p = store.find(manifest, patch_id)
+    if p is None or not p.get("delisted"):
+        return {"ok": True, "id": patch_id, "changed": False}
+    p.pop("delisted", None)
+    p.pop("delisted_reason", None)
+    store.save(manifest)
+    return {"ok": True, "id": patch_id, "changed": True}
+
+
+def sweep_delisted(store, listing: dict) -> list:
+    """Retire catalog patches a SUCCESSFUL listing no longer names.
+
+    Identity is id OR source (a renamed entry with the same source is still
+    published). Only `curated` rows the user has not adopted are candidates,
+    and only when the tier listing actually answered: a failed or degraded
+    listing must never switch anything off. Returns the retired ids."""
+    ids, srcs = _listed_keys(listing)
+    manifest = store.load()
+    out = []
+    for p in manifest.get("patches", []):
+        pid = p.get("id")
+        if not pid or p.get("curated_adopted"):
+            continue
+        n = norm_source(p.get("source"))
+        listed = pid in ids or (n is not None and n in srcs)
+        if listed:
+            if p.get("delisted") and unretire(store, pid).get("changed"):
+                _log.info("patch %s is back in the catalog - retirement stamp "
+                          "cleared; it stays %s until you enable it",
+                          pid,
+                          "enabled" if p.get("enabled") else "disabled")
+            continue
+        if not p.get("curated"):
+            continue          # the user's own patch: the catalog says nothing
+        res = retire(store, pid, "removed from the curated catalog")
+        # 'already' = retired on an earlier pass and the operator has since
+        # made their own choice about it (maybe they re-enabled it). Saying
+        # 'delisted' again would re-read as a fresh act every sync.
+        if res.get("ok") and not res.get("already"):
+            out.append(pid)
+    return out

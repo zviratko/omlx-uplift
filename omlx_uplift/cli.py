@@ -264,9 +264,12 @@ def _print_patch_status(out: dict, stream=None) -> None:
         return
 
     def verdict(p):
-        # precedence is deliberate: off first, then a human decision that
-        # blocks applying (HELD/REVIEW), then the keg-moved fact (RE-APPLY)
-        # which outranks a stale 'applied' stamp, then the stored state.
+        # precedence is deliberate: a retired catalog patch first (it needs an
+        # operator decision, and 'OFF' would hide why), then off, then a human
+        # decision that blocks applying (HELD/REVIEW), then the keg-moved fact
+        # (RE-APPLY) which outranks a stale 'applied' stamp, then state.
+        if p.get("delisted"):
+            return "RETIRED", "33"
         if not p.get("enabled"):
             return "OFF", "90"
         if p.get("requires_approval"):

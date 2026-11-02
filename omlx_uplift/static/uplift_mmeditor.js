@@ -100,7 +100,25 @@ function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
    saves live — no reload, no lie. */
 function seIsRuntimeKey(k) {
     return k === 'model_type_override' ||
-        window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(k);
+        window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(k) ||
+        seCtxQueuedRebuild(k);
+}
+/* The one CONDITIONAL reload key: max_context_window is engine material only
+   where the queued window passes the checkpoint's native one (YaRN scaling
+   baked into the rope tables); inside the native window it is a request-time
+   limit the running engine picks up live. Deciding it from the static key set
+   was wrong in both directions — a 32k tweak on a 128k model asked for a
+   restart it did not need, and a 262k -> 524k tweak on a Qwen3.5 reloaded the
+   model behind a plain SAVE (user report 2026-11-02). Same measurement the
+   server makes, so the row mark, the rail badge and the deferred split agree. */
+function seCtxQueuedRebuild(k) {
+    if (k !== 'max_context_window') return false;
+    const t = seTab();
+    if (!t || !seFormModel) return false;
+    // the tab's own ORIGINAL (stored) window vs what is queued now; for a
+    // profile origVals is base-merged, i.e. the value actually in force
+    const orig = (t.origVals || seOrig || {})[k];
+    return window.UpliftModelSpec.ctxRebuilds(seFormModel, orig, seValues[k]);
 }
 function seRuntimeDirtyKeys() { return seDirtyKeys().filter(seIsRuntimeKey); }
 function sePlainDirtyKeys() { return seDirtyKeys().filter(k => !seIsRuntimeKey(k)); }
@@ -205,7 +223,8 @@ function seEffLive(key, input) {
 function seUpdateSaveBtn() {
     const b = document.getElementById('se-save'); if (!b) return;
     const rb = document.getElementById('se-restart');
-    const n = seDirtyKeys().length + (seTtsIsDirty() ? 1 : 0);
+    const at = seTab();
+    const activeN = (at ? seTabChangeCount(at) : 0) + (seTtsIsDirty() ? 1 : 0);
     // U84: the label counts changes across ALL tabs (one press commits
     // every one of them). The active tab's own change count (dirty keys +
     // kwargs + expose/api flips — seTabChangeCount) decides the single-tab
@@ -213,9 +232,14 @@ function seUpdateSaveBtn() {
     // enables SAVE instead of leaving a CHANGES entry nobody could commit.
     const all = seTabs.reduce((s, t) => s + seTabChangeCount(t), 0)
         + (seTtsIsDirty() ? 1 : 0);
-    const at = seTab();
-    const activeN = at ? seTabChangeCount(at) : 0;
+    // KWARGS DEAD END (user report 2026-11-02, same class as U84's flip):
+    // the dirty-KEY set never carries chat-template kwargs (they live in an
+    // entry list by design, R10-6), so an effort/thinking kwarg edit counted
+    // in the tab total but in nothing that armed the button — SAVE stayed
+    // grey and the queued change could not be committed from the tab holding
+    // it. The active tab's TOTAL is what arms and labels the button.
     const multi = all > activeN;
+    const shown = multi ? all : activeN;
     const onProfile = !seIsBaseTab();
     // U41 two-phase (user design): SAVE commits EVERY dirty key — live keys
     // via the sparse classic PUT, runtime keys via the uplift deferred
@@ -226,9 +250,8 @@ function seUpdateSaveBtn() {
     const pending = onProfile ? 0 : Object.keys(seDeferred).length;
     const runtimeDirty = !onProfile && loaded ? seRuntimeDirtyKeys().length : 0;
     const awaitingReload = pending + runtimeDirty;
-    b.classList.toggle('queued', n > 0);
+    b.classList.toggle('queued', shown > 0);
     b.classList.toggle('restart-mode', false);
-    const shown = multi ? all : n;
     const tabTxt = multi ? ' ALL' : (onProfile ? ' PROFILE' : '');
     b.textContent = shown
         ? ('SAVE' + tabTxt + ' (' + shown + ')')
@@ -290,7 +313,43 @@ function renderEdChanges() {
                                cur: seTts.vals[k] || '', isSecret: false,
                                display: disp });
     }
+    // CHAT TEMPLATE KWARGS (user report 2026-11-02): these bypass the dirty
+    // KEY set by design, so the rail never showed them either — an effort or
+    // thinking kwarg edit armed nothing the user could see. One line per
+    // parameter that actually moved (added, changed or removed), named the
+    // way the payload names it.
+    for (const l of seKwargChanges(t)) entries.push(l);
     window.UpliftDirty.renderChangesBox(box, entries, C.tf);
+}
+/* payload-shaped view of one tab's kwargs: {name: value} + the forced set.
+   Same mapping modelspec.buildPayload applies, so the rail cannot promise a
+   line the save will not write. */
+function seKwargMap(entries) {
+    const out = {}, forced = {};
+    const S = window.UpliftModelSpec;
+    for (const e of entries || []) {
+        const k = S.kwargIdentity(e);
+        if (!k) continue;
+        out[k] = e.type === 'reasoning_effort' && e.custom ? e.customValue : e.value;
+        if (e.force) forced[k] = true;
+    }
+    return { vals: out, forced: forced };
+}
+function seKwargChanges(t) {
+    if (!t) return [];
+    const cur = (seTab() === t && t.id === 'base') ? seValues : (t.workVals || {});
+    const a = seKwargMap((t.origVals || {}).ctKwargEntries);
+    const b = seKwargMap(cur.ctKwargEntries);
+    const out = [];
+    for (const k of [...new Set([...Object.keys(a.vals), ...Object.keys(b.vals)])].sort()) {
+        const av = k in a.vals ? a.vals[k] : '', bv = k in b.vals ? b.vals[k] : '';
+        const af = !!a.forced[k], bf = !!b.forced[k];
+        if (String(av) === String(bv) && af === bf) continue;
+        const nm = 'chat_template_kwargs.' + k + (bf ? ' (forced)' : '');
+        out.push({ key: nm, orig: af ? av + ' (forced)' : av, cur: bv,
+                   isSecret: false, display: MM_GLUE.gsDisplay });
+    }
+    return out;
 }
 
 /* ---- spec-driven settings form (parity with classic _modal_model_settings) ---- */
@@ -470,6 +529,15 @@ function seBind(kind, key, opts) {
     // reload trigger on a loaded model — badge it at definition, all fields.
     if (key === 'model_type_override' || window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(key))
         name.append(' ', seReloadBadge([key]));
+    else if (key === 'max_context_window' && window.UpliftModelSpec.yarnFamily(seFormModel))
+        // CONDITIONAL: on these families a window past the native one is
+        // baked into the rope tables at load. Rendered whenever it CAN apply
+        // (never toggled per keystroke — dirty state must not move the form),
+        // with the bound spelled out so the badge is true either way.
+        name.append(' ', seReloadBadge([key],
+            C.tf('uplift.se.ctx.reload_title',
+                'A context window above the model default rebuilds the loaded '
+                + 'engine (model reload); one at or below it applies live.')));
     if (opts && opts.hint) {
         const h = document.createElement('small');
         h.className = 'se-hint';
@@ -554,13 +622,14 @@ function seRefreshGates(root) {
    it built reflowed the form when a master switch flipped. Dependent
    controls now live in gated sub-blocks that are always rendered. */
 
-function seReloadBadge(keys) {
+function seReloadBadge(keys, title) {
     // item 8: a settings control that feeds the engine runtime signature
-    // reloads a loaded model on change — badge it.
+    // reloads a loaded model on change — badge it. `title` overrides the
+    // wording for a control whose reload is conditional (context scaling).
     const b = document.createElement('span');
     b.className = 'se-reload-badge';
     b.textContent = '⟳ RELOAD';
-    b.title = C.tf('uplift.se.reload_badge.title',
+    b.title = title || C.tf('uplift.se.reload_badge.title',
         'Changing this setting rebuilds the loaded engine (model reload).');
     return b;
 }
@@ -1066,22 +1135,31 @@ function renderEditorFields(container) {
     if (seIsBaseTab() || !seTab().template)
         g.append(aliasRow());
     if (!gguf) g.append(typeRow());   // UP-18 (3): GGUF hides Model Type
-    if (!S.isDiffusion(m))
-            if (m.thinking_default !== undefined && m.thinking_default !== null || seValues.enable_thinking != null) {
-                const tv = seValues.enable_thinking;
-                g.append(seBind('select', 'enable_thinking', {
-                    label: C.tf('uplift.ui.enable_thinking', 'Enable Thinking'), disabled: !!m.thinking_forced,
-                    hint: 'Enable reasoning/thinking mode for this model.',
-                    options: [{ value: '', label: m.thinking_default === true
-                                   ? 'Using model default (on)' : 'Using model default (off)' },
-                              { value: 'true', label: 'On' }, { value: 'false', label: 'Off' }],
-                }));
-                // select needs string values; store real bool/null back
-                const sel = g.lastChild.querySelector('select');
-                sel.value = tv === true ? 'true' : tv === false ? 'false' : '';
-                sel.addEventListener('change', () => {
-                    seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
-            }
+    /* Classic renders the thinking switch for EVERY non-diffusion LLM/VLM
+       (_modal_model_settings.html, ms_llm_non_diffusion) and lets the model's
+       own default show through when the user has not set one. Uplift hid the
+       row whenever the server reported no default (thinking_default null:
+       Llama, Qwen2, SmolLM, gemma3n, ...), so those models had NO way to turn
+       thinking on or off from the editor at all (user report 2026-11-02:
+       "did we lose that knob?"). The row is always there now; only the
+       inherit option claims less when the server says less - it names the
+       model default without asserting whether it is on or off. */
+    if (!S.isDiffusion(m)) {
+        const tv = seValues.enable_thinking;
+        g.append(seBind('select', 'enable_thinking', {
+            label: C.tf('uplift.ui.enable_thinking', 'Enable Thinking'), disabled: !!m.thinking_forced,
+            hint: C.tf('modal.model_settings.enable_thinking_hint',
+                       'Enable reasoning/thinking mode for this model.'),
+            options: [{ value: '', label: C.tf('modal.model_settings.enable_thinking_default',
+                                               'Using model default') },
+                      { value: 'true', label: 'On' }, { value: 'false', label: 'Off' }],
+        }));
+        // select needs string values; store real bool/null back
+        const sel = g.lastChild.querySelector('select');
+        sel.value = tv === true ? 'true' : tv === false ? 'false' : '';
+        sel.addEventListener('change', () => {
+            seValues.enable_thinking = sel.value === '' ? null : sel.value === 'true'; });
+    }
     g.append(seBind('number', 'ttl_seconds', { label: 'TTL (Seconds)',
         min: 0, step: 60, disabled: !!(m && m.pinned),   // UP-18 (6): classic MO:385
         effHint: seEffHint('ttl_seconds'),
@@ -1923,14 +2001,14 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
         } else {
             key = document.createElement('input');
             key.type = 'text'; key.value = e.key || ''; key.placeholder = 'key';
-            key.addEventListener('input', () => { e.key = key.value; });
+            key.addEventListener('input', () => { e.key = key.value; seUpdateSaveBtn(); });
         }
         let val;
         if (e.type === 'enable_thinking') {
             val = document.createElement('select');
             ['true', 'false'].forEach(v => { const o = document.createElement('option'); o.value = v; val.append(o); });
             val.value = String(e.value);
-            val.addEventListener('change', () => { e.value = val.value; });
+            val.addEventListener('change', () => { e.value = val.value; seUpdateSaveBtn(); });
         } else if (e.type === 'reasoning_effort') {
             val = document.createElement('select');
             // R10-10: offer the model-reported effort options; fall back to
@@ -1945,19 +2023,20 @@ function renderCtKwargs(container) {   // R10-5: container is the section body
             val.value = e.custom ? '__custom__' : e.value;
             val.addEventListener('change', () => {
                 if (val.value === '__custom__') { e.custom = true; } else { e.custom = false; e.value = val.value; }
+                seSyncKwEntries();
                 renderEditorFields(editorRoot);
             });
             if (e.custom) {
                 const cv = document.createElement('input');
                 cv.type = 'text'; cv.value = e.customValue || '';
-                cv.addEventListener('input', () => { e.customValue = cv.value; });
+                cv.addEventListener('input', () => { e.customValue = cv.value; seUpdateSaveBtn(); });
                 row.append(key, val, cv);
             }
         } else {
             val = document.createElement('input');
             val.type = 'text'; val.placeholder = 'value';
             val.value = String(e.value == null ? '' : e.value);
-            val.addEventListener('input', () => { e.value = val.value; });
+            val.addEventListener('input', () => { e.value = val.value; seUpdateSaveBtn(); });
         }
         const rm = document.createElement('button');
         rm.className = 'se-btn'; rm.textContent = '×';
@@ -2750,7 +2829,7 @@ function refreshDivergence() {
     const baseP = seBasePayload();
     const out = [];
     for (const p of (MM_DATA.profiles || [])) {
-        const diff = S.runtimeDiff(baseP, seProfilePayload(p));
+        const diff = S.runtimeDiff(baseP, seProfilePayload(p), seFormModel);
         if (diff.length)
             out.push({ name: p.name, display_name: p.display_name || p.name,
                        api_name: p.api_name || null, diff });
@@ -4439,7 +4518,10 @@ async function saveProfileTab(panel) {
         msg.textContent = 'error: ' + D.errText(e);
         MM_GLUE.toast(C.t('uplift.toast.profile_save_failed', {msg: D.errText(e)}));
     } finally {
-        if (btn) btn.disabled = seDirtyKeys().length === 0;
+        // the tab's TOTAL, not the dirty-key set: a kwargs-only edit on a
+        // profile must re-arm SAVE exactly like a widget edit did (same blind
+        // spot as the button's initial arming)
+        if (btn) btn.disabled = !seTabHasChanges(seTab());
     }
 }
 function seProfileSettingsFrom(vals) {

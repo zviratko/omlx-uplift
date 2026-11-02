@@ -2197,6 +2197,13 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
                                       "clean base re-gate still applies the "
                                       "diff, upstream does NOT carry it "
                                       "(restored to applied)")
+                elif rep.get("check") == "delisted":
+                    # a RETIRED catalog patch, not a failing source: say what
+                    # happened to it and what is left for the operator (user
+                    # report 2026-11-02 - this line used to read
+                    # "source re-gate failed - HTTP 404")
+                    _emit(res, "out", f"{pid}: retired from the patch catalog"
+                                      f" - {rep.get('reason') or 'no longer published'}")
                 elif rep.get("check") == "error":
                     # LOG-2: the drift gate's failure used to vanish here while
                     # fetch_and_gate printed an unattributed 'gate REJECTED' —

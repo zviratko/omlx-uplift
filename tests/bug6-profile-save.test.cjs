@@ -61,7 +61,7 @@ function harness({ dirtyKeys = ['max_context_window'], putFails = null,
         'MM_GLUE', 'C', 'D', 'API', 'window', 'document',
         'seBaseVals', 'seModel', 'MM_DATA', 'seFormModel',
         'seTab', 'seDirtyKeys', 'seNormalizeKwargs', 'seModelEntry',
-        'seRenderTabs', 'seUpdateSaveBtn',
+        'seRenderTabs', 'seUpdateSaveBtn', 'seTabHasChanges',
         region + '\nreturn saveProfileTab;'
     )(
         MM_GLUE, C, D, '/admin', window,
@@ -69,8 +69,11 @@ function harness({ dirtyKeys = ['max_context_window'], putFails = null,
         { max_context_window: 8192, temperature: 0.7 }, 'M1',
         { profiles: [] }, {},
         () => tab, () => st.dirty, () => {}, () => ({}),
-        () => {}, () => { st.dirty = []; btn.disabled = true; }   // success path re-derives from state
-    );
+        () => {}, () => { st.dirty = []; btn.disabled = true; },   // success path re-derives from state
+        // the button's final state comes from the TAB's change total, and a
+        // successful commit clears t.dirty — same answer the real
+        // seTabHasChanges gives for these fixtures (no kwargs edits in them)
+        t => !!(t && t.dirty && t.dirty.size));
     return { run: () => f(panel), log, msg, btn, tab, st };
 }
 

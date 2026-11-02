@@ -108,6 +108,10 @@ def fetch_and_gate(source: dict, tree_root: str,
                      f"{source.get('repo', '')}#{source.get('pr', '')}",
                      fetched["reason"])
         return {"ok": False, "stage": "fetch", "reason": fetched["reason"],
+                # the HTTP code rides along: a 404 on a catalog URL is a
+                # RETIREMENT, a 5xx or a dead socket is a transient failure,
+                # and check_all must not read them the same way
+                "status": fetched.get("status"),
                 "advisories": advisories}
     gate = validate(fetched["data"], tree_root, overrides=overrides,
                     reverse=reverse, skip_patterns=skip_patterns,
@@ -1035,6 +1039,11 @@ def view(store, tree_root: str, keg: str | None) -> dict:
             "description": p.get("description") or "",
             "curated": p.get("curated"),
             "curated_adopted": bool(p.get("curated_adopted")),
+            # retired from the catalog (curated.retire): a distinct fact from
+            # 'the user switched it off', so the card can say so and offer
+            # Remove instead of an Enable that has no source behind it
+            "delisted": p.get("delisted"),
+            "delisted_reason": p.get("delisted_reason") or "",
             # PAT-TABLE: checkbox + Manage state, computed server-side so
             # every surface (both boards, CLI view) reads one truth.
             # surfaces.*.checked = what the VANILLA / DEV boxes show;
@@ -1143,9 +1152,13 @@ def set_enabled(store, patch_id: str, enabled: bool,
         _ver = (store.get_version(p, p.get("desired_version")) or {})
         applied = bool(_ver.get("applied") or _ver.get("kegs")
                        or _ver.get("dev_applied"))
+        # WHEN the restore happens is a scope fact (applies_phrase is the one
+        # source): a build patch comes back only when omlx-dev is next
+        # compiled, so telling its operator to restart the server was a lie
+        # about the action that actually clears it.
         store.set_state(
             p, "disabled",
-            "disabled — restores on next restart" if applied
+            "disabled — restores on %s" % applies_phrase(p) if applied
             else "disabled — nothing to restore (never applied)")
     store.save(manifest)
     return {"ok": True, "state": p["state"], "approved": approved_now}
@@ -1915,10 +1928,22 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
     manifest = store.load()
     reports = {}
     changed_any = False
+    to_retire = []          # retired catalog rows, applied after the save
     for p in manifest.get("patches", []):
         src = p.get("source") or {}
         pid = p.get("id")
         if src.get("kind") not in ("github_pr", "url"):
+            continue
+        if p.get("delisted"):
+            # RETIRED (user report 2026-11-02): the catalog no longer
+            # publishes this source, so re-fetching it can only produce a 404
+            # that reads as a gate fault. curated.sync decided it once, with
+            # the listing as proof; say the same thing here and change
+            # nothing (the entry stays stored and disabled until the operator
+            # removes it).
+            reports[pid] = {"check": "delisted",
+                            "reason": p.get("delisted_reason")
+                            or "removed from the curated catalog"}
             continue
         root, overrides, skip, kind = _gate_root_selection(
             store, manifest, p, tree_root, dev_root=dev_root)
@@ -1959,6 +1984,28 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                     reports[pid] = {"check": "obsolete"}
                     changed_any = True
                     continue
+            if (result.get("stage") == "fetch"
+                    and result.get("status") == 404
+                    and p.get("curated") and not p.get("curated_adopted")):
+                # A catalog row whose own URL 404s is a patch the catalog
+                # retired (the sync lane is the normal decider; a box that
+                # only ever runs `patch check` must not read that as a gate
+                # fault). Queue the same verdict and the same rule: disabled,
+                # stored, removable by the operator only.
+                #
+                # ORDER IS LOAD-BEARING: retire() writes through set_enabled,
+                # which saves its own reload - and this function saves ITS
+                # manifest copy at the end of the loop. Doing it inline made
+                # that final save restore the pre-retirement row (enabled,
+                # un-stamped), i.e. the fix silently undid itself.
+                to_retire.append(
+                    (pid, "the catalog no longer serves this patch (HTTP 404)"))
+                reports[pid] = {"check": "delisted",
+                                "reason": "the catalog no longer serves this "
+                                          "patch (HTTP 404) - disabled; the "
+                                          "stored version stays until you "
+                                          "remove it"}
+                continue
             reports[pid] = {"check": "error", "reason": result.get("reason"),
                             "files": _ui_files(result)}
             continue
@@ -2218,6 +2265,10 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
         changed_any = True
     if changed_any:
         store.save(manifest)
+    if to_retire:
+        from . import curated as _curated
+        for pid, why in to_retire:
+            _curated.retire(store, pid, why)
     return {"ok": True, "reports": reports}
 
 

@@ -701,13 +701,40 @@
         return payload;
     }
 
+    /* ---- YaRN context scaling (omlx/patches/qwen35_yarn.py) -------------
+       A max_context_window ABOVE the checkpoint's native one is not a
+       request-time limit on these families: the factor is baked into the
+       rope tables when the engine is built, so engine_pool carries it in the
+       runtime signature and the server unloads the model to re-apply it.
+       Exact family match, same as upstream (no prefix rules). ---- */
+    const YARN_MODEL_TYPES = new Set(['qwen3_5', 'qwen3_5_moe', 'qwen4_exp']);
+    const yarnFamily = m => YARN_MODEL_TYPES.has(normType(m && m.config_model_type));
+    function yarnFactor(model, window) {
+        if (!yarnFamily(model)) return null;
+        const native = Number(model && model.model_context_length);
+        const w = Number(window);
+        if (!Number.isFinite(native) || native <= 0 || !Number.isFinite(w) || w <= 0)
+            return null;
+        return w > native ? w / native : null;
+    }
+    /* Does moving this model's context window rebuild the loaded engine?
+       Only when the scaling factor itself moves: 8k -> 16k under a 32k native
+       window changes nothing, 32k -> 64k on a YaRN family rebuilds it. */
+    function ctxRebuilds(model, oldWindow, newWindow) {
+        if (!yarnFamily(model)) return false;
+        return yarnFactor(model, oldWindow) !== yarnFactor(model, newWindow);
+    }
+
     /* ---- runtime-signature replica (engine_pool._engine_runtime_signature)
        A setting change reloads a loaded engine exactly when the signature of
        the effective settings differs (or model_type_override flips). Used by
        the editor for the RELOAD field badges and the RUNTIME DIVERGENCE
        warning between base and profiles. Field presence matters here, not
-       value dirtiness: dependent fields count only while their feature is on. ---- */
-    function runtimeSignature(payload) {
+       value dirtiness: dependent fields count only while their feature is on.
+       `model` (the /admin/api/models entry) is optional: without it the
+       context-scaling entry cannot be judged, so it stays out - every other
+       signature entry is payload-only. ---- */
+    function runtimeSignature(payload, model) {
         const d = payload || {};
         const has = v => v !== null && v !== undefined && v !== '';
         const sig = {};
@@ -726,6 +753,16 @@
             add('mtp_adaptive_max_depth', d.mtp_adaptive_max_depth ?? null);
             add('mtp_fixed_depth', d.mtp_fixed_depth ?? null);
         }
+        // engine_pool adds the load-time activation recast UNCONDITIONALLY
+        // (engine_pool.py, right after the MTP pair): any change rebuilds a
+        // loaded engine, whatever the model family.
+        add('activation_fp16_enabled', !!d.activation_fp16_enabled);
+        // The YaRN factor the server derives from the window (see
+        // yarnFactor). Named after the setting that owns it so the row, the
+        // CHANGES line and the divergence banner all read "max_context_window
+        // 32768 -> 131072" instead of an opaque factor.
+        const yarn = yarnFactor(model, d.max_context_window);
+        if (yarn !== null) add('max_context_window', yarn);
         const tqOn = !!d.turboquant_kv_enabled;
         add('turboquant_kv_enabled', tqOn);
         if (tqOn) {
@@ -822,6 +859,10 @@
         // material (engine_pool.py add('embedding_audio_enabled', …))
         'embedding_audio_enabled', 'embedding_audio_max_seconds',
         'mtp_enabled', 'mtp_adaptive_max_depth', 'mtp_fixed_depth',
+        // the load-time activation recast is signature material on EVERY
+        // model (engine_pool adds it unconditionally) - a plain SAVE used to
+        // hand it to the classic PUT and the model reloaded under the user
+        'activation_fp16_enabled',
         'turboquant_kv_enabled', 'turboquant_kv_scheme', 'turboquant_kv_bits',
         'a8_prefill_enabled', 'a8_prefill_min_tokens',
         'qwen35_ane_prefill_enabled', 'qwen35_ane_prefill_sequence_length',
@@ -850,6 +891,10 @@
         'dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode',
         'mtp_enabled', 'vlm_mtp_enabled', 'vlm_mtp_draft_model',
         'vlm_mtp_draft_block_size',
+        // NOT listed here on purpose: max_context_window. It is signature
+        // material only where the window passes the native one (YaRN), so the
+        // editor classifies it per model + per queued value through
+        // ctxRebuilds() instead of pretending every context tweak rebuilds.
     ]);
     /* Diff two settings payloads (payload shape) through the signature:
        returns [{key, base, other}] of settings-signature entries that differ.
@@ -860,8 +905,9 @@
        master switch is ON — so a master flip (off -> on) made the signature
        pair `null` vs `"128"` while the RAW base value was 128 all along: a
        reload IS forced (the master row says it), the knob row was noise. */
-    function runtimeDiff(basePayload, otherPayload) {
-        const a = runtimeSignature(basePayload), b = runtimeSignature(otherPayload);
+    function runtimeDiff(basePayload, otherPayload, model) {
+        const a = runtimeSignature(basePayload, model),
+              b = runtimeSignature(otherPayload, model);
         const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
         const out = [];
         for (const k of [...keys].sort()) {
@@ -1197,6 +1243,7 @@
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
              runtimeSignature, runtimeDiff, sigMasterKey, RUNTIME_SETTING_KEYS,
+             YARN_MODEL_TYPES, yarnFamily, yarnFactor, ctxRebuilds,
              effDefault, requestDiff, eqBase, REQUEST_DIFF_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,
              specprefillCandidates, dflashCandidates, vlmMtpDrafters,
