@@ -386,9 +386,10 @@ function syncThinkInputs(c) {
     var bud = gid('chat-native-think-budget');
     // The model owns the stop list (UP-37(1)): a value it does not offer —
     // restored conv, profile blob, per-model snapshot from another era —
-    // paints Auto, the one stop every model has.
+    // paints Auto, the one stop every model has. think.children is a live
+    // HTMLCollection in a browser: no array methods, so borrow some().
     if (think && think.children && think.children.length &&
-        !think.children.some(function (o) { return o.value === mode; })) {
+        !Array.prototype.some.call(think.children, function (o) { return o.value === mode; })) {
         mode = 'auto';
         if (_conv) _conv.thinking = 'auto';
     }

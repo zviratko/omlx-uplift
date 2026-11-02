@@ -88,9 +88,23 @@ const { STATIC_DIR } = require('./static-src.cjs');
 const SRC = fs.readFileSync(path.join(STATIC_DIR, 'uplift_chat.js'), 'utf8');
 
 // ---- DOM stub ---------------------------------------------------------------
+// el.children is a LIVE-COLLECTION view, like a browser HTMLCollection:
+// index access, length and iteration work, Array.prototype methods
+// (some/map/filter/find/indexOf/...) are ABSENT. A plain array here kept the
+// suite green while the live page threw 'think.children.some is not a
+// function' on every switch to a thinking model. The stub's own bookkeeping
+// mutates the private _kids array instead.
+const NO_ARRAY_METHODS = new Set(Object.getOwnPropertyNames(Array.prototype)
+    .filter((k) => k !== 'length' && k !== 'constructor'));
+function liveCollection(arr) {
+    return new Proxy(arr, {
+        get(t, k, r) { return NO_ARRAY_METHODS.has(k) ? undefined : Reflect.get(t, k, r); },
+    });
+}
 function mkEl(tag, byId) {
     const el = {
-        tagName: tag, children: [], style: {}, dataset: {}, attrs: {},
+        tagName: tag, _kids: [], style: {}, dataset: {}, attrs: {},
+        get children() { return liveCollection(this._kids); },
         className: '', textContent: '', title: '', hidden: false, type: '',
         parentNode: null, isContentEditable: false,
         _value: '',
@@ -103,25 +117,25 @@ function mkEl(tag, byId) {
         // whole class of stop-list bugs.
         set value(v) {
             const s = String(v == null ? '' : v);
-            if (tag === 'select' && this.children.length &&
-                !this.children.some((o) => o.value === s)) { this._value = ''; return; }
+            if (tag === 'select' && this._kids.length &&
+                !this._kids.some((o) => o.value === s)) { this._value = ''; return; }
             this._value = (tag === 'input') ? s.replace(/[\r\n]/g, '') : s;
         },
         get id() { return this._id; },
         set id(v) { this._id = v; if (v && byId) byId[v] = this; },
         replaceChildren(...ks) {
-            this.children = ks;
+            this._kids = ks;
             ks.forEach((k) => { k.parentNode = this; });
         },
         append(...ks) { ks.forEach((k) => this.appendChild(k)); },
         appendChild(k) {
-            if (k.parentNode) {
-                const i = k.parentNode.children.indexOf(k);
-                if (i >= 0) k.parentNode.children.splice(i, 1);
+            if (k.parentNode && k.parentNode._kids) {
+                const i = k.parentNode._kids.indexOf(k);
+                if (i >= 0) k.parentNode._kids.splice(i, 1);
             }
-            this.children.push(k); k.parentNode = this; return k;
+            this._kids.push(k); k.parentNode = this; return k;
         },
-        insertBefore(k) { this.children.unshift(k); k.parentNode = this; return k; },
+        insertBefore(k) { this._kids.unshift(k); k.parentNode = this; return k; },
         _lis: {},
         addEventListener(t2, fn) { (this._lis[t2] = this._lis[t2] || []).push(fn); },
         removeEventListener() {},
@@ -135,7 +149,7 @@ function mkEl(tag, byId) {
         getAttribute(k) { return this.attrs[k] == null ? null : this.attrs[k]; },
         remove() {
             const p = this.parentNode;
-            if (p) { const i = p.children.indexOf(this); if (i >= 0) p.children.splice(i, 1); }
+            if (p && p._kids) { const i = p._kids.indexOf(this); if (i >= 0) p._kids.splice(i, 1); }
             this.parentNode = null;
         },
         focus() {}, blur() {},
@@ -284,7 +298,7 @@ test('the think picker offers EXACTLY the selected model stops — never a stati
         convs: [{ id: 'c1', title: 'T', model: 'EFF', systemPrompt: '', messages: [] }],
     }));
     const think = win.document.getElementById('chat-native-think-mode');
-    assert.deepEqual(think.children.map((o) => o.value),
+    assert.deepEqual([...think.children].map((o) => o.value),
                      ['off', 'auto', 'low', 'medium', 'high', 'limit'],
                      'effort stops replace the static auto/on/limit/off four');
     // labels: the legacy four keep classic's thinking_mode keys, the efforts
@@ -316,6 +330,26 @@ test('a stored stop the new model lacks clamps to auto (select would drop it any
     win.M._u37b.switchChatModel('NOBUDGET');   // SW has the budget; NOBUDGET does not
     assert.equal(st.conv.thinking, 'auto', 'the illegal limit stop is gone from state');
     assert.equal(think.value, 'auto', 'and the picker says the same — no blank select');
+});
+
+test('switching to a thinking model runs the whole switch on a real DOM collection', async () => {
+    // Live regression: syncThinkInputs called think.children.some(...), which
+    // a browser HTMLCollection does not have. The TypeError aborted the switch
+    // after the picker repaint, so the new model's sampling values never
+    // reached their inputs.
+    const win = await booted(makeHarness({
+        convs: [{ id: 'c1', title: 'T', model: 'PLAIN', systemPrompt: '', messages: [] }],
+    }));
+    const st = win.M._state();
+    st.conv.modelSettingsByModel.EFF = { thinking: 'medium', thinkingBudget: null,
+                                         generation: { temperature: 0.4 } };
+    const think = win.document.getElementById('chat-native-think-mode');
+    const temp = win.document.getElementById('chat-native-gen-temperature');
+    assert.equal(typeof think.children.some, 'undefined', 'the stub models a live collection');
+    win.M._u37b.switchChatModel('EFF');
+    assert.equal(st.conv.thinking, 'medium', 'EFF s stored stop is restored');
+    assert.equal(think.value, 'medium', 'and painted');
+    assert.equal(temp.value, '0.4', 'the sampling inputs are refilled after the picker sync');
 });
 
 // ---- 3: the wire --------------------------------------------------------------
@@ -445,7 +479,7 @@ test('the picker AND the sampling inputs follow the switch (no lying UI)', async
     const think = win.document.getElementById('chat-native-think-mode');
     const temp = win.document.getElementById('chat-native-gen-temperature');
     win.M._u37b.switchChatModel('K2');
-    assert.deepEqual(think.children.map((o) => o.value),
+    assert.deepEqual([...think.children].map((o) => o.value),
                      ['auto', 'low', 'medium', 'high', 'limit'], 'K2 stops painted');
     assert.equal(think.value, 'high', 'K2 keeps the page on the way in (nothing lost)');
     assert.equal(temp.value, '0.9', 'and the input still shows the live value');
