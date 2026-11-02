@@ -14,10 +14,11 @@ Uplift installs next to oMLX and adds a live status board, a chat you can talk t
 - **Chat with voice.** Replies can read themselves aloud while they stream. Talk back with push-to-talk or hands-free listening through a local speech model. Attach files, search and pin conversations, branch from an earlier answer, see the context use of every reply.
 - **Presets and profiles.** Save the whole chat setup (prompt, sampling, thinking, web search, voice) as a preset. Give one model several profiles, for example `creative` and `precise`, and call each one as its own model name from any API client.
 - **Voices.** Clone a voice from a short clip, or use the macOS system voices. Every client that speaks the OpenAI audio API can use them, for example `Qwen3-TTS:Jake`.
-- **Patches.** Run an open oMLX pull request or your own fix today. Every patch is checked before it is stored, keeps its versions, and can be rolled back or switched off. Disabling a patch restores the original oMLX files.
+- **Patches.** Test what an unmerged oMLX pull request, or any other patch, does on your own oMLX. Roll it back easily if you don't like it, or let Uplift update it for you when the PR changes. Every patch is checked before it is stored, and disabling it restores the original oMLX files.
 - **Dev builds.** Build oMLX from the newest upstream source plus your patches. Old builds stay installed, so going back takes seconds.
 - **Benchmarks.** All oMLX benchmarks, plus embeddings, rerankers, a decision bench, a custom parallel-load test and extra intelligence suites. Runs wait in a queue, and raw results are downloadable.
 - **Themes and languages.** 18 bundled skins plus your own (one YAML file each), and 10 UI languages.
+- **CAAAAATZ!** :)
 
 ## Install
 
