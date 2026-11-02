@@ -62,7 +62,8 @@ Then open **http://127.0.0.1:8001/uplift/** and create your key as in option 1. 
 
 ### Good to know
 
-- **After `brew upgrade`** of oMLX (or omlx-dev), run `omlx-uplift install` again and restart the service. A new keg comes with a new Python, and Uplift must connect to it again.
+- **After `brew upgrade omlx`**, run `omlx-uplift install` again and `brew services restart omlx`. A new keg comes with a new Python, and Uplift must connect to it again.
+- **Updating the dev build:** `omlx-uplift dev upgrade --restart`. It rebuilds only when upstream or your patches moved, reconnects Uplift, and restarts the service after a rebuild.
 - **Power and temperature charts** need [macmon](https://github.com/vladkens/macmon): `brew install macmon`. Without it, those charts stay hidden.
 - **Voice input** needs a speech-recognition model (for example a Whisper model from Models > Downloader). Browsers allow the microphone only on `http://127.0.0.1`, `http://localhost` or HTTPS, not on plain `http://` LAN addresses.
 - **Using the dashboard from another computer:** set an API key first. Without one, oMLX refuses to listen on the network and falls back to `127.0.0.1`.
