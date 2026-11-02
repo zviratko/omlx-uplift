@@ -1583,10 +1583,16 @@ def request_removal(store, patch_id: str, tree_root: str) -> dict:
     decision and never re-enables. Real deletion stays reachable:
     adopt first (cuts the catalog tie), then remove. The kernel
     remove_patch below stays raw — internal flows (rescope widen)
-    remove-and-re-add under the same id and must not be intercepted."""
+    remove-and-re-add under the same id and must not be intercepted.
+
+    RETIRED exception (user report 2026-11-03): once a catalog patch is
+    delisted the re-add argument is void - the catalog no longer names
+    it, so nothing can add the row back. A delisted row is therefore
+    removable for good without the adopt step; the verb is Remove."""
     manifest = store.load()
     p = store.find(manifest, patch_id)
-    if p is not None and p.get("curated") and not p.get("curated_adopted"):
+    if (p is not None and p.get("curated") and not p.get("curated_adopted")
+            and not p.get("delisted")):
         res = set_enabled(store, patch_id, False)
         if not res.get("ok"):
             return res

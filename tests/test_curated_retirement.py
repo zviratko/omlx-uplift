@@ -299,6 +299,34 @@ class RetirementTests(unittest.TestCase):
         self.assertIn("omlx-dev build", detail, detail)
         self.assertNotIn("next restart", detail)
 
+    # -- removing a retired row -------------------------------------------
+    def test_remove_on_a_retired_row_is_final(self):
+        # once a patch is delisted the re-add argument is void: the
+        # catalog no longer names it, so Remove must be a real delete
+        # and must survive the next sync (user report 2026-11-03)
+        self.install_both()
+        self.drop_from_catalog("nice", "optional")
+        r = curated.sync(self.store, self.root, fetch=self.fetch)
+        self.assertEqual(r["report"]["nice"]["sync"], "delisted")
+        res = patchsource.request_removal(self.store, "nice", self.root)
+        self.assertTrue(res.get("ok"), res)
+        self.assertFalse(res.get("disabled_instead"),
+                        "a retired row is removable for good, no adopt step")
+        self.assertIsNone(self.find("nice"))
+        # and it does not come back: a later sync re-adds only what the
+        # catalog lists, which no longer names nice
+        curated.sync(self.store, self.root, fetch=self.fetch)
+        self.assertIsNone(self.find("nice"))
+
+    def test_live_catalog_row_still_disables(self):
+        # the 2026-10-29 contract holds for a patch the catalog still
+        # lists: remove on a live curated row means disable, not forget
+        self.install_both()
+        res = patchsource.request_removal(self.store, "live-apply", self.root)
+        self.assertTrue(res.get("ok"), res)
+        self.assertTrue(res.get("disabled_instead"))
+        self.assertIsNotNone(self.find("live-apply"))
+
 
 if __name__ == "__main__":
     unittest.main()

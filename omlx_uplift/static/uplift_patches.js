@@ -1042,12 +1042,14 @@ function ptManage(p) {
     rmBtn.className = 'btn danger';
     // a catalog patch cannot be deleted for good (the next check re-adds a
     // removed entry) — the honest verb for it is Disable (user report
-    // 2026-10-29: remove → the patch returned as pending)
-    rmBtn.textContent = (p.curated && !p.curated_adopted)
+    // 2026-10-29: remove → the patch returned as pending). A RETIRED
+    // catalog row is the exception: the catalog no longer names it, so
+    // nothing re-adds it — the honest verb there is Remove (2026-11-03)
+    rmBtn.textContent = (p.curated && !p.curated_adopted && !p.delisted)
         ? ptMsg('uplift.patches.disable', 'Disable')
         : ptMsg('uplift.patches.remove', 'Remove');
     rmBtn.onclick = async () => {
-        if (p.curated && !p.curated_adopted) {
+        if (p.curated && !p.curated_adopted && !p.delisted) {
             // one button, one verb, one truth (user 2026-10-29): the
             // confirm says exactly what OK does — disable. Catalog rows
             // cannot be deleted for good (a removed entry is re-added by
