@@ -15,7 +15,7 @@ Our file adds sub-hour samples and per-request rows:
   requests(id PK, model, state, prompt_tokens, completion_tokens, tps,
            error, ts_start, ts_end)   per-request lifecycle rows
 Retention (RL-0, split + configurable): metrics samples are purged after
-RETENTION_METRICS_DAYS (default 30), finished request-log rows after
+RETENTION_METRICS_DAYS (default 7), finished request-log rows after
 RETENTION_LOG_DAYS (default 2). Resolution per value: env override
 (OMLX_UPLIFT_RETENTION_METRICS_DAYS / OMLX_UPLIFT_RETENTION_LOG_DAYS) >
 meta-table keys (retention_metrics_days / retention_log_days, set via
@@ -43,7 +43,10 @@ from pathlib import Path
 
 from . import paths as _paths
 
-RETENTION_METRICS_DAYS = 30
+# RET-7 (user 2026-11-02): 30 -> 7 days. The fine 5 s layer grew to 5.3 GB
+# in 11 days on the dev box; long windows keep their hourly backfill from
+# vanilla's usage.sqlite3, so 7 d of fine samples is enough.
+RETENTION_METRICS_DAYS = 7
 RETENTION_LOG_DAYS = 2
 _RET_CLAMP = (1, 365)
 _SCHEMA_VERSION = 3
@@ -826,15 +829,21 @@ class MetricsStore:
 
         Runs wal_checkpoint(TRUNCATE) so the WAL file itself gets recycled
         once per day (journal_size_limit keeps it capped between runs).
-        VACUUM policy lives in maybe_vacuum() (G2)."""
+        VACUUM policy lives in maybe_vacuum() (G2).
+
+        RET-7: samples age out in small batches, one short transaction
+        each. One big DELETE held the store lock (so every collector write
+        and every meta read) for the whole pass - millions of rows on a
+        big store, and the first pass after a retention cut deletes days
+        at once."""
         ret = self.retention()
         mdays = metrics_days if metrics_days is not None else ret["metrics_days"]
         ldays = log_days if log_days is not None else ret["log_days"]
         cutoff_m = time.time() - mdays * 86400
         cutoff_l = time.time() - ldays * 86400
+        self._delete_batched("samples", cutoff_m)
+        self._delete_batched("samples_1m", cutoff_m)
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_m,))
-            self._conn.execute("DELETE FROM samples_1m WHERE ts < ?", (cutoff_m,))
             gone = self._conn.execute(
                 "SELECT id FROM requests "
                 "WHERE COALESCE(ts_end, ts_start) < ?",
@@ -852,6 +861,27 @@ class MetricsStore:
         with self._lock:
             self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self.maybe_vacuum()
+
+    # RET-7: rows per purge transaction. ~20k rows of samples + 3 index
+    # entries each commits in well under a second, so a collector tick
+    # waiting on the lock slips by at most that much.
+    PURGE_BATCH = 20000
+
+    def _delete_batched(self, table: str, cutoff: float) -> int:
+        """Delete TABLE rows with ts < CUTOFF, PURGE_BATCH rows per commit,
+        releasing the store lock between batches. Returns rows deleted.
+        The rowid sub-select on `samples` rides ix_samples_ts_key (ts
+        first), so each batch is a range seek, not a table walk."""
+        total = 0
+        while True:
+            with self._lock, self._conn:
+                n = self._conn.execute(
+                    f"DELETE FROM {table} WHERE rowid IN "
+                    f"(SELECT rowid FROM {table} WHERE ts < ? LIMIT ?)",
+                    (cutoff, self.PURGE_BATCH)).rowcount
+            total += max(0, n)
+            if n < self.PURGE_BATCH:
+                return total
 
     # -- space reclaim (RETENTION-1 G2) --------------------------------------
     # DELETE frees pages INSIDE the file only; nothing here ever shrank it

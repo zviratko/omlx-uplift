@@ -47,8 +47,9 @@ def test_purge_split_retention(store):
     store.upsert_request(live)
     store.write_sample("k", 1.0, ts=time.time() - 3 * 86400)   # log-age
     store.write_sample("k", 2.0, ts=time.time() - 31 * 86400)  # metrics-age
+    store.write_sample("k", 3.0, ts=time.time() - 8 * 86400)   # past 7 d (RET-7)
 
-    store.purge()  # defaults: metrics 30 d, log 2 d
+    store.purge()  # defaults: metrics 7 d, log 2 d
 
     ids = {r["id"] for r in store.recent_requests()}
     assert "fresh" in ids           # younger than log_days=2
@@ -56,14 +57,14 @@ def test_purge_split_retention(store):
     assert "ancient-zombie" not in ids   # orphaned active row: purged (RETENTION-1)
     assert "live-generating" in ids      # fresh ts_end = alive, age exempt
     pts = store.series("k", window_s=45 * 86400)
-    assert len(pts) == 1 and pts[0]["v"] == 1.0  # 31 d sample purged, 3 d survives
+    assert len(pts) == 1 and pts[0]["v"] == 1.0  # 31 d + 8 d purged, 3 d survives
 
 
 # -- 2. resolution order + clamping -----------------------------------------
 
 def test_retention_defaults(store):
     r = store.retention()
-    assert r == {"metrics_days": 30, "log_days": 2, "source": "default"}
+    assert r == {"metrics_days": 7, "log_days": 2, "source": "default"}
 
 
 def test_retention_meta_persists_survives_reopen(store):
@@ -303,3 +304,48 @@ def test_vacuum_policy_gates(tmp_path, monkeypatch):
         assert s.maybe_vacuum() is False   # rate limit, not policy
     finally:
         s.close()
+
+
+# -- RET-7: batched purge + purge on the first tick after start --------------
+
+def test_purge_deletes_in_batches_and_keeps_fresh_rows(store, monkeypatch):
+    """The purge must commit in PURGE_BATCH-sized steps (the store lock is
+    released between them) and still remove every expired row from both
+    the raw table and the 1-minute rollup."""
+    monkeypatch.setattr(MetricsStore, "PURGE_BATCH", 3)
+    old = time.time() - 10 * 86400
+    for i in range(10):
+        store.write_sample("k", float(i), ts=old + i * 300)
+    store.write_sample("k", 100.0, ts=time.time() - 60)
+    store.write_sample("k", 101.0, ts=time.time() - 30)
+
+    rec = RecordingConn(store._conn)
+    store._conn = rec
+    store.purge()
+
+    batches = [s for s in rec.stmts if s.startswith("DELETE FROM samples WHERE")]
+    assert len(batches) == 4, batches          # 3 + 3 + 3 + 1 rows
+    left = rec.execute("SELECT value FROM samples ORDER BY ts").fetchall()
+    assert [r[0] for r in left] == [100.0, 101.0]
+    old_1m = rec.execute(
+        "SELECT COUNT(*) FROM samples_1m WHERE ts < ?",
+        (time.time() - 7 * 86400,)).fetchone()[0]
+    assert old_1m == 0
+
+
+def test_first_tick_after_start_runs_the_purge(store, monkeypatch):
+    """RET-7 (user 2026-11-02): every server start purges on the first
+    collector tick, then not again the same day."""
+    import omlx_uplift.request_log as rl
+    import omlx_uplift.router as rt
+
+    monkeypatch.setattr(rt, "engine_pool", lambda: None)
+    monkeypatch.setattr(rl, "get_request_tracker", lambda: FakeTracker([]))
+    calls = []
+    monkeypatch.setattr(store, "purge", lambda *a, **k: calls.append(1))
+
+    c = Collector(store=store)       # a fresh process = a fresh collector
+    c.sample_once()
+    assert calls == [1], "the first tick after start must purge"
+    c.sample_once()
+    assert calls == [1], "a second tick the same day must not purge again"

@@ -32,6 +32,8 @@ class Collector:
         self._tick = tick_s
         self._task: Optional[asyncio.Task] = None
         self._prev: dict[str, float] = {}
+        # RET-7: 0 never equals today's day number, so the retention purge
+        # runs on the first tick after every server start, then daily.
         self._purged_day = 0
         # id -> last-persisted change signature (RL-0: persist only on change)
         self._persisted: dict[str, tuple] = {}
@@ -250,7 +252,7 @@ class Collector:
             for k in sorted(self._persisted, key=str)[:500]:
                 self._persisted.pop(k, None)
 
-        # Daily retention purge
+        # Retention purge: first tick after start (RET-7), then daily
         day = int(now // 86400)
         if day != self._purged_day:
             self._purged_day = day
