@@ -53,7 +53,7 @@ brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
 brew trust jundot/omlx zviratko/uplift
 brew install omlx-uplift
 omlx-uplift dev bootstrap        # a few questions, once (--yes takes the defaults)
-omlx-uplift dev install          # builds the omlx-dev keg (about 20 minutes the first time)
+omlx-uplift dev install          # builds the omlx-dev keg
 omlx-uplift install              # connects Uplift to the dev build
 brew services start omlx-dev
 ```
