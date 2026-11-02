@@ -80,6 +80,7 @@
  "uplift.chip.temp": "Max CPU/GPU temp, 60 s",
  "uplift.chip.temp_max": "Max CPU/GPU temp — 60 s max",
  "uplift.chip.temp_mean": "mean",
+ "uplift.chip.tgs": "Live token rate: in = prompt prefill, out = generation",
  "uplift.dl.cancel_fail": "cancel: ",
  "uplift.dl.download_fail": "download: ",
  "uplift.dl.loading": "Loading suggestions…",

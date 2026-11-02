@@ -17,6 +17,7 @@ users never see.
 - **Metrics history keeps 7 days by default (was 30), and the metrics store is much smaller.** Expired samples are also removed at every server start. Beyond 7 days, the token-rate, request-rate and cache-efficiency charts keep hourly history from omlx's own usage data; the other charts show 7 days. Change the period under Layout settings (gear icon, "Metrics history (days)") if you want more.
 - **The patches page shows the omlx-dev build status in under a second (was about 3 s).** The restart dialog no longer loads the server while it comes back up.
 - **The Status board uses less browser CPU.** Metric cards outside the visible area, and cards with no new data, are no longer redrawn every second.
+- **Live token rate in the header.** A chip next to the temperature and uptime shows what the engine moves right now, input (prompt processing) and output (generation) in tokens per second, refreshed about every second while it runs.
 
 ## [3.2] - 2026-11-02
 

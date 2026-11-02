@@ -80,6 +80,7 @@
  "uplift.chip.temp": "Max teplota CPU/GPU — maximum 60 s",
  "uplift.chip.temp_max": "Max teplota CPU/GPU — maximum 60 s",
  "uplift.chip.temp_mean": "průměr",
+ "uplift.chip.tgs": "Živá rychlost tokenů: vstup = prefill promptu, výstup = generování",
  "uplift.dl.cancel_fail": "zrušení: ",
  "uplift.dl.download_fail": "stahování: ",
  "uplift.dl.loading": "Načítání návrhů…",

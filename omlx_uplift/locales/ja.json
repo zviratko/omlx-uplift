@@ -80,6 +80,7 @@
  "uplift.chip.temp": "CPU/GPU最高温度 — 60秒最大",
  "uplift.chip.temp_max": "CPU/GPU最高温度 — 60秒最大",
  "uplift.chip.temp_mean": "平均",
+ "uplift.chip.tgs": "リアルタイム トークン速度：入力 = プロンプトのプリフィル、出力 = 生成",
  "uplift.dl.cancel_fail": "キャンセル: ",
  "uplift.dl.download_fail": "ダウンロード: ",
  "uplift.dl.loading": "候補を読み込み中…",

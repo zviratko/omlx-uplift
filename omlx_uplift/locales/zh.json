@@ -80,6 +80,7 @@
  "uplift.chip.temp": "CPU/GPU 最高温度 — 60 秒最大值",
  "uplift.chip.temp_max": "CPU/GPU 最高温度 — 60 秒最大值",
  "uplift.chip.temp_mean": "均值",
+ "uplift.chip.tgs": "实时 token 速率：输入 = 提示词 prefill，输出 = 生成",
  "uplift.dl.cancel_fail": "取消: ",
  "uplift.dl.download_fail": "下载: ",
  "uplift.dl.loading": "正在加载建议…",

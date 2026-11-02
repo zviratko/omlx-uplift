@@ -211,6 +211,13 @@ CH.probeGatedCards();
 setInterval(() => { if (!document.hidden && boardVisible()) CH.probeGatedCards(); }, 60000);
 CH.refreshPowerChips();
 setInterval(() => { if (!document.hidden) CH.refreshPowerChips(); }, 30000);
+/* HDR-TGS: the live token-rate chip. This timer reads the 2 Hz feed's
+   columns (uplift_livefeed.js) and paints at most ~1/s; no HTTP on the live
+   path (the stored fallback inside self-throttles and only runs when the
+   feed has nothing to give). Header chrome lives on every tab, so this one
+   is NOT boardVisible()-gated like the chart probes above. */
+CH.refreshTgsChips();
+setInterval(() => { if (!document.hidden) CH.refreshTgsChips(); }, 1000);
 /* ---- PAT-4 patches page: extracted to uplift_patches.js (PH2-1 stage 8) and
    lazy-loaded on #settings/patches entry (FE-8); runPatches() in uplift.js
    calls initPatchesPage() once on load. ---- */

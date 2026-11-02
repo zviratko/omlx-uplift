@@ -2047,6 +2047,99 @@ async function refreshPowerChips() {
     finally { pwrChipsFetching = false; }
 }
 
+/* HDR-TGS (user 2026-11-02): live token rate in the header, between the
+   the temperature and the uptime chip. INPUT = prefill.tokens_s (prompt tokens
+   the engine computed), OUTPUT = generation.tokens_s (tokens it decoded). Same
+   two series the Throughput chart plots, so the chip and the line under it
+   cannot disagree (the U20 chip-parity rule power/temp follow).
+   Cadence: the 2 Hz live feed while its column is fresh, mean of its last k
+   samples with k = the card's own smoothing control (layout.tpsSmooth); the
+   stored 5 s series is the fallback lane (no EventSource, the live-display
+   toggle off, a dropped stream) and is fetched ONLY while a live value is
+   missing, so the normal path costs zero requests.
+   Both samplers write a value every tick INCLUDING zeros, so an idle engine
+   reads 0 rather than an empty chip; the chip stays hidden only while
+   NEITHER lane has ever answered. Paint is throttled to ~1 Hz: each sample
+   is a 500 ms window, and a header number that jitters per frame cannot be
+   read while you look at it. */
+const TGS_IN_KEY = 'prefill.tokens_s';
+const TGS_OUT_KEY = 'generation.tokens_s';
+const TGS_PAINT_MS = 900;
+const TGS_STORED_MIN_MS = 10_000;      // refetch floor for the fallback lane
+const TGS_STORED_MAX_AGE_S = 60;       // older than this = the tick stopped
+let tgsPaintAt = 0;
+let tgsStored = {}, tgsStoredAt = 0, tgsStoredFetching = false;
+
+/* Mean of the last k samples of one column (newest-LAST, like every store
+   series). Null when the column is empty or holds no finite number. */
+function tgsLiveMean(col, k) {
+    if (!col || !col.v || !col.v.length) return null;
+    const tail = col.v.slice(-Math.max(1, k | 0));
+    let sum = 0, n = 0;
+    for (const v of tail) {
+        if (typeof v === 'number' && isFinite(v)) { sum += v; n++; }
+    }
+    return n ? sum / n : null;
+}
+
+/* 'in 12.3k · out 42 tok/s'. '' = no chip at all (neither half has a
+   value); a null half paints '—' so the other half still reads. */
+function tgsChipText(inp, outp, inLabel, outLabel, unit, fmt) {
+    if (inp === null && outp === null) return '';
+    const f = v => (v === null ? '—' : fmt(v));
+    return `${inLabel} ${f(inp)} · ${outLabel} ${f(outp)} ${unit}`;
+}
+
+async function tgsStoredFetch() {
+    const now = Date.now();
+    if (tgsStoredFetching || now - tgsStoredAt < TGS_STORED_MIN_MS) return;
+    tgsStoredFetching = true;
+    tgsStoredAt = now;
+    try {
+        const r = await CH_GLUE.fetchJson(`${API}/uplift/api/metrics/latest?keys=` +
+            encodeURIComponent(`${TGS_IN_KEY},${TGS_OUT_KEY}`));
+        const lat = (r && r.latest) || {};
+        // Rebuild wholesale: a key whose tick stopped must drop out of the
+        // chip on the next paint, not ride the previous value in as live.
+        const next = {};
+        for (const key of [TGS_IN_KEY, TGS_OUT_KEY]) {
+            const p = lat[key];
+            if (p && typeof p.v === 'number' && isFinite(p.v) &&
+                now - (p.ts || 0) * 1000 < TGS_STORED_MAX_AGE_S * 1000) next[key] = p.v;
+        }
+        tgsStored = next;
+    } catch (_) { /* keep the last lane; absence stays silent */ }
+    finally { tgsStoredFetching = false; }
+}
+
+function refreshTgsChips() {
+    const chip = document.getElementById('chip-tgs');
+    if (!chip) return;                 // no header chrome (embed frame)
+    const now = Date.now();
+    if (now - tgsPaintAt < TGS_PAINT_MS) return;
+    tgsPaintAt = now;
+    const kS = C.LAYOUT_SMOOTHES.includes(layout.tpsSmooth) ? layout.tpsSmooth : 1;
+    let inp = LF.liveUsable(TGS_IN_KEY) ? tgsLiveMean(LF.liveCol(TGS_IN_KEY), kS) : null;
+    let outp = LF.liveUsable(TGS_OUT_KEY) ? tgsLiveMean(LF.liveCol(TGS_OUT_KEY), kS) : null;
+    if (inp === null || outp === null) {
+        if (inp === null && TGS_IN_KEY in tgsStored) inp = tgsStored[TGS_IN_KEY];
+        if (outp === null && TGS_OUT_KEY in tgsStored) outp = tgsStored[TGS_OUT_KEY];
+        if (inp === null || outp === null) tgsStoredFetch();   // self-throttled
+    }
+    const txt = tgsChipText(inp, outp,
+        C.tf('uplift.label.total_in', 'in'),
+        C.tf('uplift.label.total_out', 'out'),
+        // the classic unit suffix: already translated in every catalog; a
+        // minted uplift key for 'tok/s' would be the same word ten times
+        C.tf('chat.stats.tokens_per_second_suffix', 'tok/s'),
+        C.fmtCompact);
+    chip.hidden = txt === '';
+    if (txt !== '' && chip.textContent !== txt) chip.textContent = txt;
+    // An idle engine reads quiet grey; header ink only while tokens move.
+    chip.classList.toggle('chip-idle',
+        inp !== null && outp !== null && inp <= 0 && outp <= 0);
+}
+
 function pushStatusSample(s) {
     refreshSysPct();   // fire-and-forget; lands in the next push
     // Chart buffers (window pruning happens at draw time). U30: column 3 =
@@ -2101,6 +2194,7 @@ window.Uplift.charts = {
     legendUpdater: legendUpdater,   // SWEEP178: exposed for console testability
     fitAllMetricPlots: fitAllMetricPlots, clearMainChartHover: clearMainChartHover,
     refreshPowerChips: refreshPowerChips,
+    refreshTgsChips: refreshTgsChips,   // HDR-TGS header token-rate chip
     refreshSysPct: refreshSysPct,   // POLL-BATCH-2: Status-entry catch-up
     /* U24 gated cards (macmon): the card DOM ALWAYS exists (boot creates it
        parked); this probe only FLIPS it visible once the series actually

@@ -80,6 +80,7 @@
  "uplift.chip.temp": "CPU/GPU 최대 온도 — 60초",
  "uplift.chip.temp_max": "CPU/GPU 최대 온도 — 60초 최대",
  "uplift.chip.temp_mean": "평균",
+ "uplift.chip.tgs": "실시간 토큰 속도: 입력 = 프롬프트 프리필, 출력 = 생성",
  "uplift.dl.cancel_fail": "취소: ",
  "uplift.dl.download_fail": "다운로드: ",
  "uplift.dl.loading": "추천 불러오는 중…",

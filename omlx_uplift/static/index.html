@@ -22,11 +22,13 @@
     <!-- Row 1: status chips left, control icons right (same band). Row 2:
          logo left, menu bar right-aligned where the icons used to sit
          (uplift.css .hdr-stats / .tabs). Reading order hardware | watts |
-         temp | uptime; power/temp stay hidden while macmon is absent. -->
+         temp | token rate | uptime; power/temp stay hidden while macmon is
+         absent, the token-rate chip until the metrics feed answers. -->
     <span class="hdr-stats">
         <span class="chip" id="chip-device">—</span>
         <span class="chip" id="chip-power" hidden title="Package power, 60 s mean" data-i18n-title="uplift.chip.power">—</span>
         <span class="chip" id="chip-temp" hidden title="Max CPU/GPU temp, 60 s" data-i18n-title="uplift.chip.temp">—</span>
+        <span class="chip" id="chip-tgs" hidden title="Live token rate: in = prompt prefill, out = generation" data-i18n-title="uplift.chip.tgs">—</span>
         <span class="chip" id="chip-uptime">—</span>
         <!-- gateway status only exists for the ?api= dev proxy mode; native
              hosting IS the server, so the old 'direct' chip stays hidden -->

@@ -80,6 +80,7 @@
  "uplift.chip.temp": "Макс. темп. CPU/GPU за 60 с",
  "uplift.chip.temp_max": "Макс. темп. CPU/GPU — максимум за 60 с",
  "uplift.chip.temp_mean": "среднее",
+ "uplift.chip.tgs": "Скорость токенов в реальном времени: вход = prefill промпта, выход = генерация",
  "uplift.dl.cancel_fail": "отмена: ",
  "uplift.dl.download_fail": "загрузка: ",
  "uplift.dl.loading": "Загрузка предложений…",

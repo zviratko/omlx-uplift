@@ -343,9 +343,9 @@ header.top .chip, header.top .tabs a, header.top .dd-btn { white-space: nowrap; 
     nowrap text — the tabs strip absorbs width pressure instead */
 /* Row 1 unit: status chips left, control icons right (spacer between).
    The icons moved in here from the menu row (user: same level as the
-   hardware | watts | temp | uptime chips); the menu bar took their old
-   right-aligned spot on row 2. The unit travels together: order -1 pins
-   it to the header's first line at every width. */
+   hardware | watts | temp | token rate | uptime chips); the menu bar took
+   their old right-aligned spot on row 2. The unit travels together:
+   order -1 pins it to the header's first line at every width. */
 header.top .hdr-stats { display: flex; align-items: center; gap: 10px;
     flex: 1 1 100%; order: -1; }   /* own top row inside the sticky header */
 header.top .hdr-stats .icon-btn { flex: none; }
@@ -431,6 +431,11 @@ header.top .chip {
 header.top .chip.state-ok { color: var(--hdr-ink); }
 /* U20 temperature chip — hot state colours the text via theme token. */
 header.top .chip.chip-hot, .chip.chip-hot { color: var(--bad); border-color: var(--bad); }
+/* HDR-TGS live token-rate chip: quiet while the engine moves no tokens
+   (both rates 0), header ink as soon as prefill or decode is running. The
+   digits stay visible in both states: the chip is an instrument, not a
+   lamp, and '0 tok/s' is the answer to 'is it idle?'. */
+header.top .chip.chip-idle { color: var(--dim); border-color: var(--edge); }
 header.top .icon-btn { color: var(--hdr-ink); border-color: var(--hdr-edge); }
 header.top .icon-btn:hover { background: var(--hdr-ink); border-color: var(--hdr-ink);
     color: var(--bg); }
