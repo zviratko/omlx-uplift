@@ -588,6 +588,27 @@ def test_instance_id_unique_per_process():
     assert server_instance_id().endswith(f"\x1f{os.getpid()}")
 
 
+def test_instance_tag_is_short_and_keeps_kegs_apart(monkeypatch):
+    """TAG-SHORT (user 2026-11-02): the tag rides every sample row and
+    three indexes, so its keg half is an 8-hex hash, not the ~100-byte
+    path. Different kegs must still get different tags; the PID half
+    must stay parseable for the HIST-1 liveness check."""
+    import os
+
+    import omlx_uplift.store as stm
+
+    monkeypatch.setattr(stm, "_inst_cache", None)
+    tag = stm.server_instance_id()
+    keg, pid = stm._split_instance(tag)
+    assert pid == os.getpid()
+    assert len(keg) == 8 and all(c in "0123456789abcdef" for c in keg)
+    assert len(tag.encode()) <= 16, tag
+    a = stm._keg_hash("/opt/homebrew/Cellar/omlx-dev/20261102.111742.29873ce/libexec")
+    b = stm._keg_hash("/opt/homebrew/Cellar/omlx-dev/20261101.194805.2500d6e/libexec")
+    assert a != b and a == stm._keg_hash(
+        "/opt/homebrew/Cellar/omlx-dev/20261102.111742.29873ce/libexec")
+
+
 # ---- _HOURLY_DERIVE: avg_prefill_tps must mirror upstream's honest metric
 # (server_metrics._build_snapshot divides prompt MINUS cached tokens). The
 # old prompt-only derivation inflated the 7d/30d backfill up to +45% over

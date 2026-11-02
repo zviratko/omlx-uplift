@@ -150,6 +150,14 @@ def server_instance_id() -> str:
     dashboard shows exactly its own server's numbers. After a restart
     the fine layer starts fresh by design (session metrics reset on a
     restart anyway); long windows still backfill from the hourly layer.
+
+    TAG-SHORT (user 2026-11-02): the keg half is an 8-hex-digit hash of
+    the omlx package path, not the path itself. The tag is stored in the
+    row AND in three indexes; the ~100-byte path made it ~400 of ~610
+    bytes per sample (5.3 GB store in 11 days). Only the PID half carries
+    meaning for reads (_split_instance / _pid_alive); the hash keeps
+    different kegs apart. Old long-path rows stay readable as history
+    and age out with retention.
     """
     global _inst_cache
     if _inst_cache is None:
@@ -160,8 +168,17 @@ def server_instance_id() -> str:
             keg = str(Path(omlx.__file__).resolve().parent)
         except Exception:
             keg = os.environ.get("OMLX_INSTANCE_ROOT", "") or "unknown"
-        _inst_cache = f"{keg}\x1f{os.getpid()}"
+        _inst_cache = f"{_keg_hash(keg)}\x1f{os.getpid()}"
     return _inst_cache
+
+
+def _keg_hash(keg: str) -> str:
+    """Short stable id for a keg path (TAG-SHORT): first 8 hex digits of
+    its SHA-1. Collisions only matter between two LIVE writers that also
+    share a PID, which cannot happen on one machine."""
+    import hashlib
+
+    return hashlib.sha1(keg.encode("utf-8", "replace")).hexdigest()[:8]
 
 
 def _split_instance(tag: str) -> tuple[str, int | None]:
