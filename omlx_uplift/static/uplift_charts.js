@@ -1014,6 +1014,7 @@ function ensureMetricPlot(id) {
     applyCardLegendCompact(chart, e.def);   // LEGEND-COMPACT (card only)
     if (e.def.series && e.def.series.length) bindCursorUpdater(chart);
     e.chart = chart;
+    e.drawnSig = null;    // CARD-IDLE: a new canvas has drawn nothing yet
     if (!e.host._ro) {
         e.host._ro = new ResizeObserver(() => { fitMetricPlot(id); });
         e.host._ro.observe(e.host);
@@ -1292,6 +1293,7 @@ function createMetricCard(def, park) {
     if (CH_GLUE.applyI18n) CH_GLUE.applyI18n(sec);
     const fmt = metricFormat(def);
     metricCharts.set(id, { chart: null, sec, host, fmt, def, nameEl: title, nowEl: now, noteEl: note });
+    _observeCard(sec);
     if (!park) ensureMetricPlot(id);
 }
 /* ISSUE-2 (small metric cards blank after a theme/skin switch): the rerender
@@ -1312,6 +1314,7 @@ function reinitMetricPlot(id, col) {
     e.host.textContent = '';
     const c = col || chartColors();
     e.chart = new uPlot(metricOpts(id, e.def, c), prevData, e.host);
+    e.drawnSig = null;    // CARD-IDLE: rebuilt canvas (theme/skin) must redraw
     bindCursorTip(e.chart);
     applyCardLegendCompact(e.chart, e.def);   // LEGEND-COMPACT survives theme/skin rebuilds
     if (e.def.series && e.def.series.length) bindCursorUpdater(e.chart);
@@ -1463,8 +1466,10 @@ function windowKeys(w) {
     return out;
 }
 function drawWindow(w) {
-    for (const [cid] of metricCharts)
+    for (const [cid, ce] of metricCharts) {
+        if (ce.onScreen === false && !_popOpen(cid)) continue;   // CARD-IDLE: catches up on scroll-in
         if (windowParam(cardWindow(cid)) === w) drawMetricChart(cid);
+    }
 }
 function metricFetch(id, force) {
     const e = metricCharts.get(id);
@@ -1476,7 +1481,7 @@ function metricFetch(id, force) {
     const w = windowParam(cardWindow(id));
     const keys = windowKeys(w);
     const key = keys.join(',');
-    const cache = metricCache[w] || (metricCache[w] = { data: {}, at: 0, fails: 0, bucket_s: 0,
+    const cache = metricCache[w] || (metricCache[w] = { ver: ++_cacheVerSeq, data: {}, at: 0, fails: 0, bucket_s: 0,
                                                         full: false, maxTs: 0 });
     // TAIL-1 (user 2026-10-14: "74 KB every 5 s — unacceptable"). Two
     // past attempts and why they were wrong: POP-PIN's 4.5 s TTL made the
@@ -1536,6 +1541,7 @@ function metricFetch(id, force) {
     CH_GLUE.fetchJson(url)
         .then(d => {
             cache.fails = 0;
+            cache.ver = ++_cacheVerSeq;      // CARD-IDLE: data changed
             const rawMap = d.series_map || {};
             const map = {};
             for (const [k, raw] of Object.entries(rawMap)) map[k] = unpackCols(raw, d.bucket_s);
@@ -1638,6 +1644,13 @@ function drawMetricChart(id) {
     // ring does not cover (feed dead -> columns fall through unchanged).
     const win = cardWindow(id);
     const liveOn = LF.liveForWindow(win);
+    // CARD-IDLE: on the idle path, a card with no live column and an
+    // unchanged window cache would paint the same picture - skip it.
+    const liveCapable = liveOn
+        && metricServes(e.def).some(s => !s.legendOnly && LF.liveUsable(s.key));
+    const sig = w + '|' + (cache.ver || 0) + '|' + win + '|'
+        + (cardZoom[id] ? cardZoom[id].join(',') : '');
+    if (_idleDraw && !liveCapable && e.drawnSig === sig && !_popOpen(id)) return;
     let liveUsed = false;
     let data = cache.data;
     if (liveOn) {
@@ -1695,6 +1708,7 @@ function drawMetricChart(id) {
     }
     e.lastCols = cols;
     e.chart.setData(cols);
+    e.drawnSig = liveCapable ? null : sig;
     e.chart._rawSeries = e.rawCols;
     if (popHooks.ref) popHooks.ref.onMetricDraw(id, cols, e.rawCols);
     // SWEEP178: with legend.live:false the vendored build paints value
@@ -1745,11 +1759,52 @@ function fmtLast(fmt, v) {
     return s;
 }
 function fmtNumberPrecise(v) { return C.fmtNumber(v); }
-function drawAllMetricCharts() {
-    for (const id of [...metricCharts.keys()]) {
-        _drewSync = false;
-        metricFetch(id, false);
-        if (!_drewSync) drawMetricChart(id);
+/* CARD-IDLE (user 2026-11-02: browser energy). The live frame path asks
+   for a card redraw about once a second. Two kinds of card gain nothing
+   from it and are skipped on that path ONLY (drawAllMetricCharts(true)):
+   - cards outside the viewport (IntersectionObserver, 200 px margin) - a
+     card that scrolls into view catches up at once from its cache;
+   - cards whose drawn series have no live twin and whose window cache did
+     not change since their last draw: the picture would be identical (the
+     x edge anchors to the newest sample, STALL-FREEZE), and new data
+     redraws them through drawWindow() when the fetch lands.
+   Every other caller (tab entry, window change, theme, locale, resize)
+   keeps the full redraw. */
+let _idleDraw = false;
+let _cacheVerSeq = 0;
+let _cardIO = null;
+function _observeCard(sec) {
+    if (typeof IntersectionObserver === 'undefined' || !sec) return;
+    if (!_cardIO) _cardIO = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+            const cid = en.target.dataset.block;
+            const ce = metricCharts.get(cid);
+            if (!ce) continue;
+            const was = ce.onScreen !== false;
+            ce.onScreen = en.isIntersecting;
+            if (ce.onScreen && !was && !document.hidden
+                    && document.documentElement.dataset.tab === 'status')
+                metricFetch(cid, false);   // draws from cache, fetches if due
+        }
+    }, { rootMargin: '200px 0px' });
+    _cardIO.observe(sec);
+}
+function _popOpen(id) {
+    const ref = popHooks.ref;
+    return !!(ref && ref.isOpen && ref.isOpen(id));
+}
+function drawAllMetricCharts(idle) {
+    _idleDraw = !!idle;
+    try {
+        for (const id of [...metricCharts.keys()]) {
+            if (_idleDraw && (metricCharts.get(id) || {}).onScreen === false
+                && !_popOpen(id)) continue;
+            _drewSync = false;
+            metricFetch(id, false);
+            if (!_drewSync) drawMetricChart(id);
+        }
+    } finally {
+        _idleDraw = false;
     }
 }
 function relabelExplore() {

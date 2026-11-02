@@ -189,6 +189,9 @@ document.addEventListener('click', ev => {
 
 window.Uplift.popout = {
     open, close,
+    // CARD-IDLE: the board keeps drawing a card whose pop-out is open,
+    // even when the card itself is off screen or idle-skipped
+    isOpen(id) { return !!(popout && popout.id === id); },
     /* Registered into uplift_charts.js's popHooks on load — the card
        redraw paths call these with the columns they just built. */
     onSharedRedraw(tpsD, memD) {

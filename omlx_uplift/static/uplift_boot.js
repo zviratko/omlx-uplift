@@ -222,7 +222,8 @@ CH.drawAllMetricCharts();
 // 60 s is plenty — and it is one batched fetch PER WINDOW, not per card
 // (POLL-BATCH), values on the wire rounded to 6 sig digits (SQUEEZE).
 // Tab entry redraws immediately (uplift.js applyTab).
-setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAllMetricCharts(); }, 60_000);
+// CARD-IDLE: idle path (true) - off-screen and unchanged cards are skipped.
+setInterval(() => { if (!document.hidden && currentTab() === 'status') CH.drawAllMetricCharts(true); }, 60_000);
 UUP.initUsageRange();   // seeds the range select now that glue helpers exist
 UUP.pollUsage(); UUP.pollLogs();
 FE.connectEventStream();
@@ -247,7 +248,9 @@ LF.onFrame(() => {
         const now = Date.now();
         // half rate for the grid: many canvases, and 1 Hz is already 5x
         // the stored cadence — keeps a laptop tab cool
-        if (now - _lfCardsAt >= 900) { _lfCardsAt = now; CH.drawAllMetricCharts(); }
+        // CARD-IDLE: idle path - off-screen cards and cards with no live
+        // column and no new data are skipped (see uplift_charts.js)
+        if (now - _lfCardsAt >= 900) { _lfCardsAt = now; CH.drawAllMetricCharts(true); }
     });
 });
 if (layout.liveFeed) {
