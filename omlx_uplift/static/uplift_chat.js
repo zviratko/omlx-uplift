@@ -44,6 +44,7 @@ var _mounted = false, _dc = null, _key = null, _convs = [], _conv = null,
     _turnUsage = null,    // UP-38: accumulated token usage of the in-flight turn
     _turnT0 = 0, _turnFirstTok = 0,   // UP-38: wall clocks for gen t/s
     _convSearch = '',   // UP-39: history title filter
+    _convMenu = null,   // UP-39b: the open row actions menu {m, s} (one at a time)
     _mcpTools = [],   // UP-15: classic fetchMcpTools (chat.html:4443) — offered
                       // alongside web tools exactly like activeTools() :4418
     _ctxRender = null,    // UP-16: mount-time handle to the ctx ring renderer
@@ -865,6 +866,108 @@ async function openConv(id) {
     hydrateConv();   // round 11: sys fill + variant apply + legacy migration
     refreshConvList();
 }
+function convMenu(btn, s) {
+    // UP-39b (classic ce43187): rename + delete move into a per-row
+    // '...' menu beside the pin; the dblclick rename stays as an extra
+    // path. The panel is position:FIXED on purpose - the rail and the
+    // list both scroll (overflow:auto), so an absolute child would be
+    // clipped exactly where classic flips the menu UP for (the
+    // chatMenuUp rule in toggleChatMenu). Same dismiss contract as
+    // bench dropMenu: deferred document click, Escape, plus scroll -
+    // a fixed panel does not ride the rail's scroll, so an open menu
+    // must close rather than float over other rows.
+    var d = document;
+    if (_convMenu && _convMenu.s === s) { convMenuClose(); return; }
+    convMenuClose();
+    var m = el('div', 'chat-conv-menu');
+    m._s = s;
+    var item = function (key, fb, cls, fn) {
+        var b = el('button', cls, t(key, fb));
+        b.type = 'button';
+        b.addEventListener('click', function (ev) {
+            ev.stopPropagation();   // the opening click must not dismiss
+            convMenuClose();
+            fn();
+        });
+        m.appendChild(b);
+    };
+    item('chat.rename_tooltip', 'Rename chat', null,
+         function () { convRename(s, btn); });
+    item('chat.delete_tooltip', 'Delete chat', 'danger',
+         function () { convDelete(s); });
+    d.body.appendChild(m);
+    var r = btn.getBoundingClientRect();
+    var mh = m.offsetHeight || 72, mw = m.offsetWidth || 160;
+    // classic flips UP when the row sits near the bottom of the list
+    var list = gid('chat-native-convs');
+    var lb = list && list.getBoundingClientRect
+        ? list.getBoundingClientRect().bottom : d.documentElement.clientHeight;
+    var vh = d.documentElement.clientHeight || 800;
+    var top = r.bottom + 4;
+    if (r.bottom + 4 + mh > Math.min(lb, vh)) top = r.top - 4 - mh;
+    m.style.top = Math.max(4, top) + 'px';
+    m.style.left = Math.max(4, Math.min(r.right - mw,
+                                        (d.documentElement.clientWidth || 1200) - mw - 4)) + 'px';
+    _convMenu = { m: m, s: s };
+    // one named handler so removeEventListener really detaches
+    m._dismiss = function (ev) {
+        if (ev.key !== 'Escape') return;
+        convMenuClose();
+        // one-shot: the key belongs to the menu, not to Esc-as-stop
+        ev.stopPropagation();
+    };
+    m._dismissScroll = function () { convMenuClose(); };
+    setTimeout(function () {
+        if (!_convMenu || _convMenu.m !== m) return;
+        d.addEventListener('click', convMenuClose);
+        // capture so the menu's Escape wins the race against the
+        // window-level Esc-as-stop router (UP-40(4) borrowed-Escape trap)
+        d.addEventListener('keydown', m._dismiss, true);
+        d.addEventListener('scroll', m._dismissScroll, true);
+        d.addEventListener('resize', m._dismissScroll);
+    }, 0);
+}
+function convMenuClose() {
+    if (!_convMenu) return;
+    var m = _convMenu.m; _convMenu = null;
+    m.remove();
+    document.removeEventListener('click', convMenuClose);
+    if (m._dismiss) {
+        document.removeEventListener('keydown', m._dismiss, true);
+        document.removeEventListener('scroll', m._dismissScroll, true);
+        document.removeEventListener('resize', m._dismissScroll);
+    }
+}
+function convDelete(s) {
+    // UP-39b: per-row delete for ANY row (classic deleteChat :7665 -
+    // confirm, cut the stream if it is the live one, drop the row; the
+    // page resets to a fresh chat only when the CURRENT chat was cut).
+    // The toolbar Delete keeps its own path; the emptied-chat
+    // auto-delete (classic skipConfirm) is a different edge.
+    var CONFIRM = t('chat.confirm_delete_chat', 'Are you sure you want to delete this chat?');
+    if (s.id === (_conv && _conv.id)) {
+        if (!window.confirm(CONFIRM)) return;
+        stopAndSettle().then(function () { doConvDelete(s, true); });
+        return;
+    }
+    if (!window.confirm(CONFIRM)) return;
+    doConvDelete(s, false);
+}
+function doConvDelete(s, wasCurrent) {
+    var d = D();
+    d.deleteJson(api() + '/chat/history/' + encodeURIComponent(s.id))
+        .then(function () {
+            _convs = _convs.filter(function (c) { return c.id !== s.id; });
+            if (wasCurrent) {
+                _conv = newConv();
+                if (_dc) _dc.history = [];
+                if (_ctxRender) _ctxRender();   // UP-16: deleted chat, zero gauge
+            }
+            refreshConvList();
+        })
+        .catch(function (e) { d.toast(errText(e), 'error'); });
+}
+
 function refreshConvList() {
     // CHAT-3R: the picker became the LEFT history list (classic renders
     // conversations as rows, not a <select>). Same contract as before:
@@ -928,6 +1031,14 @@ function refreshConvList() {
                 .catch(function (e) { D().toast(errText(e), 'error'); });
         });
         row.appendChild(b);
+        // UP-39b (classic ce43187): the '...' actions button beside the pin
+        var more = el('button', 'chat-conv-more', '⋯');
+        more.type = 'button';
+        more.title = t('uplift.chat.more_actions', 'More actions');
+        more.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            convMenu(more, s);
+        });
         if (_conv && s.id === _conv.id && _streaming) {
             // per-row stop while THIS chat streams (classic :1308)
             var stop = el('button', 'chat-conv-stop', '\u25A0');
@@ -938,6 +1049,7 @@ function refreshConvList() {
             row.appendChild(stop);
         }
         row.appendChild(pin);
+        row.appendChild(more);   // UP-39b: menu sits beside the pin (classic)
         list.appendChild(row);
     });
 }

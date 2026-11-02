@@ -65,6 +65,7 @@
  "uplift.card.requests": "Requests",
  "uplift.card.throughput": "Throughput",
  "uplift.card.tokens": "Total tokens",
+ "uplift.chat.more_actions": "More actions",
  "uplift.chat.web_search": "Web search",
  "uplift.chat.params_used": "Sampling used for this reply",
  "uplift.chat.native_stub": "Native surface — not implemented yet.",

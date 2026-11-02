@@ -65,6 +65,7 @@
  "uplift.card.requests": "請求",
  "uplift.card.throughput": "吞吐量",
  "uplift.card.tokens": "總 Token 數",
+ "uplift.chat.more_actions": "更多操作",
  "uplift.chat.web_search": "網頁搜尋",
  "uplift.chat.params_used": "此回覆使用的取樣參數",
  "uplift.chat.native_stub": "原生介面 — 尚未實作。",

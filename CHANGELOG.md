@@ -13,6 +13,8 @@ users never see.
 
 ## Unreleased
 
+- **Chat history rows are compact and carry a "..." menu.** Rename and delete now sit in a per-row menu next to the pin, and you can delete any chat from its row, not only the open one.
+
 ## [3.2] - 2026-11-02
 
 - **Chat switching to a thinking model works end to end.** The switch stopped halfway: remembered sampling values never reached their inputs and the context ring stayed stale.

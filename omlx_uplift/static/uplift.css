@@ -3443,7 +3443,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-speak-row .btn { flex: 0 0 auto; }
 .chat-native-convlist { display: flex; flex-direction: column; gap: 2px;
     flex: 1 1 auto; min-height: 60px; max-height: 45vh; overflow-y: auto; }
-.chat-native-conv { text-align: left; font-size: 11px; padding: 4px 6px;
+.chat-native-conv { text-align: left; font-size: 11px; padding: 3px 6px;
     border: 1px solid transparent; border-radius: var(--radius);
     background: none; color: var(--ink); cursor: pointer;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3621,6 +3621,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     cursor: pointer; opacity: .45; font-size: 12px; padding: 2px 4px; }
 .chat-native-convrow:hover .chat-conv-pin { opacity: .9; }
 .chat-conv-stop { opacity: .9; color: var(--red); }
+/* UP-39b (classic ce43187): per-row '...' actions menu. The panel is
+   fixed-position (the rail AND the list clip absolutes) and owns its own
+   field well - the global input rules here are geometry-only. */
+.chat-conv-more { flex: none; background: none; border: 0;
+    cursor: pointer; opacity: .45; font-size: 13px; padding: 2px 5px;
+    line-height: 1; color: inherit; }
+.chat-native-convrow:hover .chat-conv-more { opacity: .9; }
+.chat-conv-menu { position: fixed; z-index: 60; display: flex;
+    flex-direction: column; min-width: 158px; padding: 4px 0;
+    background: var(--card); border: 1px solid var(--edge);
+    border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.chat-conv-menu button { display: block; width: 100%; text-align: left;
+    background: none; border: 0; color: var(--ink); font: inherit;
+    font-size: 11px; padding: 5px 10px; cursor: pointer; }
+.chat-conv-menu button:hover { background: var(--field); }
+.chat-conv-menu button.danger { color: var(--red); }
 /* Skinned like every other field well (user report: the box sat unthemed
    in the rail - UA white search field on a dark skin). appearance:none
    kills the WebKit searchfield chrome so radius/ground/border apply.
