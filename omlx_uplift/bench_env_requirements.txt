@@ -33,7 +33,7 @@ h11==0.16.0
 hf-xet==1.7.1
 httpcore2==2.16.0
 httpx2==2.16.0
-huggingface_hub==2.3.0
+huggingface_hub==2.4.0
 idna==3.20
 # ACC-2c batch-1 scoring deps, both MEASURED as missing in the pre-2c
 # bench-env (importlib.util.find_spec -> False) and both required at task
@@ -64,7 +64,7 @@ propcache==0.5.4
 pyarrow==26.0.0
 pytablewriter==1.2.1
 python-dateutil==2.9.0.post0
-pytz==2026.5
+pytz==2026.6
 PyYAML==6.0.3
 regex==2026.9.29
 requests==2.34.2
