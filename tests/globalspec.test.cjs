@@ -121,7 +121,7 @@ test('payload skip list stays minimal', () => {
     // round-trip it (omitting = "keep" server-side). Everything else in
     // the GlobalSettingsRequest schema must stay MAPPED and reachable.
     assert.deepStrictEqual([...skip].sort(),
-        ['api_key', 'base_path', 'ui_dashboard_layout']);
+        ['api_key', 'base_path', 'ui_custom_theme', 'ui_dashboard_layout']);
 });
 
 // P1A-8: model-settings editor parity. Every ModelSettingsRequest field must

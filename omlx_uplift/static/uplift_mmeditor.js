@@ -1362,18 +1362,28 @@ function renderEditorFields(container) {
             { label: C.tf('uplift.gs.adv.wide_proj', 'Qwen4 Wide-Proj GDN Decode'),
               hint: C.tf('uplift.gs.adv.wide_proj_hint',
                   'Wider projection in fused Qwen4 GDN decode (experimental).') }));
-    if (S.showsA8Prefill(m)) {
+    if (S.showsA8Prefill(m, seValues)) {
         // SYNC-1 fire 13 (upstream 18fe1c3 #4946): field family renamed to
         // a8_prefill_* and widened to DeepSeek V4.1 — labels now reuse
         // classic's own modal.model_settings.qwen_oq_a8* keys (translated in
         // all 10 locales through the mounted catalog; the old hardcoded EN
         // never resolved uplift.se.qwen35_oq_a8_enabled, seBind derives the
         // lookup key from the payload key).
+        // SYNC-1 fire 18: classic appends a second line when THIS Mac has no
+        // INT8 tensor units but a paired Prefill Accelerator Mac does
+        // (modal.model_settings.qwen_oq_a8_helper_only, same condition:
+        // a8_prefill_supported !== true && prefill_helper_node_id).
+        const a8Hint = C.tf('modal.model_settings.qwen_oq_a8_hint',
+            'Runs prefill with INT8 activations on supported Qwen and DeepSeek V4.1 models. Requires M5 or newer and the native kernels. Output quality may change, and it cannot be combined with ANE prefill. Applies after the model reloads.');
+        const a8HelperOnly = !!((m && m.a8_prefill_supported !== true)
+                                && seValues.prefill_helper_node_id);
         seFam(g, 'a8_prefill_enabled',
             seBind('bool', 'a8_prefill_enabled',
                 { label: C.tf('modal.model_settings.qwen_oq_a8', 'INT8 Activation Prefill'),
-                  hint: C.tf('modal.model_settings.qwen_oq_a8_hint',
-                      'Runs prefill with INT8 activations on supported Qwen and DeepSeek V4.1 models. Requires M5 or newer and the native kernels. Output quality may change, and it cannot be combined with ANE prefill. Applies after the model reloads.') }),
+                  hint: a8HelperOnly
+                      ? a8Hint + ' ' + C.tf('modal.model_settings.qwen_oq_a8_helper_only',
+                          'This Mac has no INT8 tensor units, so only the layers on the Prefill Accelerator Mac use INT8 activations.')
+                      : a8Hint }),
             [seBind('number', 'a8_prefill_min_tokens',
                 { label: C.tf('modal.model_settings.qwen_oq_a8_min_tokens', 'Minimum prompt tokens'), min: 1, step: 1 })]);
     }

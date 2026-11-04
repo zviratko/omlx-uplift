@@ -102,6 +102,10 @@
         'qwen4_gdn_decode_wide_proj',
         'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
         'a8_prefill_enabled', 'a8_prefill_min_tokens',
+        // SYNC-1 fire 18 (upstream f6897ff #5065): the Prefill Accelerator
+        // block lives in classic's ms-acceleration section, behind the same
+        // llm/vlm gate as its A8 neighbour.
+        'prefill_helper_node_id', 'prefill_helper_layers',
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         // SYNC-1 (upstream 7a4ea39): surviving dflash family only.
@@ -171,12 +175,28 @@
         return t === 'qwen4_exp' || t === 'deepseek_v41'
             || ['qwen3_5', 'qwen3_6', 'qwen3_8'].some(p => t.startsWith(p));
     };
-    // UP-18 (5): classic showsA8Prefill — the kernels need native INT8
-    // tensor ops (M5-series or newer, server verdict a8_prefill_supported);
-    // a saved "on" keeps the row so it can be turned off.
-    const showsA8Prefill = m => isA8PrefillModel(m)
+    /* SYNC-1 fire 18 (upstream f6897ff #5065): a8_prefill_enabled and
+       deepseek_v41_ced_prefill_enabled became TRI-STATE on the server
+       (Optional[bool] = None, and None means ON). model_settings.py
+       a8_prefill_on / ced_prefill_on are the two rules; mirror them verbatim
+       or every RELOAD badge and every payload fold reads the wrong way. */
+    const a8PrefillOn = d => {
+        const v = d && d.a8_prefill_enabled;
+        if (v === null || v === undefined)
+            return !(d && d.qwen35_ane_prefill_enabled);
+        return !!v;
+    };
+    const cedPrefillOn = d => !d || d.deepseek_v41_ced_prefill_enabled !== false;
+    // UP-18 (5) + SYNC-1 fire 18: classic showsA8Prefill — the kernels need
+    // native INT8 tensor ops (M5-series or newer, server verdict
+    // a8_prefill_supported); a saved "on" keeps the row so it can be turned
+    // off; and a paired Prefill Accelerator Mac IS INT8 hardware for the
+    // layers it runs, so the row shows for it too (ms.prefill_helper_node_id).
+    const showsA8Prefill = (m, ms) => isA8PrefillModel(m)
         && (m && m.a8_prefill_supported === true
-            || !!((m && m.settings) && m.settings.a8_prefill_enabled === true));
+            || !!((m && m.settings) && m.settings.a8_prefill_enabled === true)
+            || !!((ms && ms.prefill_helper_node_id)
+                  || (m && m.settings && m.settings.prefill_helper_node_id)));
     // UP-18 (4): classic DSA_MODEL_TYPES — the Index Cache row exists only
     // for sparse-attention models (DeepSeek V3.2 / GLM DSA).
     const DSA_MODEL_TYPES = new Set(['deepseek_v32', 'glm_moe_dsa']);
@@ -279,8 +299,19 @@
             qwen4_ple_ssd_offload: (model && model.qwen4_ple_ssd_offload_forced === true) || s.qwen4_ple_ssd_offload === true,
             qwen4_ple_ssd_offload_supported: !!(model && model.qwen4_ple_ssd_offload_supported === true),
             qwen4_ple_ssd_offload_forced: !!(model && model.qwen4_ple_ssd_offload_forced === true),
-            deepseek_v41_ced_prefill_enabled: s.deepseek_v41_ced_prefill_enabled === true,
+            // SYNC-1 fire 18 (upstream f6897ff #5065): unset means ON, only a
+            // saved false turns CED off (model_settings.ced_prefill_on).
+            deepseek_v41_ced_prefill_enabled: s.deepseek_v41_ced_prefill_enabled !== false,
             deepseek_v41_ced_prefill_supported: normType(model && model.config_model_type) === 'deepseek_v41',
+            // SYNC-1 fire 18: Prefill Accelerator (a paired Mac runs the first
+            // layers). The classic row feeds its helper list from
+            // /admin/api/prefill-helper/candidates; Uplift has no editor row
+            // for it yet (UP-67), so the state carries the STORED value and the
+            // payload echoes it — a save from this editor must never clear a
+            // helper the operator picked on the classic page.
+            prefill_helper_supported: !!(model && model.prefill_helper_supported === true),
+            prefill_helper_node_id: s.prefill_helper_node_id || '',
+            prefill_helper_layers: s.prefill_helper_layers ? String(s.prefill_helper_layers) : '',
             // SYNC-1 (upstream 3c39990): qwen4_gdn_decode_wide_proj moved from
             // GlobalSettingsRequest to ModelSettingsRequest. Classic computes
             // the row gate from the /models row's config_model_type
@@ -330,7 +361,9 @@
                 ? 4 : (s.turboquant_kv_bits || 4),
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!s.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: s.moe_expert_offload_resident_fraction ?? 0.25,
-            a8_prefill_enabled: s.a8_prefill_enabled || false,
+            // SYNC-1 fire 18: unset means ON unless ANE prefill claims the
+            // same projections (classic dashboard.js a8_prefill_on mirror).
+            a8_prefill_enabled: s.a8_prefill_enabled ?? !s.qwen35_ane_prefill_enabled,
             a8_prefill_min_tokens: s.a8_prefill_min_tokens ?? 128,
             qwen35_ane_prefill_enabled: s.qwen35_ane_prefill_enabled || false,
             qwen35_ane_prefill_sequence_length: s.qwen35_ane_prefill_sequence_length || 2048,
@@ -426,7 +459,10 @@
             if (!Number.isInteger(n) || n < 0)
                 errors.push('Top K must be an integer of at least 0.');
         }
-        if (ms.a8_prefill_enabled) {
+        // SYNC-1 fire 18: classic gates the whole A8 check on the row being
+        // shown (validateA8PrefillSettings) — a family the row never renders
+        // for cannot block a save.
+        if (ms.a8_prefill_enabled && showsA8Prefill(model, ms)) {
             if (ms.qwen35_ane_prefill_enabled)
                 errors.push('ANE prefill and INT8 activation prefill cannot both be enabled; they accelerate the same projections. Turn one off.');
             const mt = num(ms.a8_prefill_min_tokens);
@@ -550,7 +586,10 @@
             index_cache_freq: ms.enableIndexCache ? (ms.index_cache_freq || 4) : 0,
             enable_thinking: model && model.thinking_forced ? null : ms.enable_thinking,
             qwen4_ple_ssd_offload: !!ms.qwen4_ple_ssd_offload,
-            deepseek_v41_ced_prefill_enabled: !!ms.deepseek_v41_ced_prefill_enabled,
+            // SYNC-1 fire 18: CED moved out of the always-sent base — classic
+            // sends it only where its row renders (deepseek_v41_ced_prefill_
+            // supported), so an untouched model keeps the field UNSET (= on)
+            // instead of being saved off. See the conditional below.
             // SYNC-1 (upstream 3c39990 + tip routes.py:2833): model-level key,
             // sent ONLY when the row is supported. The running keg may still
             // be pre-3c39990, whose ModelSettingsRequest has no such field and
@@ -579,8 +618,15 @@
             turboquant_kv_bits: ms.turboquant_kv_enabled ? (parseFloat(ms.turboquant_kv_bits) || 4) : 4,
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!ms.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: ms.moe_expert_offload_resident_fraction ?? 0.25,
-            a8_prefill_enabled: !!ms.a8_prefill_enabled,
-            a8_prefill_min_tokens: Number(ms.a8_prefill_min_tokens) || 128,
+            // SYNC-1 fire 18 (upstream f6897ff #5065): Prefill Accelerator.
+            // Classic sends both keys unconditionally; the editor state
+            // carries the stored value, so a save from Uplift preserves a
+            // helper chosen on the classic page. dropPostTipKeys keeps the pair
+            // off a keg that predates the fields (extra='forbid' would 422).
+            prefill_helper_node_id: ms.prefill_helper_node_id || null,
+            prefill_helper_layers: ms.prefill_helper_node_id && ms.prefill_helper_layers
+                ? parseInt(ms.prefill_helper_layers, 10)
+                : null,
             qwen35_ane_prefill_enabled: !!ms.qwen35_ane_prefill_enabled,
             qwen35_ane_prefill_sequence_length: Number(ms.qwen35_ane_prefill_sequence_length) || 2048,
             qwen35_ane_prefill_tail_padding_min_tokens: Number.isFinite(Number(ms.qwen35_ane_prefill_tail_padding_min_tokens))
@@ -649,6 +695,18 @@
             payload.embedding_audio_enabled = !!ms.embedding_audio_enabled;
             payload.embedding_audio_max_seconds = sec > 0 ? sec : null;
         }
+        // SYNC-1 fire 18 (upstream f6897ff #5065): the two keys whose whole
+        // point is "unset means on" leave the payload when their row is hidden,
+        // exactly like classic (dashboard.js buildModelSettingsPayload). An
+        // unconditional `false` here would pin the feature OFF on every model
+        // the operator never opened.
+        if (ms.deepseek_v41_ced_prefill_supported) {
+            payload.deepseek_v41_ced_prefill_enabled = !!ms.deepseek_v41_ced_prefill_enabled;
+        }
+        if (showsA8Prefill(model, ms)) {
+            payload.a8_prefill_enabled = !!ms.a8_prefill_enabled;
+            payload.a8_prefill_min_tokens = Number(ms.a8_prefill_min_tokens) || 128;
+        }
         // MT-1: a non-LLM effective type must not carry LLM-family values.
         // Reached via a model_type_override flip: the editor hid those rows,
         // but buildPayload would otherwise write the stale LLM values back
@@ -695,7 +753,11 @@
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
                 vlm_mtp_enabled: false, vlm_mtp_draft_model: null,
                 moe_expert_offload_enabled: false,
-                a8_prefill_enabled: false,
+                // SYNC-1 fire 18: a8_prefill_enabled is NO LONGER zeroed here.
+                // It left the always-sent base and is written only when
+                // showsA8Prefill passes (a diffusion config type never joins the
+                // A8 family), so writing `false` would save an OFF the field
+                // classic leaves UNSET (= on).
             });
         }
         return payload;
@@ -775,7 +837,7 @@
             add('turboquant_kv_scheme', kvScheme);
             add('turboquant_kv_bits', kvPin !== null ? kvPin : (d.turboquant_kv_bits ?? 4));
         }
-        const oqOn = !!d.a8_prefill_enabled;
+        const oqOn = a8PrefillOn(d);
         add('a8_prefill_enabled', oqOn);
         if (oqOn) add('a8_prefill_min_tokens', d.a8_prefill_min_tokens ?? 128);
         const aneOn = !!d.qwen35_ane_prefill_enabled;
@@ -813,7 +875,7 @@
         // the signature unconditionally next to the PLE offload.
         add('qwen4_gdn_decode_wide_proj', !!d.qwen4_gdn_decode_wide_proj);
         add('deepseek_v41_engram_ssd_offload', !!d.deepseek_v41_engram_ssd_offload);
-        add('deepseek_v41_ced_prefill_enabled', !!d.deepseek_v41_ced_prefill_enabled);
+        add('deepseek_v41_ced_prefill_enabled', cedPrefillOn(d));
         const spOn = !!d.specprefill_enabled && has(d.specprefill_draft_model);
         add('specprefill_enabled', spOn);
         if (spOn) {
@@ -1041,7 +1103,11 @@
        body model is extra='forbid' — the mere key 422s the save. When the
        live schema is known and lacks it, omit (omission = "keep"). The
        payload shape AND the profile-override shape both pass through here. */
-    const POST_TIP_MSR_KEYS = ['qwen4_gdn_decode_wide_proj'];
+    const POST_TIP_MSR_KEYS = ['qwen4_gdn_decode_wide_proj',
+        // SYNC-1 fire 18 (upstream f6897ff #5065): a keg older than the tip has
+        // no Prefill Accelerator fields, and its ModelSettingsRequest is
+        // extra='forbid' — the pair must be dropped there, never sent as null.
+        'prefill_helper_node_id', 'prefill_helper_layers'];
     function dropPostTipKeys(obj, fields) {
         if (!fields) return obj;
         let out = obj;
@@ -1237,7 +1303,8 @@
              DFLASH_DRAFTER_CONFIG_MODEL_TYPES,
              llmLike, TYPE_ONLY_KEYS, stickyForType,
              normType,
-             isDiffusion, isA8PrefillModel, showsA8Prefill, DSA_MODEL_TYPES,
+             isDiffusion, isA8PrefillModel, showsA8Prefill,
+             a8PrefillOn, cedPrefillOn, DSA_MODEL_TYPES,
              coerceKwargValue, buildCtKwargEntries,
              kwargIdentity, mergeRawKwargs,
              buildState, validate, buildPayload, adaptToServerPayload,

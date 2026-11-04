@@ -13,6 +13,8 @@ users never see.
 
 ## Unreleased
 
+- **The Claude Code command no longer prints your API key on screen.** The rendered command carried the real `ANTHROPIC_AUTH_TOKEN` value, visible to anyone looking at the screen or a screenshot. It now shows bullets and the copy button still puts the working command on the clipboard.
+- **Saving a model no longer switches off prefill accelerators you never touched.** INT8 activation prefill and DeepSeek V4.1 CED prefill became "on unless you save it off" upstream; the editor was still writing an explicit off for every model it saved, including ones whose row was hidden.
 - **A patch the catalog retires is marked RETIRED, not broken.** A machine that still had one we dropped failed every upgrade with `source re-gate failed -- HTTP 404` while its card said applied. It is now switched off, labelled RETIRED on the card, in the upgrade log and in `omlx-uplift patches`, and kept with its stored version until you remove it.
 - **The Enable Thinking switch is back.** It disappeared for models the server reports no thinking default for; it now shows for every text or vision model, as classic always did.
 - **Editing a chat-template parameter lights up SAVE.** Reasoning effort and the other parameter rows counted in CHANGES but never enabled the button, so the change could not be saved from the tab holding it.

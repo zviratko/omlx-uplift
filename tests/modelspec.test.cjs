@@ -84,9 +84,13 @@ test('validate: mtp + dflash conflict', () => {
     assert.match(ok(st).join('|'), /Lightning MTP and DFlash/);
 });
 test('validate: oq A8 vs ANE conflict + min tokens', () => {
-    const st = S.buildState(base(), { a8_prefill_enabled: true,
+    // SYNC-1 fire 18: the check runs only where the row shows (classic
+    // validateA8PrefillSettings gates on showsA8Prefill), so the model carries
+    // the server's INT8 verdict.
+    const m8 = base({ a8_prefill_supported: true });
+    const st = S.buildState(m8, { a8_prefill_enabled: true,
         qwen35_ane_prefill_enabled: true, a8_prefill_min_tokens: 0 });
-    const errs = ok(st);
+    const errs = S.validate(st, m8);
     assert.strictEqual(errs.length, 2);
 });
 test('validate: ANE prompt block multiple of 64', () => {
@@ -758,9 +762,12 @@ test('SYNC-1 f13: family is the classic exact/prefix rule incl. deepseek_v41', (
         'qwen4_exp is an EXACT match (classic comment: unvalidated checkpoints)');
 });
 test('SYNC-1 f13: buildPayload speaks the new keys only — no qwen35_oq_a8 leak', () => {
+    // SYNC-1 fire 18: the row needs the server's INT8 verdict to render, and
+    // buildPayload writes the pair only when it does.
+    const m8 = base({ a8_prefill_supported: true });
     const p = S.buildPayload(Object.assign(
-        S.buildState(base(), { a8_prefill_enabled: true, a8_prefill_min_tokens: 256 }),
-        { model_alias: 'x' }), base());
+        S.buildState(m8, { a8_prefill_enabled: true, a8_prefill_min_tokens: 256 }),
+        { model_alias: 'x' }), m8);
     assert.strictEqual(p.a8_prefill_enabled, true);
     assert.strictEqual(p.a8_prefill_min_tokens, 256);
     assert.ok(!('qwen35_oq_a8_enabled' in p) && !('qwen35_oq_a8_min_tokens' in p),
@@ -776,11 +783,108 @@ test('SYNC-1 f13: signature + reload keys renamed with the payload', () => {
     assert.ok(![...S.RUNTIME_SETTING_KEYS].some(k => k.startsWith('qwen35_oq_a8')));
 });
 test('SYNC-1 f13: validate mirrors the tip A8 messages', () => {
-    const errs = S.validate(base() && S.buildState(base(),
-        { a8_prefill_enabled: true, qwen35_ane_prefill_enabled: true }), base());
+    const m8 = base({ a8_prefill_supported: true });   // fire 18: row gate
+    const errs = S.validate(S.buildState(m8,
+        { a8_prefill_enabled: true, qwen35_ane_prefill_enabled: true }), m8);
     assert.ok(errs.some(e => /ANE prefill and INT8 activation prefill/.test(e)));
-    const errs2 = S.validate(S.buildState(base(),
-        { a8_prefill_enabled: true, a8_prefill_min_tokens: 0 }), base());
+    const errs2 = S.validate(S.buildState(m8,
+        { a8_prefill_enabled: true, a8_prefill_min_tokens: 0 }), m8);
     assert.ok(errs2.some(e => e === 'A8 minimum prompt tokens must be a positive integer.'),
         'tip reworded oQ A8 -> A8 (js.error.oq_a8_min_tokens_positive EN value)');
+});
+
+/* ---- SYNC-1 fire 18 (upstream f6897ff #5065): Prefill Accelerator + the
+   a8/CED tri-state. Both booleans became Optional[bool] = None where UNSET
+   means ON, and classic moved them out of its always-sent payload; a save
+   that still writes `false` would switch the feature off on every model the
+   operator never opened. ---- */
+test('f18: unset a8_prefill_enabled reads as ON, saved false stays off', () => {
+    const m8 = base({ a8_prefill_supported: true });
+    assert.strictEqual(S.buildState(m8, {}).a8_prefill_enabled, true,
+        'unset = on (model_settings.a8_prefill_on)');
+    assert.strictEqual(S.buildState(m8, { a8_prefill_enabled: false }).a8_prefill_enabled, false,
+        'a saved false is the only thing that turns it off');
+    // unset yields to ANE prefill, which claims the same projections
+    assert.strictEqual(S.buildState(m8, { qwen35_ane_prefill_enabled: true }).a8_prefill_enabled, false);
+    assert.strictEqual(S.a8PrefillOn({}), true);
+    assert.strictEqual(S.a8PrefillOn({ qwen35_ane_prefill_enabled: true }), false);
+    assert.strictEqual(S.a8PrefillOn({ a8_prefill_enabled: false, qwen35_ane_prefill_enabled: true }), false);
+    assert.strictEqual(S.a8PrefillOn({ a8_prefill_enabled: true }), true);
+});
+test('f18: unset deepseek_v41_ced_prefill_enabled reads as ON', () => {
+    const v41 = base({ config_model_type: 'deepseek_v41' });
+    assert.strictEqual(S.buildState(v41, {}).deepseek_v41_ced_prefill_enabled, true);
+    assert.strictEqual(S.buildState(v41, { deepseek_v41_ced_prefill_enabled: false })
+        .deepseek_v41_ced_prefill_enabled, false);
+    assert.strictEqual(S.cedPrefillOn({}), true);
+    assert.strictEqual(S.cedPrefillOn({ deepseek_v41_ced_prefill_enabled: null }), true);
+    assert.strictEqual(S.cedPrefillOn({ deepseek_v41_ced_prefill_enabled: false }), false);
+});
+test('f18: CED + A8 keys leave the payload when their row is hidden', () => {
+    // A non-DeepSeek model: classic never renders the CED row, so it never
+    // sends the key — the stored value stays UNSET (= on) instead of false.
+    const p = S.buildPayload(S.buildState(base(), {}), base());
+    assert.ok(!('deepseek_v41_ced_prefill_enabled' in p),
+        'an untouched model must not be saved with CED off');
+    // A machine without INT8 units and no helper Mac: same story for A8.
+    assert.ok(!('a8_prefill_enabled' in p) && !('a8_prefill_min_tokens' in p),
+        'hidden A8 row stays unset (classic: "a hidden A8 toggle stays unset (on)")');
+    // The row shows for the family on INT8 hardware, and for a paired helper.
+    const onInt8 = base({ a8_prefill_supported: true });
+    assert.strictEqual(S.buildPayload(S.buildState(onInt8, {}), onInt8)
+        .a8_prefill_enabled, true);
+    const withHelper = Object.assign(S.buildState(base(), {}),
+        { prefill_helper_node_id: 'node-2' });
+    assert.strictEqual('a8_prefill_enabled' in S.buildPayload(withHelper, base()), true,
+        'a Prefill Accelerator Mac is INT8 hardware for its own layers');
+    const v41 = base({ config_model_type: 'deepseek_v41' });
+    assert.strictEqual(S.buildPayload(S.buildState(v41, {}), v41)
+        .deepseek_v41_ced_prefill_enabled, true);
+});
+test('f18: prefill_helper pair round-trips so an Uplift save never clears it', () => {
+    const m = base({ prefill_helper_supported: true });
+    const st = S.buildState(m, { prefill_helper_node_id: 'node-7',
+                                 prefill_helper_layers: 12 });
+    assert.strictEqual(st.prefill_helper_node_id, 'node-7');
+    assert.strictEqual(st.prefill_helper_layers, '12',
+        'classic keeps the select as a STRING in state');
+    const p = S.buildPayload(st, m);
+    assert.strictEqual(p.prefill_helper_node_id, 'node-7');
+    assert.strictEqual(p.prefill_helper_layers, 12, 'payload sends an INT');
+    // no helper chosen -> both null, layers never an int on its own
+    const off = S.buildPayload(S.buildState(m, { prefill_helper_layers: '8' }), m);
+    assert.strictEqual(off.prefill_helper_node_id, null);
+    assert.strictEqual(off.prefill_helper_layers, null);
+    // an older keg (no fields in the live schema) must not see the keys at all
+    const stripped = S.adaptToServerPayload(p, new Set(['a8_prefill_enabled']));
+    assert.ok(!('prefill_helper_node_id' in stripped) && !('prefill_helper_layers' in stripped),
+        'extra=forbid on a pre-#5065 keg would 422 the save');
+    const kept = S.adaptToServerPayload(p, new Set(['prefill_helper_node_id',
+        'prefill_helper_layers']));
+    assert.strictEqual(kept.prefill_helper_node_id, 'node-7');
+});
+test('f18: prefill_helper is NOT reload material and IS type-strip material', () => {
+    // routes.py applies it through engine.configure_prefill_helper() — "Applied
+    // without reloading the model", so a RELOAD badge here would be a lie.
+    assert.ok(!S.RUNTIME_SETTING_KEYS.has('prefill_helper_node_id')
+              && !S.RUNTIME_SETTING_KEYS.has('prefill_helper_layers'));
+    assert.ok(!('prefill_helper_node_id' in S.runtimeSignature(
+        S.buildPayload(S.buildState(base({ prefill_helper_supported: true }),
+            { prefill_helper_node_id: 'n1', prefill_helper_layers: '4' }),
+            base({ prefill_helper_supported: true })), base())));
+    // classic renders the block in ms-acceleration, behind the llm/vlm gate
+    assert.ok(S.TYPE_ONLY_KEYS.has('prefill_helper_node_id')
+              && S.TYPE_ONLY_KEYS.has('prefill_helper_layers'));
+    const emb = base();
+    const p = S.buildPayload(Object.assign(S.buildState(emb, {}),
+        { model_type_override: 'embedding',
+          prefill_helper_node_id: 'n1', prefill_helper_layers: '4' }), emb);
+    assert.ok(!('prefill_helper_node_id' in p) && !('prefill_helper_layers' in p),
+        'a flip to a non-LLM engine must not re-apply the accelerator');
+});
+test('f18: a diffusion save never writes a8_prefill_enabled false', () => {
+    const d = base({ config_model_type: 'diffusion_gemma' });
+    const p = S.buildPayload(S.buildState(d, {}), d);
+    assert.ok(!('a8_prefill_enabled' in p),
+        'the old zeroing line would save an OFF the server keeps unset');
 });

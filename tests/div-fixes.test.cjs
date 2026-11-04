@@ -37,20 +37,27 @@ const aliasDiffChips = new Function('window',
 const model = (over = {}) => Object.assign(
     { id: 'm1', model_type: 'llm', config_model_type: 'qwen3_5' }, over);
 const rt = (over = {}) => S.buildPayload(S.buildState(model(), over), model());
+/* SYNC-1 fire 18 (upstream f6897ff): the A8 pair left the always-sent payload
+   and is written only where classic renders the row — on a machine with INT8
+   tensor units (server verdict) or with a Prefill Accelerator Mac paired.
+   These two DIV-2 pins are about master/knob diff NOISE, so they need a model
+   whose row actually shows. */
+const modelA8 = (over = {}) => model(Object.assign({ a8_prefill_supported: true }, over));
+const rtA8 = (over = {}) => S.buildPayload(S.buildState(modelA8(), over), modelA8());
 
 /* ================= DIV-2: runtimeDiff display ================= */
 test('DIV-2: a master flip shows only the master row, not an equal knob', () => {
     // profile turns oq_a8 ON but leaves min_tokens at the default 128 that
     // the base also holds -> "a8_prefill_min_tokens 128 -> 128" was noise
     const d = S.runtimeDiff(
-        rt({ a8_prefill_enabled: false, a8_prefill_min_tokens: 128 }),
-        rt({ a8_prefill_enabled: true, a8_prefill_min_tokens: 128 }));
+        rtA8({ a8_prefill_enabled: false, a8_prefill_min_tokens: 128 }),
+        rtA8({ a8_prefill_enabled: true, a8_prefill_min_tokens: 128 }));
     assert.deepStrictEqual(d.map(r => r.key), ['a8_prefill_enabled']);
 });
 test('DIV-2: the same flip with a REAL knob change keeps the knob row', () => {
     const d = S.runtimeDiff(
-        rt({ a8_prefill_enabled: false, a8_prefill_min_tokens: 128 }),
-        rt({ a8_prefill_enabled: true, a8_prefill_min_tokens: 256 }));
+        rtA8({ a8_prefill_enabled: false, a8_prefill_min_tokens: 128 }),
+        rtA8({ a8_prefill_enabled: true, a8_prefill_min_tokens: 256 }));
     assert.deepStrictEqual(d.map(r => r.key),
         ['a8_prefill_enabled', 'a8_prefill_min_tokens']);
 });

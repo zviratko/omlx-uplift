@@ -99,7 +99,14 @@ const GS_MAP = {
    Uplift has its own localStorage layout and must never round-trip or
    clobber the classic one. Omitting a key means "keep" server-side
    (routes.py only applies keys present in model_fields_set). */
-const GS_PAYLOAD_SKIP = new Set(['base_path', 'api_key', 'ui_dashboard_layout']);
+// SYNC-1 fire 18 (upstream 034d0a4/#5037 + f7a8255): ui_custom_theme is the
+// classic web UI color-token override map ({"light":{token:#hex},"dark":{...}}).
+// Uplift has no theme editor and its own skin system owns this box's colors, so
+// the key is never round-tripped: the server only reads it when it is in
+// model_fields_set, so omission KEEPS whatever the operator set on the classic
+// page. Sending the nested GET shape back through the flat save would corrupt it.
+const GS_PAYLOAD_SKIP = new Set(['base_path', 'api_key', 'ui_dashboard_layout',
+    'ui_custom_theme']);
 
 /* Integration keys whose save payload carries the integrations_ prefix;
    the others (markitdown_*, web_search_*) save bare — classic parity,
@@ -366,15 +373,21 @@ const CLAUDE_CLOUD_UNSET = 'env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN '
     + '-u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL '
     + '-u ANTHROPIC_DEFAULT_HAIKU_MODEL -u API_TIMEOUT_MS '
     + '-u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC claude';
-function claudeCodeCommand(cc, conn) {
+// SYNC-1 fire 18 (upstream 579db64 #5055): the on-screen variant masks the
+// auth token (sub-key style bullets) so a shared screen or a screenshot never
+// carries the API key; the copy button still copies the REAL command.
+// Classic's mask value is `api_key ? '••••••••' : ''`.
+function claudeCodeCommand(cc, conn, opts) {
     if ((cc || {}).mode === 'cloud') return CLAUDE_CLOUD_UNSET;
     const c = conn || {};
+    const mask = !!(opts && opts.mask);
     const port = c.port || 8000;
     const ph = 'select-a-model';
+    const token = mask ? (c.apiKey ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : '') : c.apiKey;
     const parts = [
         `${shellEnv('ANTHROPIC_BASE_URL', 'http://' + displayHostFor(c.host) + ':' + port)}`,
     ];
-    if (c.apiKey) parts.push(shellEnv('ANTHROPIC_AUTH_TOKEN', c.apiKey));
+    if (token) parts.push(shellEnv('ANTHROPIC_AUTH_TOKEN', token));
     parts.push(shellEnv('ANTHROPIC_DEFAULT_OPUS_MODEL', (cc || {}).opus_model || ph));
     parts.push(shellEnv('ANTHROPIC_DEFAULT_SONNET_MODEL', (cc || {}).sonnet_model || ph));
     parts.push(shellEnv('ANTHROPIC_DEFAULT_HAIKU_MODEL', (cc || {}).haiku_model || ph));
