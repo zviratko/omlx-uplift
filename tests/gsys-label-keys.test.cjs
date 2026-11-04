@@ -80,3 +80,29 @@ test('keyless-inference row is fully labeled and confirms', () => {
     assert.match(L.auth.keyless_hint, /Admin still requires authentication/);
     assert.match(L.auth.keyless_confirm, /Select OK only if you understand/);
 });
+
+/* The say family (vendored omlx-tts-macos-say, PR #5076) is the first GS_LABELS
+   block whose translations Uplift owns, so pin the overlay contract: every row
+   string must exist as 'uplift.gs.say.<key>' in EVERY locale file. A missing key
+   is invisible at runtime — the overlay just leaves the English fallback on the
+   row, so it looks right in one language and stays silently English in nine.
+   ('ph' is the literal example 'en-GB', not a translatable string.) */
+test('uplift.gs.say.* is translated in every locale file', () => {
+    const L = extractLabels();
+    const dir = path.join(__dirname, '..', 'omlx_uplift', 'locales');
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+    assert.ok(files.length >= 10, `expected the 10 locale files, found ${files.length}`);
+    const keys = Object.keys(L.say).filter(k => k !== 'ph');
+    assert.ok(keys.length >= 6,
+        `say family shrank to ${keys.length} — the guard would go vacuous`);
+    for (const f of files) {
+        const cat = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        for (const k of keys) {
+            const key = 'uplift.gs.say.' + k;
+            assert.ok(typeof cat[key] === 'string' && cat[key].length,
+                `${f}: missing ${key}`);
+            if (f !== 'en.json') assert.notEqual(cat[key], L.say[k],
+                `${f}: ${key} still holds the English fallback`);
+        }
+    }
+});
