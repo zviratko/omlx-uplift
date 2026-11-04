@@ -432,17 +432,58 @@ def test_classic_mapping_declared_wins():
     assert skins.classic_mapping({"classic": {"theme": "light",
                                               "enhanced": True},
                                   "tokens": {"bg": "#000000"}}) == \
-        {"theme": "light", "enhanced": True}
+        {"theme": "light", "enhanced": True, "colors": True,
+         "palette": {"bg": "#000000"}}
 
 
 def test_classic_mapping_bg_luminance_default():
     dark = skins.classic_mapping({"tokens": {"bg": "#14151a"}})
-    assert dark == {"theme": "dark", "enhanced": False}
+    assert dark == {"theme": "dark", "enhanced": False, "colors": True,
+                    "palette": {"bg": "#14151a"}}
     light = skins.classic_mapping({"tokens": {"bg": "#f5f5f0"}})
-    assert light == {"theme": "light", "enhanced": False}
+    assert light == {"theme": "light", "enhanced": False, "colors": True,
+                     "palette": {"bg": "#f5f5f0"}}
     # unusable bg -> dark is the safe default
     assert skins.classic_mapping({"tokens": {"bg": "red"}})["theme"] == "dark"
     assert skins.classic_mapping({})["theme"] == "dark"
+
+
+# ------------------------------------------------- UP-68 classic palette bridge
+
+def test_classic_palette_only_declared_bridge_tokens():
+    """An undeclared token must NOT ship: uplift.css's default --good is
+    near-white ink, and classic's success is green — inheriting a default
+    would repaint classic with a colour no crate author chose."""
+    p = skins.classic_palette({"tokens": {"bg": "#101014", "card": "#1a1a20",
+                                          "good": "#f2f0ea", "gs-tab": "#fff"}})
+    assert p == {"bg": "#101014", "card": "#1a1a20"}
+
+
+def test_classic_palette_normalizes_and_drops_alpha():
+    p = skins.classic_palette({"tokens": {"bg": "#abc", "ink": "rgb(242, 240, 234)",
+                                          "dim": "rgba(1,2,3,0.5)",
+                                          "edge": "#3a3b4080",
+                                          "accent": "hsl(40,90%,50%)"}})
+    assert p == {"bg": "#aabbcc", "ink": "#f2f0ea"}
+
+
+def test_classic_mapping_colors_opt_out():
+    on = skins.classic_mapping({"classic": {}, "tokens": {}})
+    assert on["colors"] is True and on["palette"] == {}
+    off = skins.classic_mapping({"classic": {"colors": False},
+                                 "tokens": {"bg": "#101014"}})
+    assert off["colors"] is False
+
+
+def test_opaque_hex_helper():
+    assert skins._opaque_hex("#abc") == "#aabbcc"
+    assert skins._opaque_hex("#23242780") is None
+    assert skins._opaque_hex("#2324") is None
+    assert skins._opaque_hex("rgb(35, 36, 39)") == "#232427"
+    assert skins._opaque_hex("rgba(35, 36, 39, 1)") == "#232427"
+    assert skins._opaque_hex("rgba(35, 36, 39, 0.4)") is None
+    assert skins._opaque_hex("red") is None
+    assert skins._opaque_hex(None) is None
 
 
 def test_luminance_helper():
@@ -500,7 +541,14 @@ def test_route_listing(client, root):
     assert row["label"] == "Night Watch"
     assert row["ts"] == 1_700_000_000
     assert row["stale"] is False and row["yml_newer"] is False
-    assert row["classic"] == {"theme": "dark", "enhanced": False}
+    assert row["classic"] == {"theme": "dark", "enhanced": False,
+                              "colors": True,
+                              # UP-68: only the bridge tokens the crate
+                              # declares (CRATE sets bg/card/accent; ink, dim,
+                              # edge and panel are absent on purpose, so
+                              # classic keeps its own readable inks)
+                              "palette": {"bg": "#14151a", "card": "#1c1d24",
+                                          "accent": "#57e38a"}}
 
 
 def test_route_theme_css_etag_304(client, root):

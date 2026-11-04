@@ -821,9 +821,10 @@ def _clone_entries(entries: list[dict]) -> list[dict]:
 
 
 def classic_mapping(crate: dict) -> dict:
-    """{theme: light|dark, enhanced: bool} for the embedded classic pages
-    (design section 5). Declared values win; else theme derives from --bg
-    luminance (light bg -> light, everything else -> dark)."""
+    """{theme: light|dark, enhanced: bool, colors: bool, palette: {}} for the
+    embedded classic pages (design section 5). Declared values win; else theme
+    derives from --bg luminance (light bg -> light, everything else -> dark).
+    `colors` gates the UP-68 palette bridge, `palette` feeds it."""
     classic = crate.get("classic") or {}
     theme = classic.get("theme")
     if theme not in ("light", "dark"):
@@ -836,7 +837,63 @@ def classic_mapping(crate: dict) -> dict:
         theme = "light" if (lum is not None and lum > 0.5) else "dark"
     enhanced = classic.get("enhanced")
     return {"theme": theme, "enhanced": bool(enhanced) if isinstance(
-        enhanced, bool) else False}
+        enhanced, bool) else False,
+        # UP-68 (option 5): re-tint the embedded classic pages from this
+        # crate's palette? Opt-out per crate for skins whose language depends
+        # on classic staying neutral (`classic: {colors: false}`).
+        "colors": classic.get("colors") is not False,
+        "palette": classic_palette(crate)}
+
+
+# The crate tokens the classic palette bridge can consume. Ground, ink,
+# border, accent only — see omlx_uplift/static/uplift_skinbridge.js (CROSSWALK)
+# for why classic's status and action colours stay its own.
+CLASSIC_BRIDGE_TOKENS = ("bg", "card", "panel", "ink", "dim", "edge", "accent")
+
+
+def classic_palette(crate: dict) -> dict:
+    """Declared colour tokens an embedded classic page may be tinted from,
+    as {crate token: '#rrggbb'}.
+
+    Only tokens the crate DECLARES are listed. An undeclared one would
+    inherit uplift.css's default, and several defaults do not mean what the
+    classic name means (--good is near-white ink on the board, not green).
+    Alpha is dropped rather than composited: classic's sanitizer accepts only
+    #rgb/#rrggbb, and a translucent ground laid over classic's own page is
+    not a colour anyone can reason about."""
+    tokens = crate.get("tokens") or {}
+    out = {}
+    for key in CLASSIC_BRIDGE_TOKENS:
+        if key not in tokens:
+            continue
+        hexed = _opaque_hex(tokens.get(key))
+        if hexed:
+            out[key] = hexed
+    return out
+
+
+def _opaque_hex(color):
+    """'#rrggbb' for an opaque #rgb/#rrggbb/rgb()/rgba(a=1) value, else None."""
+    c = str(color or "").strip().lower()
+    if not c:
+        return None
+    if _HEX_RE.match(c):
+        h = c[1:]
+        if len(h) == 3:
+            return "#" + "".join(ch * 2 for ch in h)
+        if len(h) == 6:
+            return "#" + h
+        return None                      # 4/8 digits = alpha, not opaque
+    m = re.match(r"^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)"
+                 r"(?:[,/\s]+([\d.]+%?))?\s*\)$", c)
+    if not m:
+        return None
+    if m.group(4) is not None:
+        a = float(m.group(4).rstrip("%")) / 100 if m.group(4).endswith("%") \
+            else float(m.group(4))
+        if a < 0.999:
+            return None
+    return "#" + "".join(f"{min(255, int(x)):02x}" for x in m.groups()[:3])
 
 
 def _luminance(color: str):

@@ -13,6 +13,7 @@ users never see.
 
 ## Unreleased
 
+- **The embedded classic pages now wear your skin.** Chat, Bench and Cluster used to open in classic's own slate no matter what the board was wearing. The skin's ground, ink, border and accent colours now carry across. A colour you set yourself in classic's theme editor still wins, a colour the skin does not define stays classic's own, and a skin can decline the whole thing with `classic: {colors: false}`.
 - **The Claude Code command no longer prints your API key on screen.** The rendered command carried the real `ANTHROPIC_AUTH_TOKEN` value, visible to anyone looking at the screen or a screenshot. It now shows bullets and the copy button still puts the working command on the clipboard.
 - **Saving a model no longer switches off prefill accelerators you never touched.** INT8 activation prefill and DeepSeek V4.1 CED prefill became "on unless you save it off" upstream; the editor was still writing an explicit off for every model it saved, including ones whose row was hidden.
 - **A patch the catalog retires is marked RETIRED, not broken.** A machine that still had one we dropped failed every upgrade with `source re-gate failed -- HTTP 404` while its card said applied. It is now switched off, labelled RETIRED on the card, in the upgrade log and in `omlx-uplift patches`, and kept with its stored version until you remove it.

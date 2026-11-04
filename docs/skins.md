@@ -46,6 +46,16 @@ label: "My Skin"
 classic:              # how embedded classic pages (Bench/Chat) are mapped
   theme: dark         #   light | dark — optional, derived from --bg otherwise
   enhanced: false     #   optional
+  colors: true        #   optional; false keeps classic's own palette. When
+                      #   true (default) classic's ground/ink/border/accent
+                      #   tokens are fed from THIS crate's bg, card, panel,
+                      #   ink, dim, edge and accent, so the embedded pages
+                      #   stop showing classic's stock slate under a skin.
+                      #   Only tokens the crate declares are used; a token
+                      #   the operator set in classic's own theme editor
+                      #   always wins, and an ink that would fail classic's
+                      #   4.5:1 floor on the crate's grounds is dropped.
+                      #   See tests/skin-bridge.test.cjs for the crosswalk.
 
 tokens:               # the palette — see the whitelist below
   bg: "#0b0e13"

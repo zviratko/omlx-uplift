@@ -671,6 +671,17 @@ function showEmbedPage(tab, sub) {
     }
     frame.src = API + path;
     frame.dataset.loaded = '1';
+    // UP-68: the palette bridge needs a pass once a document EXISTS inside
+    // the frame — classic commits its own <style id="omlx-custom-theme">
+    // during boot, so 'which tokens the user already set' is not readable
+    // before load. Not {once}: clicking around classic swaps documents and
+    // the new one needs the bridge again.
+    if (!frame.dataset.themeHooked) {
+        frame.dataset.themeHooked = '1';
+        frame.addEventListener('load', () => {
+            try { syncEmbedTheme(); } catch (_) {}
+        });
+    }
 }
 const EMBED_PAGE_IDS = {
     // U60: fallback id keeps showEmbedPage past its `if (!card) return` for
@@ -900,14 +911,50 @@ function embedThemeState() {
     // selection -> dark is the safe default, not an invalid 'light' push
     const skin = (typeof skinLookup === 'function') ? skinLookup(prefs.theme) : null;
     if (skin) {
-        return { theme: skin.classic && skin.classic.theme === 'light' ? 'light' : 'dark',
-                 enhanced: !!(skin.classic && skin.classic.enhanced) };
+        const cm = skin.classic || {};
+        return { theme: cm.theme === 'light' ? 'light' : 'dark',
+                 enhanced: !!cm.enhanced,
+                 // UP-68 (option 5): the crate's ground/ink/border/accent,
+                 // server-read from skin.yml. Carried on the same object so
+                 // the palette can never disagree with the mode we push.
+                 colors: cm.colors !== false, palette: cm.palette || {} };
     }
     const t = prefs.theme === 'auto'
         ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : (prefs.theme || 'dark');
     const light = t === 'light';
-    return { theme: light ? 'light' : 'dark', enhanced: t === 'enhanced' };
+    // built-in themes: no palette, so classic keeps its own colours (they
+    // already are the built-in ones)
+    return { theme: light ? 'light' : 'dark', enhanced: t === 'enhanced',
+             colors: false, palette: {} };
+}
+/* UP-68 (option 5): paint one loaded classic frame with the live skin's
+   ground/ink/border/accent using classic's OWN variable names — the same
+   surface its theme editor writes (custom_theme.js), so nothing in classic
+   has to know we exist. Values come from the crate, never from
+   getComputedStyle (the SHEET-1 preview-replacement trap). A token the user
+   set in classic's editor wins; classic.colors: false opts the crate out. */
+function applySkinBridge(de, st) {
+    if (typeof UpliftSkinBridge === 'undefined' || !de || !de.ownerDocument) return;
+    const d = de.ownerDocument;
+    const B = UpliftSkinBridge;
+    const node = d.getElementById(B.STYLE_ID);
+    const own = d.getElementById(B.CLASSIC_STYLE_ID);
+    const off = () => {
+        de.removeAttribute(B.SCOPE_ATTR);
+        if (node) node.remove();
+    };
+    if (!st || st.colors === false || !st.palette) { off(); return; }
+    const r = B.bridge(st, { stock: B.userSetTokens(own && own.textContent) });
+    if (!r.css) { off(); return; }
+    de.setAttribute(B.SCOPE_ATTR, '');
+    if (node) node.textContent = r.css;
+    else {
+        const el = d.createElement('style');
+        el.id = B.STYLE_ID;
+        d.head.appendChild(el);
+        el.textContent = r.css;
+    }
 }
 function syncEmbedTheme() {
     const st = embedThemeState();
@@ -923,6 +970,7 @@ function syncEmbedTheme() {
             de.setAttribute('data-theme', st.theme);
             if (st.enhanced) de.setAttribute('data-enhanced-readability', '');
             else de.removeAttribute('data-enhanced-readability');
+            applySkinBridge(de, st);
         } catch (_) {}
     }
     // 6/6c: the NATIVE chat panel is not an iframe — tell it too (it owns
