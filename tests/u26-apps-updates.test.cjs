@@ -68,6 +68,33 @@ test('claudeCodeCommand edges: default port, model placeholders, no key', () => 
     assert.ok(c.includes("ANTHROPIC_DEFAULT_OPUS_MODEL='select-a-model'"));
     assert.ok(!c.includes('ANTHROPIC_AUTH_TOKEN'), 'unset key is omitted');
 });
+/* SYNC-1 fire 18 (upstream 579db64 #5055): the rendered command must never
+   carry the API key — classic shows bullets on screen and copies the real
+   thing. Uplift had the same exposure on its Claude Code row. */
+test('f18: claudeCodeCommand mask variant hides the key, keeps the shape', () => {
+    const conn = { host: '10.0.0.5', port: 8000, apiKey: 'omlx-secret-key' };
+    const real = G.claudeCodeCommand({ mode: 'local' }, conn);
+    const shown = G.claudeCodeCommand({ mode: 'local' }, conn, { mask: true });
+    assert.ok(real.includes("ANTHROPIC_AUTH_TOKEN='omlx-secret-key'"));
+    assert.ok(!shown.includes('omlx-secret-key'), 'the screen copy must be key-free');
+    assert.ok(shown.includes("ANTHROPIC_AUTH_TOKEN='\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'"),
+        shown);
+    // same command apart from the token: nothing else may drift
+    assert.strictEqual(shown.replace("'\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'",
+        "'omlx-secret-key'"), real);
+    const noKey = G.claudeCodeCommand({ mode: 'local' }, { host: 'h', apiKey: '' },
+        { mask: true });
+    assert.ok(!noKey.includes('ANTHROPIC_AUTH_TOKEN'), 'no key -> no token at all');
+    assert.strictEqual(G.claudeCodeCommand({ mode: 'cloud' }, conn, { mask: true }),
+        G.claudeCodeCommand({ mode: 'cloud' }, conn), 'cloud mode carries no key');
+});
+test('f18: the helper row renders the masked form and copies the real one', () => {
+    assert.match(helper, /display: GSPEC\.claudeCodeCommand\(ccSec, ccConn, \{ mask: true \}\)/);
+    assert.match(helper, /cmdLine\(c\.cmd, c\.display\)/);
+    // the <code> text/title take the display variant; clipboard takes cmd
+    assert.match(helper, /const shown = display === undefined \? cmd : display;/);
+    assert.match(helper, /code\.textContent = shown;[\s\S]{0,700}navigator\.clipboard\.writeText\(cmd\)/);
+});
 test('displayHostFor mirrors classic formatDisplayHost (dashboard.js:3655)', () => {
     assert.strictEqual(G.displayHostFor(''), '127.0.0.1');
     assert.strictEqual(G.displayHostFor('0.0.0.0'), 'your-ip-address');
@@ -117,8 +144,9 @@ test('each assistant row is built and appended in the order name, settings, comm
         'name, then settings, then the command column');
     assert.match(helper, /cliCard\.append\(cliHead, cliDl, cliNote, cliRows\);/,
         'the grouped rows are appended to the card');
-    assert.match(helper, /cb\.append\(cmdLine\(c\)\);/,
-        'every command rides its own line inside the row');
+    assert.match(helper, /cb\.append\(typeof c === 'string' \? cmdLine\(c\) : cmdLine\(c\.cmd, c\.display\)\)/,
+        'every command rides its own line inside the row (string or '
+        + '{cmd, display} — fire 18: the display half is what the screen sees)');
 });
 test('the split Applications strip is retired and stays retired', () => {
     // negative pins: the dead shape must not come back through a future

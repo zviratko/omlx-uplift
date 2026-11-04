@@ -329,10 +329,14 @@ async function renderHelperModels() {
         inp.onchange = async () => { await saveIntegration({ [key]: inp.value || null }); };
         return inp;
     };
-    const cmdLine = (cmd) => {
+    // SYNC-1 fire 18 (upstream 579db64 #5055): a command may carry a masked
+    // DISPLAY variant (the Claude Code auth token). The <code> text AND its
+    // title show `display`; the copy button still copies the real `cmd`.
+    const cmdLine = (cmd, display) => {
+        const shown = display === undefined ? cmd : display;
         const line = document.createElement('div'); line.className = 'up-appcmd';
-        const code = document.createElement('code'); code.textContent = cmd;
-        code.title = cmd;
+        const code = document.createElement('code'); code.textContent = shown;
+        code.title = shown;
         const cp = document.createElement('button');
         cp.type = 'button'; cp.className = 'se-btn act';
         cp.textContent = '\u29C9';   // ⧉, same idiom as the API-endpoints card
@@ -360,7 +364,8 @@ async function renderHelperModels() {
             d.textContent = '\u2014'; ctl.append(d);
         }
         const cb = document.createElement('div'); cb.className = 'cli-cmds';
-        for (const c of cmds) cb.append(cmdLine(c));
+        for (const c of cmds)
+            cb.append(typeof c === 'string' ? cmdLine(c) : cmdLine(c.cmd, c.display));
         row.append(nm, ctl, cb);
         cliRows.append(row);
     };
@@ -369,9 +374,10 @@ async function renderHelperModels() {
     for (const m of modelList) {
         const o2 = document.createElement('option'); o2.value = m.id || m.name || ''; cliDl.append(o2);
     }
+    const ccConn = { host: stats.host, port: stats.port, apiKey: stats.api_key };
     cliRow(C.tf('status.integrations.claude_code', 'Claude Code'), null,
-        [GSPEC.claudeCodeCommand(ccSec, { host: stats.host, port: stats.port,
-                                          apiKey: stats.api_key }),
+        [{ cmd: GSPEC.claudeCodeCommand(ccSec, ccConn),
+           display: GSPEC.claudeCodeCommand(ccSec, ccConn, { mask: true }) },
          GSPEC.launchCommand('claude', { cliPrefix: stats.cli_prefix })]);
     cliRow('GitHub Copilot', [cliPick('copilot_model')],
         [GSPEC.launchCommand('copilot', { cliPrefix: stats.cli_prefix })]);
