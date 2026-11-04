@@ -394,7 +394,8 @@ def test_the_ceiling_moves_with_the_environment_and_junk_falls_back(monkeypatch)
     assert SE.max_audio_mb() == SE.DEFAULT_MAX_AUDIO_MB
     monkeypatch.setenv(SE.MAX_AUDIO_ENV, "0")
     assert SE.max_audio_mb() == SE.DEFAULT_MAX_AUDIO_MB
-    assert SE.MAX_AUDIO_ENV == "OMLX_SAY_MAX_AUDIO_MB", "one env, both doors"
+    assert SE.MAX_AUDIO_ENV == "OMLX_SAY_MAX_AUDIO_MB", \
+        "the name it shipped with; Uplift is its only reader since #5076"
 
 
 def test_a_slow_voice_crossing_the_ceiling_mid_render_stops_early(

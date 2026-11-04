@@ -78,8 +78,10 @@ MAX_CHUNK_CHARS = 20000        # `say` reads a file, so argv is not the limit
 # The ceiling is a guardrail rather than a panel field (decided 2026-10-29):
 # the default is 256 MB, ~90 minutes of speech, deliberately generous
 # because guessing what an operator needs is a losing game. The one knob is
-# the OMLX_SAY_MAX_AUDIO_MB environment - same name as the vanilla engine,
-# one Mac one truth - and a reply past it is refused, never cut short.
+# the OMLX_SAY_MAX_AUDIO_MB environment — it kept the name it had when the
+# vendored vanilla patch read it too, and since the swap to the minimal
+# macos-say PR (upstream #5076) Uplift's door is the only reader. A reply
+# past it is refused, never cut short.
 MAX_AUDIO_ENV = "OMLX_SAY_MAX_AUDIO_MB"
 DEFAULT_MAX_AUDIO_MB = 256
 SPEECH_BYTES_PER_SEC = 48000     # 24 kHz mono 16-bit, fixed whatever the voice

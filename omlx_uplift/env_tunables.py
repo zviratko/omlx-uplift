@@ -764,9 +764,12 @@ CATALOG: dict[str, dict] = {
         "desc": "Ceiling for ONE spoken macOS reply in MB of audio (48 KB "
                 "per second: 256 MB is about 89 minutes). A reply that cannot "
                 "fit is refused before anything renders; junk or 0 keeps the "
-                "default. Read per request by the macOS speech engine "
-                "(omlx/utils/macos_say.max_audio_mb, mirrored by uplift "
-                "say_engine), so a change answers the next request."},
+                "default. Read per request by Uplift's macOS engine "
+                "(omlx_uplift/say_engine.max_audio_mb), so a change answers "
+                "the next request. The vanilla macos-say engine has no such "
+                "ceiling — it caps the INPUT at 4096 characters instead, so "
+                "this knob is Uplift's door only (it covered both while the "
+                "retired omlx-tts-say patch was in the build)."},
 }
 
 

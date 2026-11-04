@@ -3377,24 +3377,47 @@ function voiceRowById(id) {
         if (list[i].id === id) return list[i];
     return null;
 }
+/* The vanilla door's macOS engine (SYNC-1 patch omlx-tts-macos-say, upstream
+   PR #5076) knows ONE model id, 'macos-say', and takes the voice in the
+   `voice` field. Uplift addresses the same voices with its own tokens
+   ('say:<name>', 'say:<name>:<locale>', bare 'say'), which that door has
+   never understood — until the swap it worked there only because our retired
+   vendored patch spoke the same tokens. This maps a picker row onto the
+   vanilla form; the chat's own door (the default) is untouched. */
+function macosSayVoice(model) {
+    var m = String(model || '');
+    if (m !== 'say' && m.indexOf('say:') !== 0) return null;   // not a macOS row
+    var tail = m.slice(4);
+    if (!tail) return '';                       // bare 'say': let the server pick
+    if (tail.indexOf(':') >= 0) tail = tail.split(':')[0];   // <name>:<locale>
+    // A locale tail ('say:cs-CZ', SAY-2) names no voice. The OpenAI request
+    // has no language field, so there is nothing to carry it in: send the
+    // model bare and let autodetect or the configured default speak.
+    if (/^[a-z]{2}([-_][A-Za-z0-9]{2,4}){0,2}$/.test(tail)) return '';
+    return tail;                                // display name or full identifier
+}
 function vanillaSpeechCall(voiceId, chunk) {
-    // The picker's row -> the vanilla server's call. A macOS row carries
-    // 'say:<identifier>' in .model already, which is exactly the model token
-    // that engine addresses; a stored or model voice splits into {model,
-    // voice}. A row the catalog no longer has is sent as a model name and the
-    // server answers honestly instead of the chat guessing.
+    // The picker's row -> the vanilla server's call. A macOS row goes to the
+    // engine's single model id with the voice name in `voice` (see
+    // macosSayVoice); a stored or model voice splits into {model, voice}. A
+    // row the catalog no longer has is sent as a model name and the server
+    // answers honestly instead of the chat guessing.
     var r = voiceRowById(voiceId);
     var model = r && r.model ? String(r.model) : '';
     var ask = { input: chunk, response_format: 'wav' };
     // WAV at both doors: it is what the browser decode path already handles,
     // and it keeps the server out of a transcode hop per chunk
-    if (model.indexOf('say:') === 0)
-        return { url: '/v1/audio/speech', body: Object.assign({ model: model }, ask) };
+    var sayVoice = macosSayVoice(model);
+    if (sayVoice !== null) {
+        var body = Object.assign({ model: 'macos-say' }, ask);
+        if (sayVoice) body.voice = sayVoice;
+        return { url: '/v1/audio/speech', body: body };
+    }
     if (model)
         return { url: '/v1/audio/speech',
                  body: Object.assign({ model: model, voice: (r.name || '') }, ask) };
     return { url: '/v1/audio/speech',
-             body: Object.assign({ model: String(voiceId || 'say') }, ask) };
+             body: Object.assign({ model: String(voiceId || 'macos-say') }, ask) };
 }
 async function vanillaSpeechFetch(url, body) {
     // /v1 takes the Bearer key, not the board session: the same credential the
@@ -3747,13 +3770,36 @@ function memPut(text, bufs) {
    the rebuild after a reload. Sentence mode runs the markdown sanitizer (whose
    streaming twin is byte-identical, pinned in voice10/VOICE-11a); line and
    paragraph modes stay RAW, because there the newline IS the boundary. */
+/* The vanilla door refuses input over 4096 characters (OpenAI's own limit,
+   which macos-say keeps). Uplift's door stitches longer text, but a plan is
+   built once and a route flip mid-read must never hand the vanilla door a
+   chunk it will reject, so the ceiling applies to both doors — one rule is
+   cheaper than a route-dependent plan, and a 4096-char sentence is not a
+   thing anyone wants read aloud in one breath anyway. */
+function capChunks(list, max) {
+    var LIMIT = 4096;                       // the vanilla door's input cap
+    var cap = (typeof max === 'number' && max > 0) ? max : LIMIT;
+    var out = [], i, c;
+    for (i = 0; i < list.length; i++) {
+        c = String(list[i] || '');
+        while (c.length > cap) {
+            var cut = c.lastIndexOf(' ', cap);
+            if (cut < cap * 0.5) cut = cap;       // no word break: hard slice
+            out.push(c.slice(0, cut));
+            c = c.slice(cut).replace(/^\s+/, '');
+        }
+        if (c.trim()) out.push(c);
+    }
+    return out;
+}
 function planChunks(text, mode) {
     var S = SIO();
     if (!S) return [];
     var src = String(text || '');
     if (!src.trim()) return [];
-    return mode === 'sentence' ? S.splitSpeechChunks(src, 'sentence')
-        : S.splitSpeechChunks(src, mode, undefined, { sanitize: false });
+    return capChunks(mode === 'sentence'
+        ? S.splitSpeechChunks(src, 'sentence')
+        : S.splitSpeechChunks(src, mode, undefined, { sanitize: false }));
 }
 
 function planOf(msg) {

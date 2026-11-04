@@ -1,0 +1,7 @@
+{
+  "description": "macOS system speech on the OpenAI door: POST /v1/audio/speech with model='macos-say' renders through the `say` command with the voices already installed on this Mac - no download, no GPU, no model load. A request may name the voice in the `voice` field; with Detect language on the voice follows the language of the text, otherwise the configured default language decides, and with neither set the system voice speaks. Three switches live in Settings > Integrations. Input is capped at 4096 characters like the OpenAI endpoint and rendered in one pass. Vendored from OUR OWN upstream PR https://github.com/jundot/omlx/pull/5076 (branch feat/tts-macos-say-mini, commit b957ca6f, based on 4213c32) - on merge, link the PR source and drop this copy. It replaces the retired omlx-tts-say patch, which carried the rejected 3835-line design (sentence chunking, disk spool, progressive stream, per-language voice pins, OMLX_SAY_MAX_AUDIO_MB). That functionality stays where it is always lived for board clients: Uplift's own engine on POST /uplift/v1/audio/speech with model='say', which does not depend on this patch and is unchanged by it.",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "dev"
+}

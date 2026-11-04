@@ -1,0 +1,1127 @@
+diff --git a/apps/omlx-web/omlx_web/i18n/cs.json b/apps/omlx-web/omlx_web/i18n/cs.json
+index 04f164b0..8181f2f0 100644
+--- a/apps/omlx-web/omlx_web/i18n/cs.json
++++ b/apps/omlx-web/omlx_web/i18n/cs.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Zvolte, zda požadavky na dokumenty PDF zpracuje MarkItDown sám, nebo OCR engine.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "Vybraný OCR model není dostupný. PDF se zpracovávají přes MarkItDown, dokud model zase nebude dostupný nebo dokud nezvolíte jiný engine.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Skenovaná PDF nebo PDF obsahující jen obrázky při volbě MarkItDown selžou a PDF s tabulkami nemusí být zpracována správně.",
++  "settings.integrations.macos_say.section_label": "Řeč macOS",
++  "settings.integrations.macos_say.enabled": "Zapnout macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Odpovídat na požadavky /v1/audio/speech pro model \"macos-say\" hlasy nainstalovanými v tomto Macu. Bez stahování, bez GPU.",
++  "settings.integrations.macos_say.autodetect": "Rozpoznat jazyk",
++  "settings.integrations.macos_say.autodetect_hint": "Vybrat hlas podle jazyka textu. Hlas nebo jazyk v požadavku má vždy přednost.",
++  "settings.integrations.macos_say.language": "Výchozí jazyk",
++  "settings.integrations.macos_say.language_hint": "Použije se, když je rozpoznávání vypnuté nebo si není jisté, například en-GB nebo cs-CZ. Prázdné: systémový hlas.",
+   "settings.integrations.websearch.section_label": "Vyhledávání na webu",
+   "settings.integrations.websearch.provider": "Poskytovatel hledání",
+   "settings.integrations.websearch.provider_hint": "Backend používaný nástrojem pro webové hledání v chatu. DDGS Total se dotazuje všech dostupných enginů a nevyžaduje klíč.",
+diff --git a/apps/omlx-web/omlx_web/i18n/de.json b/apps/omlx-web/omlx_web/i18n/de.json
+index d7f9704f..48916828 100644
+--- a/apps/omlx-web/omlx_web/i18n/de.json
++++ b/apps/omlx-web/omlx_web/i18n/de.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Festlegen, ob PDF-Dokumentanfragen von MarkItDown selbst oder von einer OCR-Engine verarbeitet werden.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "Das ausgewählte OCR-Modell ist nicht verfügbar. PDFs werden mit MarkItDown verarbeitet, bis das Modell wieder verfügbar ist oder Sie eine andere Engine auswählen.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Gescannte PDFs und PDFs, die nur Bilder enthalten, können mit MarkItDown nicht verarbeitet werden. PDFs mit Tabellen werden möglicherweise nicht korrekt verarbeitet.",
++  "settings.integrations.macos_say.section_label": "macOS-Sprachausgabe",
++  "settings.integrations.macos_say.enabled": "macos-say aktivieren",
++  "settings.integrations.macos_say.enabled_hint": "Beantwortet /v1/audio/speech-Anfragen für das Modell \"macos-say\" mit den auf diesem Mac installierten Stimmen. Kein Download, keine GPU.",
++  "settings.integrations.macos_say.autodetect": "Sprache erkennen",
++  "settings.integrations.macos_say.autodetect_hint": "Wählt die Stimme nach der Sprache des Textes. Eine Stimme oder Sprache in der Anfrage hat immer Vorrang.",
++  "settings.integrations.macos_say.language": "Standardsprache",
++  "settings.integrations.macos_say.language_hint": "Wird verwendet, wenn die Erkennung aus oder unsicher ist, z. B. en-GB oder de-DE. Leer: die Systemstimme.",
+   "settings.integrations.websearch.section_label": "Websuche",
+   "settings.integrations.websearch.provider": "Suchanbieter",
+   "settings.integrations.websearch.provider_hint": "Backend für das Websuchwerkzeug im Chat. DDGS Total fragt alle verfügbaren Suchmaschinen ab und benötigt keinen Schlüssel.",
+diff --git a/apps/omlx-web/omlx_web/i18n/en.json b/apps/omlx-web/omlx_web/i18n/en.json
+index dac82880..005d9c84 100644
+--- a/apps/omlx-web/omlx_web/i18n/en.json
++++ b/apps/omlx-web/omlx_web/i18n/en.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Select whether PDF document requests are processed by MarkItDown itself or by an OCR engine.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "The selected OCR model is unavailable. PDFs use MarkItDown until the model is available again or you select another engine.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Scanned or image-only PDFs will fail when MarkItDown is selected, and PDFs with tables may not be processed correctly.",
++  "settings.integrations.macos_say.section_label": "macOS Speech",
++  "settings.integrations.macos_say.enabled": "Enable macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Answer /v1/audio/speech requests for model \"macos-say\" with the voices installed on this Mac. No download, no GPU.",
++  "settings.integrations.macos_say.autodetect": "Detect language",
++  "settings.integrations.macos_say.autodetect_hint": "Choose the voice from the language of the text. A voice or language in the request always wins.",
++  "settings.integrations.macos_say.language": "Default language",
++  "settings.integrations.macos_say.language_hint": "Used when detection is off or not sure, for example en-GB or cs-CZ. Empty: the system voice.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DDGS Total queries every available engine and needs no key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/es.json b/apps/omlx-web/omlx_web/i18n/es.json
+index f0ed5ae0..7b1c8137 100644
+--- a/apps/omlx-web/omlx_web/i18n/es.json
++++ b/apps/omlx-web/omlx_web/i18n/es.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Select whether PDF document requests are processed by MarkItDown itself or by an OCR engine.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "El modelo OCR seleccionado no está disponible. Los PDF se procesan con MarkItDown hasta que el modelo vuelva a estar disponible o selecciones otro motor.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Scanned or image-only PDFs will fail when MarkItDown is selected, and PDFs with tables may not be processed correctly.",
++  "settings.integrations.macos_say.section_label": "Voz de macOS",
++  "settings.integrations.macos_say.enabled": "Activar macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Responde a las solicitudes /v1/audio/speech del modelo \"macos-say\" con las voces instaladas en este Mac. Sin descargas, sin GPU.",
++  "settings.integrations.macos_say.autodetect": "Detectar idioma",
++  "settings.integrations.macos_say.autodetect_hint": "Elige la voz según el idioma del texto. Una voz o idioma en la solicitud siempre tiene prioridad.",
++  "settings.integrations.macos_say.language": "Idioma predeterminado",
++  "settings.integrations.macos_say.language_hint": "Se usa cuando la detección está desactivada o no es segura, por ejemplo en-GB o es-ES. Vacío: la voz del sistema.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/fr.json b/apps/omlx-web/omlx_web/i18n/fr.json
+index 73964187..decc2b19 100644
+--- a/apps/omlx-web/omlx_web/i18n/fr.json
++++ b/apps/omlx-web/omlx_web/i18n/fr.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Select whether PDF document requests are processed by MarkItDown itself or by an OCR engine.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "Le modèle OCR sélectionné est indisponible. Les PDF sont traités avec MarkItDown jusqu'à ce que le modèle soit à nouveau disponible ou que vous sélectionniez un autre moteur.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Scanned or image-only PDFs will fail when MarkItDown is selected, and PDFs with tables may not be processed correctly.",
++  "settings.integrations.macos_say.section_label": "Voix macOS",
++  "settings.integrations.macos_say.enabled": "Activer macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Répond aux requêtes /v1/audio/speech du modèle \"macos-say\" avec les voix installées sur ce Mac. Aucun téléchargement, aucun GPU.",
++  "settings.integrations.macos_say.autodetect": "Détecter la langue",
++  "settings.integrations.macos_say.autodetect_hint": "Choisit la voix selon la langue du texte. Une voix ou une langue dans la requête l'emporte toujours.",
++  "settings.integrations.macos_say.language": "Langue par défaut",
++  "settings.integrations.macos_say.language_hint": "Utilisée quand la détection est désactivée ou incertaine, par exemple en-GB ou fr-FR. Vide : la voix du système.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/ja.json b/apps/omlx-web/omlx_web/i18n/ja.json
+index 119afc25..21078bff 100644
+--- a/apps/omlx-web/omlx_web/i18n/ja.json
++++ b/apps/omlx-web/omlx_web/i18n/ja.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Select whether PDF document requests are processed by MarkItDown itself or by an OCR engine.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "選択したOCRモデルは利用できません。モデルが再び利用可能になるか、別のエンジンを選択するまで、PDFはMarkItDownで処理されます。",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Scanned or image-only PDFs will fail when MarkItDown is selected, and PDFs with tables may not be processed correctly.",
++  "settings.integrations.macos_say.section_label": "macOS 音声",
++  "settings.integrations.macos_say.enabled": "macos-say を有効にする",
++  "settings.integrations.macos_say.enabled_hint": "モデル \"macos-say\" の /v1/audio/speech リクエストに、この Mac にインストールされた音声で応答します。ダウンロード不要、GPU 不要。",
++  "settings.integrations.macos_say.autodetect": "言語を検出",
++  "settings.integrations.macos_say.autodetect_hint": "テキストの言語から音声を選びます。リクエストで指定した音声または言語が常に優先されます。",
++  "settings.integrations.macos_say.language": "既定の言語",
++  "settings.integrations.macos_say.language_hint": "検出がオフまたは不確かなときに使用します(例: en-GB、ja-JP)。空欄: システムの音声。",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/ko.json b/apps/omlx-web/omlx_web/i18n/ko.json
+index 5eb146c7..62f5643d 100644
+--- a/apps/omlx-web/omlx_web/i18n/ko.json
++++ b/apps/omlx-web/omlx_web/i18n/ko.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "PDF 문서 요청이 들어왔을 때 MarkItDown으로 자체 처리할지 OCR 엔진을 사용할지 선택합니다.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "선택한 OCR 모델을 사용할 수 없습니다. 모델을 다시 사용할 수 있거나 다른 엔진을 선택할 때까지 PDF는 MarkItDown으로 처리됩니다.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "MarkItDown을 선택하면 스캔 또는 이미지 전용 PDF 요청은 실패할 수 있으며, 표가 포함된 PDF 문서는 제대로 처리되지 않을 수 있습니다.",
++  "settings.integrations.macos_say.section_label": "macOS 음성",
++  "settings.integrations.macos_say.enabled": "macos-say 사용",
++  "settings.integrations.macos_say.enabled_hint": "모델 \"macos-say\"의 /v1/audio/speech 요청에 이 Mac에 설치된 음성으로 응답합니다. 다운로드와 GPU가 필요 없습니다.",
++  "settings.integrations.macos_say.autodetect": "언어 감지",
++  "settings.integrations.macos_say.autodetect_hint": "텍스트의 언어에 따라 음성을 선택합니다. 요청에 지정한 음성이나 언어가 항상 우선합니다.",
++  "settings.integrations.macos_say.language": "기본 언어",
++  "settings.integrations.macos_say.language_hint": "감지가 꺼져 있거나 확실하지 않을 때 사용합니다(예: en-GB, ko-KR). 비워 두면 시스템 음성을 사용합니다.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/pt-BR.json b/apps/omlx-web/omlx_web/i18n/pt-BR.json
+index 44efa9ad..5115eb2d 100644
+--- a/apps/omlx-web/omlx_web/i18n/pt-BR.json
++++ b/apps/omlx-web/omlx_web/i18n/pt-BR.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Selecione se as requisições de documentos PDF são processadas pelo próprio MarkItDown ou por um motor de OCR.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "O modelo OCR selecionado está indisponível. Os PDFs usam o MarkItDown até que o modelo esteja disponível novamente ou você selecione outro mecanismo.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "PDFs digitalizados ou somente com imagens falharão quando o MarkItDown for selecionado, e PDFs com tabelas podem não ser processados corretamente.",
++  "settings.integrations.macos_say.section_label": "Voz do macOS",
++  "settings.integrations.macos_say.enabled": "Ativar macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Responde às solicitações /v1/audio/speech do modelo \"macos-say\" com as vozes instaladas neste Mac. Sem download, sem GPU.",
++  "settings.integrations.macos_say.autodetect": "Detectar idioma",
++  "settings.integrations.macos_say.autodetect_hint": "Escolhe a voz pelo idioma do texto. Uma voz ou idioma na solicitação sempre tem prioridade.",
++  "settings.integrations.macos_say.language": "Idioma padrão",
++  "settings.integrations.macos_say.language_hint": "Usado quando a detecção está desligada ou incerta, por exemplo en-GB ou pt-BR. Vazio: a voz do sistema.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/ru.json b/apps/omlx-web/omlx_web/i18n/ru.json
+index 8ed4316d..ca01049f 100644
+--- a/apps/omlx-web/omlx_web/i18n/ru.json
++++ b/apps/omlx-web/omlx_web/i18n/ru.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "Выберите, чем обрабатывать PDF-документы: самим MarkItDown или OCR-движком.",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "Выбранная модель OCR недоступна. PDF обрабатываются через MarkItDown, пока модель снова не станет доступна или вы не выберете другой движок.",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "Отсканированные PDF и PDF только из изображений не будут обработаны при выборе MarkItDown; PDF с таблицами также могут обработаться некорректно.",
++  "settings.integrations.macos_say.section_label": "Речь macOS",
++  "settings.integrations.macos_say.enabled": "Включить macos-say",
++  "settings.integrations.macos_say.enabled_hint": "Отвечать на запросы /v1/audio/speech для модели \"macos-say\" голосами, установленными на этом Mac. Без загрузки и без GPU.",
++  "settings.integrations.macos_say.autodetect": "Определять язык",
++  "settings.integrations.macos_say.autodetect_hint": "Выбирать голос по языку текста. Голос или язык в запросе всегда важнее.",
++  "settings.integrations.macos_say.language": "Язык по умолчанию",
++  "settings.integrations.macos_say.language_hint": "Используется, когда определение выключено или не уверено, например en-GB или ru-RU. Пусто: системный голос.",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/zh-TW.json b/apps/omlx-web/omlx_web/i18n/zh-TW.json
+index 1b980895..f731f68b 100644
+--- a/apps/omlx-web/omlx_web/i18n/zh-TW.json
++++ b/apps/omlx-web/omlx_web/i18n/zh-TW.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "選擇 PDF 文件請求由 MarkItDown 本身或 OCR 引擎處理。",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "所選的 OCR 模型無法使用。在模型恢復可用或選擇其他引擎之前，PDF 將使用 MarkItDown 處理。",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "選取 MarkItDown 時，掃描或純圖片 PDF 將會失敗，含表格的 PDF 可能無法正確處理。",
++  "settings.integrations.macos_say.section_label": "macOS 語音",
++  "settings.integrations.macos_say.enabled": "啟用 macos-say",
++  "settings.integrations.macos_say.enabled_hint": "使用本機已安裝的語音回應模型 \"macos-say\" 的 /v1/audio/speech 請求。無需下載,無需 GPU。",
++  "settings.integrations.macos_say.autodetect": "偵測語言",
++  "settings.integrations.macos_say.autodetect_hint": "依文字語言選擇語音。請求中指定的語音或語言一律優先。",
++  "settings.integrations.macos_say.language": "預設語言",
++  "settings.integrations.macos_say.language_hint": "偵測關閉或不確定時使用,例如 en-GB 或 zh-TW。留空:使用系統語音。",
+   "settings.integrations.websearch.section_label": "Web Search",
+   "settings.integrations.websearch.provider": "Search provider",
+   "settings.integrations.websearch.provider_hint": "Backend used by the chat web search tool. DuckDuckGo works without a key.",
+diff --git a/apps/omlx-web/omlx_web/i18n/zh.json b/apps/omlx-web/omlx_web/i18n/zh.json
+index 1a8637a9..a564e858 100644
+--- a/apps/omlx-web/omlx_web/i18n/zh.json
++++ b/apps/omlx-web/omlx_web/i18n/zh.json
+@@ -551,6 +551,13 @@
+   "settings.integrations.markitdown.pdf_processing_engine_hint": "选择 PDF 文档请求由 MarkItDown 自身还是 OCR 引擎处理。",
+   "settings.integrations.markitdown.pdf_processing_missing_model": "所选 OCR 模型不可用。在模型恢复可用或选择其他引擎之前，PDF 将使用 MarkItDown 处理。",
+   "settings.integrations.markitdown.pdf_processing_markitdown_warning": "选择 MarkItDown 时，扫描件或纯图片 PDF 将失败，含表格的 PDF 可能无法正确处理。",
++  "settings.integrations.macos_say.section_label": "macOS 语音",
++  "settings.integrations.macos_say.enabled": "启用 macos-say",
++  "settings.integrations.macos_say.enabled_hint": "使用本机已安装的语音响应模型 \"macos-say\" 的 /v1/audio/speech 请求。无需下载,无需 GPU。",
++  "settings.integrations.macos_say.autodetect": "检测语言",
++  "settings.integrations.macos_say.autodetect_hint": "根据文本语言选择语音。请求中指定的语音或语言始终优先。",
++  "settings.integrations.macos_say.language": "默认语言",
++  "settings.integrations.macos_say.language_hint": "检测关闭或不确定时使用,例如 en-GB 或 zh-CN。留空:使用系统语音。",
+   "settings.integrations.websearch.section_label": "联网搜索",
+   "settings.integrations.websearch.provider": "搜索服务商",
+   "settings.integrations.websearch.provider_hint": "聊天联网搜索工具使用的后端。DDGS Total 会查询所有可用引擎，无需密钥。",
+diff --git a/apps/omlx-web/omlx_web/static/js/dashboard.js b/apps/omlx-web/omlx_web/static/js/dashboard.js
+index 68d15aaa..81f3c3e5 100644
+--- a/apps/omlx-web/omlx_web/static/js/dashboard.js
++++ b/apps/omlx-web/omlx_web/static/js/dashboard.js
+@@ -204,6 +204,10 @@
+                     markitdown_max_file_size_mb: 25,
+                     markitdown_max_files_per_request: 5,
+                     markitdown_pdf_processing_engine: 'markitdown',
++                    macos_say_enabled: true,
++                    macos_say_autodetect: true,
++                    macos_say_language: '',
++                    macos_say_available: false,
+                     web_search_provider: 'ddgs',
+                     web_search_brave_api_key: '',
+                     web_search_searxng_url: '',
+@@ -4717,6 +4721,9 @@
+                             markitdown_max_file_size_mb: this.globalSettings.integrations.markitdown_max_file_size_mb,
+                             markitdown_max_files_per_request: this.globalSettings.integrations.markitdown_max_files_per_request,
+                             markitdown_pdf_processing_engine: this.globalSettings.integrations.markitdown_pdf_processing_engine,
++                            macos_say_enabled: this.globalSettings.integrations.macos_say_enabled,
++                            macos_say_autodetect: this.globalSettings.integrations.macos_say_autodetect,
++                            macos_say_language: this.globalSettings.integrations.macos_say_language,
+                             web_search_provider: this.globalSettings.integrations.web_search_provider,
+                             web_search_brave_api_key: this.globalSettings.integrations.web_search_brave_api_key,
+                             web_search_searxng_url: this.globalSettings.integrations.web_search_searxng_url,
+diff --git a/apps/omlx-web/omlx_web/templates/dashboard/_settings.html b/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
+index 2e3b3d3b..8b2b9368 100644
+--- a/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
++++ b/apps/omlx-web/omlx_web/templates/dashboard/_settings.html
+@@ -1546,6 +1546,61 @@
+                                 </div>
+                             </div>
+                         </div>
++                        <div x-show="globalSettings.integrations.macos_say_available" class="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
++                            <div class="flex items-center justify-between px-6 py-4 bg-neutral-100 border-b border-neutral-200">
++                                <div class="flex items-center gap-3">
++                                    <i data-lucide="audio-lines" class="w-4 h-4 text-neutral-500"></i>
++                                    <span class="text-xs font-bold uppercase tracking-wider text-neutral-600">{{ t('settings.integrations.macos_say.section_label') }}</span>
++                                </div>
++                                <span class="badge bg-neutral-200 text-neutral-600 border-neutral-300 font-mono">macos-say</span>
++                            </div>
++                            <div class="divide-y divide-neutral-100">
++                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4">
++                                    <div>
++                                        <label class="text-sm text-neutral-700">{{ t('settings.integrations.macos_say.enabled') }}</label>
++                                        <p class="text-xs text-neutral-400 mt-0.5">{{ t('settings.integrations.macos_say.enabled_hint') }}</p>
++                                    </div>
++                                    <button type="button" role="switch"
++                                            :aria-checked="globalSettings.integrations.macos_say_enabled ? 'true' : 'false'"
++                                            @click="globalSettings.integrations.macos_say_enabled = !globalSettings.integrations.macos_say_enabled; saveIntegrationSettings().then(() => loadModels())"
++                                            :class="globalSettings.integrations.macos_say_enabled ? 'bg-black' : 'bg-neutral-200'"
++                                            class="relative w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black">
++                                        <span :class="globalSettings.integrations.macos_say_enabled ? 'translate-x-5' : 'translate-x-0'"
++                                              class="block w-5 h-5 bg-white rounded-full shadow-sm transform transition-transform duration-300 absolute top-0.5 left-0.5"></span>
++                                    </button>
++                                </div>
++                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4">
++                                    <div>
++                                        <label class="text-sm text-neutral-700">{{ t('settings.integrations.macos_say.autodetect') }}</label>
++                                        <p class="text-xs text-neutral-400 mt-0.5">{{ t('settings.integrations.macos_say.autodetect_hint') }}</p>
++                                    </div>
++                                    <button type="button" role="switch"
++                                            :aria-checked="globalSettings.integrations.macos_say_autodetect && globalSettings.integrations.macos_say_enabled ? 'true' : 'false'"
++                                            @click="globalSettings.integrations.macos_say_autodetect = !globalSettings.integrations.macos_say_autodetect; saveIntegrationSettings()"
++                                            :disabled="!globalSettings.integrations.macos_say_enabled"
++                                            :class="[
++                                                globalSettings.integrations.macos_say_autodetect && globalSettings.integrations.macos_say_enabled ? 'bg-black' : 'bg-neutral-200',
++                                                !globalSettings.integrations.macos_say_enabled ? 'opacity-40 cursor-not-allowed' : ''
++                                            ]"
++                                            class="relative w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black">
++                                        <span :class="globalSettings.integrations.macos_say_autodetect && globalSettings.integrations.macos_say_enabled ? 'translate-x-5' : 'translate-x-0'"
++                                              class="block w-5 h-5 bg-white rounded-full shadow-sm transform transition-transform duration-300 absolute top-0.5 left-0.5"></span>
++                                    </button>
++                                </div>
++                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4">
++                                    <div>
++                                        <label class="text-sm text-neutral-700">{{ t('settings.integrations.macos_say.language') }}</label>
++                                        <p class="text-xs text-neutral-400 mt-0.5">{{ t('settings.integrations.macos_say.language_hint') }}</p>
++                                    </div>
++                                    <input type="text"
++                                           x-model.trim="globalSettings.integrations.macos_say_language"
++                                           @change="saveIntegrationSettings()"
++                                           :disabled="!globalSettings.integrations.macos_say_enabled"
++                                           placeholder="en-GB"
++                                           class="w-24 px-3 py-2 text-sm font-mono border border-neutral-200 rounded-lg focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all disabled:opacity-40">
++                                </div>
++                            </div>
++                        </div>
+                         <div class="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+                             <div class="flex items-center justify-between px-6 py-4 bg-neutral-100 border-b border-neutral-200">
+                                 <div class="flex items-center gap-3">
+diff --git a/omlx/admin/routes.py b/omlx/admin/routes.py
+index 7745cf1b..92f8d8b4 100644
+--- a/omlx/admin/routes.py
++++ b/omlx/admin/routes.py
+@@ -101,7 +101,7 @@ from ..settings import (
+     SubKeyEntry,
+     burst_decode_env,
+ )
+-from ..utils import gpu_power
++from ..utils import gpu_power, macos_say
+ from ..utils.fatal import is_command_buffer_error
+ from ..utils.hardware import (
+     compute_owner_hash,
+@@ -816,6 +816,9 @@ class GlobalSettingsRequest(BaseModel):
+     markitdown_max_file_size_mb: int | None = None
+     markitdown_max_files_per_request: int | None = None
+     markitdown_pdf_processing_engine: str | None = None
++    macos_say_enabled: bool | None = None
++    macos_say_autodetect: bool | None = None
++    macos_say_language: str | None = None
+     web_search_provider: str | None = None
+     web_search_brave_api_key: str | None = None
+     web_search_searxng_url: str | None = None
+@@ -4825,6 +4828,10 @@ def _global_settings_response(global_settings):
+             "markitdown_max_file_size_mb": global_settings.integrations.markitdown_max_file_size_mb,
+             "markitdown_max_files_per_request": global_settings.integrations.markitdown_max_files_per_request,
+             "markitdown_pdf_processing_engine": global_settings.integrations.markitdown_pdf_processing_engine,
++            "macos_say_enabled": global_settings.integrations.macos_say_enabled,
++            "macos_say_autodetect": global_settings.integrations.macos_say_autodetect,
++            "macos_say_language": global_settings.integrations.macos_say_language,
++            "macos_say_available": macos_say.available(),
+             "web_search_provider": global_settings.integrations.web_search_provider,
+             "web_search_brave_api_key": global_settings.integrations.web_search_brave_api_key,
+             "web_search_searxng_url": global_settings.integrations.web_search_searxng_url,
+@@ -5765,6 +5772,26 @@ async def update_global_settings(
+             request.markitdown_enabled
+         )
+         integrations_changed = True
++    if "macos_say_enabled" in request.model_fields_set:
++        global_settings.integrations.macos_say_enabled = bool(
++            request.macos_say_enabled
++        )
++        integrations_changed = True
++    if "macos_say_autodetect" in request.model_fields_set:
++        global_settings.integrations.macos_say_autodetect = bool(
++            request.macos_say_autodetect
++        )
++        integrations_changed = True
++    if "macos_say_language" in request.model_fields_set:
++        raw = (request.macos_say_language or "").strip()
++        lang = macos_say.normalize_language(raw)
++        if raw and not lang:
++            raise HTTPException(
++                status_code=400,
++                detail="macos_say_language must be a language tag like 'en' or 'cs-CZ'",
++            )
++        global_settings.integrations.macos_say_language = lang
++        integrations_changed = True
+     if "markitdown_expose_model" in request.model_fields_set:
+         global_settings.integrations.markitdown_expose_model = bool(
+             request.markitdown_expose_model
+diff --git a/omlx/api/audio_routes.py b/omlx/api/audio_routes.py
+index e3159509..37437eb1 100644
+--- a/omlx/api/audio_routes.py
++++ b/omlx/api/audio_routes.py
+@@ -53,7 +53,7 @@ from ..engine.vlm import (
+ )
+ from ..exceptions import InvalidRequestError, ModelNotFoundError
+ from ..server_metrics import get_server_metrics
+-from ..utils import gpu_power
++from ..utils import gpu_power, macos_say
+ from .audio_models import AudioSpeechRequest, AudioTranscriptionResponse
+ 
+ logger = logging.getLogger(__name__)
+@@ -1525,6 +1525,81 @@ def _transcode_speech_output(wav_bytes: bytes, response_format: str) -> bytes:
+     return buf.getvalue()
+ 
+ 
++def _global_settings():
++    try:
++        from omlx.server import _server_state
++    except Exception:
++        return None
++    return getattr(_server_state, "global_settings", None)
++
++
++def _has_soundfile() -> bool:
++    import importlib.util
++
++    return importlib.util.find_spec("soundfile") is not None
++
++
++async def _speech_via_macos_say(
++    request: AudioSpeechRequest, response_format: str
++) -> Response:
++    """``model: "macos-say"``: render with the macOS ``say`` command."""
++    gs = _global_settings()
++    if not macos_say.available():
++        raise HTTPException(
++            status_code=400, detail="macos-say is only available on macOS"
++        )
++    if not macos_say.enabled(gs):
++        raise HTTPException(
++            status_code=400,
++            detail="macos-say is turned off in Settings > Integrations",
++        )
++    if len(request.input) > macos_say.MAX_INPUT_CHARS:
++        raise HTTPException(
++            status_code=400,
++            detail=(
++                f"'input' is longer than {macos_say.MAX_INPUT_CHARS} characters"
++            ),
++        )
++    if response_format not in ("wav", "pcm") and not _has_soundfile():
++        raise HTTPException(
++            status_code=400,
++            detail=(
++                f"response_format '{response_format}' needs the audio extra "
++                "(soundfile); use 'wav' or 'pcm'"
++            ),
++        )
++    voice = macos_say.explicit_voice(request.voice)
++    if voice:
++        if not await asyncio.to_thread(macos_say.voice_is_installed, voice):
++            raise HTTPException(
++                status_code=400,
++                detail=f"macOS voice '{voice}' is not installed (see `say -v ?`)",
++            )
++    else:
++        integrations = getattr(gs, "integrations", None)
++        voice = await asyncio.to_thread(
++            macos_say.pick_voice,
++            request.input,
++            macos_say.normalize_language(request.language),
++            macos_say.normalize_language(
++                getattr(integrations, "macos_say_language", "")
++            ),
++            bool(getattr(integrations, "macos_say_autodetect", True)),
++        )
++    try:
++        audio = await asyncio.to_thread(
++            macos_say.synthesize, request.input, voice, request.speed
++        )
++        if response_format != "wav":
++            audio = await asyncio.to_thread(
++                _transcode_speech_output, audio, response_format
++            )
++    except Exception as exc:
++        raise HTTPException(status_code=500, detail=str(exc)) from exc
++    _record_audio_request(macos_say.MODEL_ID)
++    return Response(content=audio, media_type=_SPEECH_RESPONSE_FORMATS[response_format])
++
++
+ @router.post("/v1/audio/speech")
+ async def create_speech(request: AudioSpeechRequest):
+     """OpenAI-compatible text-to-speech endpoint."""
+@@ -1551,6 +1626,9 @@ async def create_speech(request: AudioSpeechRequest):
+             )
+         streaming_interval = _resolve_tts_streaming_interval(request)
+ 
++    if request.model == macos_say.MODEL_ID:
++        return await _speech_via_macos_say(request, response_format)
++
+     audio_bytes = _decode_ref_audio_base64(request)
+ 
+     pool = _get_engine_pool()
+diff --git a/omlx/server.py b/omlx/server.py
+index f04b4f90..27e3d6a2 100644
+--- a/omlx/server.py
++++ b/omlx/server.py
+@@ -249,7 +249,7 @@ from .prefill_helper.routes import router as prefill_helper_router
+ from .prefill_helper.routes import set_engine_pool_getter as set_prefill_helper_pool
+ from .prefill_progress import get_prefill_tracker
+ from .server_metrics import get_server_metrics, reset_server_metrics
+-from .utils import gpu_power
++from .utils import gpu_power, macos_say
+ from .utils.network import is_loopback_bind
+ 
+ logging.basicConfig(level=logging.INFO)
+@@ -3952,6 +3952,13 @@ async def list_models(_: bool = Depends(verify_inference_api_key)) -> JSONRespon
+             ModelInfo(id=MARKITDOWN_MODEL_ID, owned_by="omlx", model_type="markitdown")
+         )
+ 
++    if macos_say.model_visible(_server_state.global_settings) and not any(
++        m.id == macos_say.MODEL_ID for m in models
++    ):
++        models.append(
++            ModelInfo(id=macos_say.MODEL_ID, owned_by="omlx", model_type="audio_tts")
++        )
++
+     # Favorites first; stable sort keeps alphabetical order within groups.
+     if favorite_ids:
+         models.sort(key=lambda m: m.id not in favorite_ids)
+diff --git a/omlx/settings.py b/omlx/settings.py
+index 113e1291..e1d4280d 100644
+--- a/omlx/settings.py
++++ b/omlx/settings.py
+@@ -976,6 +976,10 @@ class IntegrationSettings:
+     markitdown_max_file_size_mb: int = 25
+     markitdown_max_files_per_request: int = 5
+     markitdown_pdf_processing_engine: str = "markitdown"
++    # macos-say TTS (omlx/utils/macos_say.py); empty language = none
++    macos_say_enabled: bool = True
++    macos_say_autodetect: bool = True
++    macos_say_language: str = ""
+     # "ddgs" (all engines) | "ddgs_custom" | "duckduckgo" | "brave" | "searxng"
+     web_search_provider: str = "ddgs"
+     web_search_brave_api_key: str = ""
+@@ -1010,6 +1014,9 @@ class IntegrationSettings:
+             "markitdown_max_file_size_mb": self.markitdown_max_file_size_mb,
+             "markitdown_max_files_per_request": self.markitdown_max_files_per_request,
+             "markitdown_pdf_processing_engine": self.markitdown_pdf_processing_engine,
++            "macos_say_enabled": self.macos_say_enabled,
++            "macos_say_autodetect": self.macos_say_autodetect,
++            "macos_say_language": self.macos_say_language,
+             "web_search_provider": self.web_search_provider,
+             "web_search_brave_api_key": self.web_search_brave_api_key,
+             "web_search_searxng_url": self.web_search_searxng_url,
+@@ -1047,6 +1054,9 @@ class IntegrationSettings:
+             markitdown_pdf_processing_engine=data.get(
+                 "markitdown_pdf_processing_engine", "markitdown"
+             ),
++            macos_say_enabled=bool(data.get("macos_say_enabled", True)),
++            macos_say_autodetect=bool(data.get("macos_say_autodetect", True)),
++            macos_say_language=str(data.get("macos_say_language") or ""),
+             web_search_provider=data.get("web_search_provider", "ddgs"),
+             web_search_brave_api_key=data.get("web_search_brave_api_key", ""),
+             web_search_searxng_url=data.get("web_search_searxng_url", ""),
+diff --git a/omlx/utils/macos_say.py b/omlx/utils/macos_say.py
+new file mode 100644
+index 00000000..c1525df3
+--- /dev/null
++++ b/omlx/utils/macos_say.py
+@@ -0,0 +1,180 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Text-to-speech through the macOS ``say`` command.
++
++Serves ``model: "macos-say"`` on ``/v1/audio/speech``. There is no model to
++load: the audio comes from the voices macOS already has installed.
++
++Voice choice, first match wins:
++
++1. ``voice`` naming a macOS voice (``"Zuzana"``, ``"Zuzana (Premium)"`` or a
++   ``com.apple...`` identifier) is used as given. OpenAI's stock voice names
++   (``alloy``, ``ash``...) and ``"default"`` mean "pick for me".
++2. ``language`` from the request.
++3. The language of the text, detected by macOS (when autodetect is on).
++4. The default language from Settings.
++5. Nothing: plain ``say`` speaks with the system voice.
++
++A language becomes a voice through ``AVSpeechSynthesisVoice
++voiceWithLanguage:``, which answers with the voice macOS itself uses for
++that language (the System Settings choice when the owner made one).
++Detection and that lookup are public APIs (macOS 10.14+) reached through one
++short ``osascript`` call; when it fails, plain ``say`` still speaks.
++"""
++
++from __future__ import annotations
++
++import logging
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++logger = logging.getLogger(__name__)
++
++MODEL_ID = "macos-say"
++MAX_INPUT_CHARS = 4096  # same limit as OpenAI's /v1/audio/speech
++SAMPLE_RATE = 24000  # an Opus-encodable rate, same as most TTS models
++_BASE_WPM = 175  # about the normal pace of the stock voices
++_TIMEOUT_S = 120
++
++OPENAI_VOICES = frozenset(
++    "alloy ash ballad coral echo fable onyx nova sage shimmer verse marin cedar".split()
++)
++
++# argv: text, explicit language, default language, "1" to detect.
++# Prints "<language>\t<voice identifier>"; either part may be empty.
++_PICK_SCRIPT = """use framework "Foundation"
++use framework "NaturalLanguage"
++use framework "AVFoundation"
++on primaryOf(tag)
++\treturn ((current application's NSString's stringWithString:tag)'s componentsSeparatedByString:"-")'s firstObject() as text
++end primaryOf
++on run argv
++\tset lang to item 2 of argv
++\tset dflt to item 3 of argv
++\tif lang is "" and item 4 of argv is "1" then
++\t\tset rec to current application's NLLanguageRecognizer's alloc()'s init()
++\t\trec's processString:(item 1 of argv)
++\t\tset hyp to rec's languageHypothesesWithMaximum:1
++\t\tset ks to hyp's allKeys()
++\t\tif (count of ks) > 0 then
++\t\t\tset k to (item 1 of ks) as text
++\t\t\tif ((hyp's objectForKey:k)'s doubleValue()) as real >= 0.5 then
++\t\t\t\tset lang to k
++\t\t\t\tif dflt is not "" and my primaryOf(dflt) is my primaryOf(k) then set lang to dflt
++\t\t\tend if
++\t\tend if
++\tend if
++\tif lang is "" then set lang to dflt
++\tif lang is "" then return ""
++\tset v to current application's AVSpeechSynthesisVoice's voiceWithLanguage:lang
++\tif v is missing value then return lang
++\treturn lang & tab & ((v's identifier()) as text)
++end run
++"""
++
++_ROSTER_LINE = re.compile(r"^(?P<name>.+?)\s+[a-z]{2,3}(?:_[A-Za-z0-9]+)*\s+#")
++
++
++def available() -> bool:
++    """True on macOS with the ``say`` command present."""
++    return sys.platform == "darwin" and shutil.which("say") is not None
++
++
++def enabled(global_settings) -> bool:
++    """The Settings > Integrations switch (on when settings are absent)."""
++    integrations = getattr(global_settings, "integrations", None)
++    return bool(getattr(integrations, "macos_say_enabled", True))
++
++
++def model_visible(global_settings) -> bool:
++    """List ``macos-say`` in ``/v1/models`` when it can actually answer."""
++    return enabled(global_settings) and available()
++
++
++def normalize_language(value: str | None) -> str:
++    """``"cs_CZ"`` / ``" cs-cz "`` -> ``"cs-CZ"``; junk -> ``""``."""
++    tag = (value or "").strip().replace("_", "-")
++    if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", tag):
++        return ""
++    head, *rest = tag.split("-")
++    return "-".join(
++        [head.lower()] + [p.upper() if len(p) == 2 else p for p in rest]
++    )
++
++
++def explicit_voice(voice: str | None) -> str:
++    """The macOS voice a request names, or ``""`` for "pick for me"."""
++    v = (voice or "").strip()
++    if not v or v.lower() == "default" or v.lower() in OPENAI_VOICES:
++        return ""
++    return v
++
++
++def installed_voice_names() -> set[str]:
++    """Lower-cased names from ``say -v ?`` (empty set when it fails)."""
++    try:
++        out = subprocess.run(
++            ["say", "-v", "?"], capture_output=True, text=True, timeout=15
++        ).stdout
++    except (OSError, subprocess.SubprocessError) as exc:
++        logger.warning("macos-say: voice list failed: %s", exc)
++        return set()
++    names = set()
++    for line in out.splitlines():
++        m = _ROSTER_LINE.match(line)
++        if m:
++            names.add(m.group("name").strip().lower())
++    return names
++
++
++def voice_is_installed(voice: str) -> bool:
++    """``say`` falls back to the system voice without an error when a name is
++    unknown, so names are checked first. Identifiers are passed through."""
++    if voice.startswith("com.apple."):
++        return True
++    return voice.lower() in installed_voice_names()
++
++
++def pick_voice(text: str, language: str, default_language: str, detect: bool) -> str:
++    """Voice identifier for this text, or ``""`` to let plain ``say`` speak."""
++    if not language and not default_language and not detect:
++        return ""
++    if shutil.which("osascript") is None:
++        return ""
++    argv = ["osascript", "-", text[:1000], language, default_language]
++    argv.append("1" if detect else "0")
++    try:
++        p = subprocess.run(
++            argv, input=_PICK_SCRIPT, capture_output=True, text=True, timeout=15
++        )
++    except (OSError, subprocess.SubprocessError) as exc:
++        logger.warning("macos-say: voice pick failed: %s", exc)
++        return ""
++    if p.returncode != 0:
++        logger.warning("macos-say: voice pick failed: %s", p.stderr.strip())
++        return ""
++    lang, _, ident = p.stdout.strip().partition("\t")
++    logger.debug("macos-say: language %r -> voice %r", lang, ident)
++    return ident.strip()
++
++
++def synthesize(text: str, voice: str = "", speed: float | None = None) -> bytes:
++    """Render ``text`` to 24 kHz mono 16-bit WAV bytes."""
++    args = ["say"]
++    if voice:
++        args += ["-v", voice]
++    if speed and speed != 1.0:
++        speed = min(max(float(speed), 0.25), 4.0)
++        args += ["-r", str(round(_BASE_WPM * speed))]
++    with tempfile.TemporaryDirectory(prefix="omlx-say-") as td:
++        src = Path(td) / "in.txt"
++        dst = Path(td) / "out.wav"
++        src.write_text(text, encoding="utf-8")
++        args += ["-f", str(src), "-o", str(dst), f"--data-format=LEI16@{SAMPLE_RATE}"]
++        p = subprocess.run(args, capture_output=True, text=True, timeout=_TIMEOUT_S)
++        if p.returncode != 0 or not dst.exists():
++            raise RuntimeError(f"say failed: {p.stderr.strip() or p.returncode}")
++        return dst.read_bytes()
+diff --git a/tests/test_tts_macos_say.py b/tests/test_tts_macos_say.py
+new file mode 100644
+index 00000000..64e9c283
+--- /dev/null
++++ b/tests/test_tts_macos_say.py
+@@ -0,0 +1,393 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Tests for the macos-say TTS model (omlx/utils/macos_say.py).
++
++Every system call is faked, so the suite runs on any OS.
++"""
++
++from __future__ import annotations
++
++import io
++import json
++import subprocess
++import wave
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++import pytest
++from fastapi.testclient import TestClient
++
++from omlx.settings import GlobalSettings, IntegrationSettings
++from omlx.utils import macos_say
++
++
++def _wav(seconds: float = 0.05, rate: int = macos_say.SAMPLE_RATE) -> bytes:
++    buf = io.BytesIO()
++    with wave.open(buf, "wb") as w:
++        w.setnchannels(1)
++        w.setsampwidth(2)
++        w.setframerate(rate)
++        w.writeframes(b"\x00\x00" * int(seconds * rate))
++    return buf.getvalue()
++
++
++# --------------------------------------------------------------------------
++# helpers
++# --------------------------------------------------------------------------
++
++
++@pytest.mark.parametrize(
++    "raw,expected",
++    [
++        ("cs_CZ", "cs-CZ"),
++        (" EN-gb ", "en-GB"),
++        ("zh-Hans-CN", "zh-Hans-CN"),
++        ("de", "de"),
++        ("", ""),
++        (None, ""),
++        ("not a tag", ""),
++        ("e", ""),
++    ],
++)
++def test_normalize_language(raw, expected):
++    assert macos_say.normalize_language(raw) == expected
++
++
++@pytest.mark.parametrize("voice", [None, "", "default", "ash", "Alloy", "marin"])
++def test_openai_and_default_voices_mean_auto(voice):
++    assert macos_say.explicit_voice(voice) == ""
++
++
++def test_named_voice_is_kept():
++    assert macos_say.explicit_voice(" Zuzana (Premium) ") == "Zuzana (Premium)"
++
++
++_ROSTER = """Albert              en_US    # Hello! My name is Albert.
++Good News           en_US    # Hello! My name is Good News.
++Zuzana              cs_CZ    # Ahoj! Já jsem Zuzana.
++Zuzana (Premium)    cs_CZ    # Ahoj! Já jsem Zuzana.
++Shelley (Czech (Czechia)) cs_CZ    # Ahoj! Já jsem Shelley.
++"""
++
++
++def test_voice_check_reads_the_roster(monkeypatch):
++    run = MagicMock(return_value=SimpleNamespace(stdout=_ROSTER, returncode=0))
++    monkeypatch.setattr(macos_say.subprocess, "run", run)
++    assert macos_say.voice_is_installed("zuzana (premium)")
++    assert macos_say.voice_is_installed("Good News")
++    assert macos_say.voice_is_installed("Shelley (Czech (Czechia))")
++    assert not macos_say.voice_is_installed("Bogus")
++    assert run.call_args.args[0] == ["say", "-v", "?"]
++
++
++def test_identifiers_skip_the_roster(monkeypatch):
++    run = MagicMock(side_effect=AssertionError("no roster call expected"))
++    monkeypatch.setattr(macos_say.subprocess, "run", run)
++    assert macos_say.voice_is_installed("com.apple.voice.premium.cs-CZ.Zuzana")
++
++
++def test_pick_voice_does_nothing_without_a_reason(monkeypatch):
++    run = MagicMock(side_effect=AssertionError("no osascript call expected"))
++    monkeypatch.setattr(macos_say.subprocess, "run", run)
++    assert macos_say.pick_voice("Hello", "", "", detect=False) == ""
++
++
++def test_pick_voice_passes_arguments_and_reads_identifier(monkeypatch):
++    monkeypatch.setattr(macos_say.shutil, "which", lambda _: "/usr/bin/osascript")
++    run = MagicMock(
++        return_value=SimpleNamespace(
++            returncode=0, stdout="cs\tcom.apple.voice.premium.cs-CZ.Zuzana\n", stderr=""
++        )
++    )
++    monkeypatch.setattr(macos_say.subprocess, "run", run)
++    got = macos_say.pick_voice("Dobrý den", "", "en-GB", detect=True)
++    assert got == "com.apple.voice.premium.cs-CZ.Zuzana"
++    argv = run.call_args.args[0]
++    assert argv == ["osascript", "-", "Dobrý den", "", "en-GB", "1"]
++    assert "NLLanguageRecognizer" in run.call_args.kwargs["input"]
++    assert "voiceWithLanguage" in run.call_args.kwargs["input"]
++
++
++@pytest.mark.parametrize(
++    "result",
++    [
++        SimpleNamespace(returncode=1, stdout="", stderr="boom"),
++        SimpleNamespace(returncode=0, stdout="xx\n", stderr=""),
++        SimpleNamespace(returncode=0, stdout="", stderr=""),
++    ],
++)
++def test_pick_voice_failure_falls_back_to_plain_say(monkeypatch, result):
++    monkeypatch.setattr(macos_say.shutil, "which", lambda _: "/usr/bin/osascript")
++    monkeypatch.setattr(macos_say.subprocess, "run", MagicMock(return_value=result))
++    assert macos_say.pick_voice("Hello there", "", "", detect=True) == ""
++
++
++def test_pick_voice_survives_timeout(monkeypatch):
++    monkeypatch.setattr(macos_say.shutil, "which", lambda _: "/usr/bin/osascript")
++    monkeypatch.setattr(
++        macos_say.subprocess,
++        "run",
++        MagicMock(side_effect=subprocess.TimeoutExpired("osascript", 15)),
++    )
++    assert macos_say.pick_voice("Hello there", "de", "", detect=False) == ""
++
++
++def _fake_say(captured: list):
++    def run(args, **kwargs):
++        captured.append(args)
++        out = Path(args[args.index("-o") + 1])
++        out.write_bytes(_wav())
++        return SimpleNamespace(returncode=0, stdout="", stderr="")
++
++    return run
++
++
++def test_synthesize_argv(monkeypatch):
++    calls: list = []
++    monkeypatch.setattr(macos_say.subprocess, "run", _fake_say(calls))
++    audio = macos_say.synthesize("Ahoj", "Zuzana", speed=2.0)
++    assert audio[:4] == b"RIFF"
++    args = calls[0]
++    assert args[:3] == ["say", "-v", "Zuzana"]
++    assert args[args.index("-r") + 1] == "350"
++    assert "--data-format=LEI16@24000" in args
++
++
++def test_synthesize_plain_say_and_speed_clamp(monkeypatch):
++    calls: list = []
++    monkeypatch.setattr(macos_say.subprocess, "run", _fake_say(calls))
++    macos_say.synthesize("Hi", "", speed=1.0)
++    macos_say.synthesize("Hi", "", speed=40)
++    assert "-v" not in calls[0] and "-r" not in calls[0]
++    assert calls[1][calls[1].index("-r") + 1] == "700"
++
++
++def test_synthesize_reports_say_errors(monkeypatch):
++    monkeypatch.setattr(
++        macos_say.subprocess,
++        "run",
++        MagicMock(return_value=SimpleNamespace(returncode=1, stdout="", stderr="no")),
++    )
++    with pytest.raises(RuntimeError, match="say failed"):
++        macos_say.synthesize("Hi")
++
++
++# --------------------------------------------------------------------------
++# settings
++# --------------------------------------------------------------------------
++
++
++def test_settings_defaults_and_round_trip():
++    s = IntegrationSettings()
++    assert (s.macos_say_enabled, s.macos_say_autodetect, s.macos_say_language) == (
++        True,
++        True,
++        "",
++    )
++    s.macos_say_enabled = False
++    s.macos_say_language = "cs-CZ"
++    back = IntegrationSettings.from_dict(s.to_dict())
++    assert back.macos_say_enabled is False
++    assert back.macos_say_language == "cs-CZ"
++    assert IntegrationSettings.from_dict({}).macos_say_autodetect is True
++
++
++# --------------------------------------------------------------------------
++# endpoints
++# --------------------------------------------------------------------------
++
++
++@pytest.fixture
++def say_client(monkeypatch):
++    from omlx.api.audio_routes import router as audio_router
++    from omlx.server import app
++
++    if "/v1/audio/speech" not in {getattr(r, "path", "") for r in app.routes}:
++        app.include_router(audio_router)
++
++    gs = GlobalSettings()
++    picks: list = []
++    renders: list = []
++
++    def pick(text, language, default_language, detect):
++        picks.append((text, language, default_language, detect))
++        return "com.apple.voice.compact.cs-CZ.Zuzana"
++
++    def synth(text, voice="", speed=None):
++        renders.append((text, voice, speed))
++        return _wav()
++
++    monkeypatch.setattr(macos_say, "available", lambda: True)
++    monkeypatch.setattr(macos_say, "pick_voice", pick)
++    monkeypatch.setattr(macos_say, "synthesize", synth)
++    monkeypatch.setattr(
++        macos_say, "voice_is_installed", lambda v: v.lower() == "zuzana"
++    )
++    pool = MagicMock()
++    pool.get_status.return_value = {"models": []}
++    with patch("omlx.server._server_state") as state:
++        state.engine_pool = pool
++        state.global_settings = gs
++        state.api_key = None
++        state.settings_manager = None
++        client = TestClient(app, raise_server_exceptions=False)
++        yield SimpleNamespace(
++            client=client, settings=gs, picks=picks, renders=renders, pool=pool
++        )
++
++
++def _speak(c, **body):
++    return c.client.post(
++        "/v1/audio/speech", json={"model": "macos-say", "input": "Ahoj", **body}
++    )
++
++
++def test_speech_autodetects_with_openai_voice(say_client):
++    r = _speak(say_client, voice="ash")
++    assert r.status_code == 200, r.text
++    assert r.headers["content-type"].startswith("audio/wav")
++    assert r.content[:4] == b"RIFF"
++    assert say_client.picks == [("Ahoj", "", "", True)]
++    assert say_client.renders[0][1] == "com.apple.voice.compact.cs-CZ.Zuzana"
++    say_client.pool.get_engine.assert_not_called()
++
++
++def test_speech_request_language_and_settings_reach_the_pick(say_client):
++    say_client.settings.integrations.macos_say_autodetect = False
++    say_client.settings.integrations.macos_say_language = "en_GB"
++    assert _speak(say_client, language="de_de").status_code == 200
++    assert say_client.picks == [("Ahoj", "de-DE", "en-GB", False)]
++
++
++def test_speech_named_voice_skips_the_pick(say_client):
++    assert _speak(say_client, voice="Zuzana", speed=1.5).status_code == 200
++    assert say_client.picks == []
++    assert say_client.renders == [("Ahoj", "Zuzana", 1.5)]
++
++
++def test_speech_unknown_voice_is_400(say_client):
++    r = _speak(say_client, voice="Bogus")
++    assert r.status_code == 400
++    assert "Bogus" in r.json()["error"]["message"]
++
++
++def test_speech_mp3_is_transcoded(say_client):
++    pytest.importorskip("soundfile")
++    r = _speak(say_client, response_format="mp3")
++    assert r.status_code == 200
++    assert r.headers["content-type"] == "audio/mpeg"
++    assert r.content[:4] != b"RIFF"
++
++
++@pytest.mark.parametrize("fmt", ["mp3", "opus", "flac"])
++def test_speech_encoded_formats_need_soundfile(say_client, monkeypatch, fmt):
++    from omlx.api import audio_routes
++
++    monkeypatch.setattr(audio_routes, "_has_soundfile", lambda: False)
++    r = _speak(say_client, response_format=fmt)
++    assert r.status_code == 400
++    assert "audio extra" in r.json()["error"]["message"]
++    assert say_client.renders == []
++
++
++@pytest.mark.parametrize("fmt", ["wav", "pcm"])
++def test_speech_raw_formats_work_without_soundfile(say_client, monkeypatch, fmt):
++    from omlx.api import audio_routes
++
++    monkeypatch.setattr(audio_routes, "_has_soundfile", lambda: False)
++    assert _speak(say_client, response_format=fmt).status_code == 200
++
++
++def test_speech_input_limit(say_client):
++    r = _speak(say_client, input="a" * (macos_say.MAX_INPUT_CHARS + 1))
++    assert r.status_code == 400
++    assert say_client.renders == []
++
++
++def test_speech_disabled_is_400(say_client):
++    say_client.settings.integrations.macos_say_enabled = False
++    assert _speak(say_client).status_code == 400
++
++
++def test_speech_off_macos_is_400(say_client, monkeypatch):
++    monkeypatch.setattr(macos_say, "available", lambda: False)
++    r = _speak(say_client)
++    assert r.status_code == 400
++    assert "macOS" in r.json()["error"]["message"]
++
++
++def test_models_list_carries_macos_say(say_client):
++    with patch("omlx.server.get_max_context_window", return_value=None):
++        data = say_client.client.get("/v1/models").json()["data"]
++        assert {"id": "macos-say", "model_type": "audio_tts"}.items() <= next(
++            m for m in data if m["id"] == "macos-say"
++        ).items()
++        say_client.settings.integrations.macos_say_enabled = False
++        data = say_client.client.get("/v1/models").json()["data"]
++        assert all(m["id"] != "macos-say" for m in data)
++
++
++# --------------------------------------------------------------------------
++# admin settings API
++# --------------------------------------------------------------------------
++
++
++def _post_settings(monkeypatch, gs, **fields):
++    import asyncio
++
++    from omlx.admin import routes
++
++    monkeypatch.setattr(routes, "_get_global_settings", lambda: gs)
++    monkeypatch.setattr(gs, "save", lambda *a, **k: None)
++    return asyncio.run(
++        routes.update_global_settings(
++            request=routes.GlobalSettingsRequest(**fields), is_admin=True
++        )
++    )
++
++
++def test_admin_post_normalizes_and_keeps_other_fields(monkeypatch):
++    from fastapi import HTTPException
++
++    gs = GlobalSettings()
++    _post_settings(
++        monkeypatch, gs, macos_say_language="cs_cz", macos_say_autodetect=False
++    )
++    assert gs.integrations.macos_say_language == "cs-CZ"
++    assert gs.integrations.macos_say_autodetect is False
++    # Saving an unrelated integration setting leaves ours alone.
++    _post_settings(monkeypatch, gs, integrations_openclaw_tools_profile="full")
++    assert gs.integrations.macos_say_language == "cs-CZ"
++    assert gs.integrations.macos_say_autodetect is False
++    _post_settings(monkeypatch, gs, macos_say_language="")
++    assert gs.integrations.macos_say_language == ""
++    with pytest.raises(HTTPException) as err:
++        _post_settings(monkeypatch, gs, macos_say_language="not a tag")
++    assert err.value.status_code == 400
++
++
++# --------------------------------------------------------------------------
++# dashboard card
++# --------------------------------------------------------------------------
++
++_WEB = Path(__file__).resolve().parents[1] / "apps" / "omlx-web" / "omlx_web"
++
++
++def test_card_keys_exist_in_every_locale():
++    html = (_WEB / "templates" / "dashboard" / "_settings.html").read_text()
++    keys = {
++        k
++        for k in json.loads((_WEB / "i18n" / "en.json").read_text())
++        if k.startswith("settings.integrations.macos_say.")
++    }
++    assert len(keys) == 7
++    for key in keys:
++        assert f"t('{key}')" in html
++    for path in (_WEB / "i18n").glob("*.json"):
++        assert keys <= set(json.loads(path.read_text())), path.name
++
++
++def test_dashboard_saves_every_field():
++    js = (_WEB / "static" / "js" / "dashboard.js").read_text()
++    for field in ("macos_say_enabled", "macos_say_autodetect", "macos_say_language"):
++        assert f"{field}: this.globalSettings.integrations.{field}" in js
+diff --git a/tests/test_v1_models_visibility.py b/tests/test_v1_models_visibility.py
+index 3f453367..63619e64 100644
+--- a/tests/test_v1_models_visibility.py
++++ b/tests/test_v1_models_visibility.py
+@@ -5,6 +5,7 @@ from __future__ import annotations
+ 
+ from unittest.mock import patch
+ 
++import pytest
+ from fastapi.testclient import TestClient
+ 
+ from omlx.integrations.base import IntegrationContext
+@@ -33,6 +34,12 @@ class _Pool:
+         }
+ 
+ 
++@pytest.fixture(autouse=True)
++def _no_macos_say(monkeypatch):
++    """These tests pin exact lists; keep the built-in macos-say entry out."""
++    monkeypatch.setattr("omlx.utils.macos_say.available", lambda: False)
++
++
+ def _model(model_id: str, config_model_type: str = "llama", **extra) -> dict:
+     return {
+         "id": model_id,

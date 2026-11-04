@@ -35,6 +35,8 @@ const CODE = [
     'function fetch(u, o) { return _fetchImpl(u, o); }',
     grab('function speakRoute()', 'function SIO()'),
     grab('function voiceRowById', 'function ensureSpeakQueue'),
+    // the 4096 ceiling the plan applies before either door sees a chunk
+    grab('function capChunks', 'function planChunks'),
     // chunkSource's own seams, stubbed: this test is about which door it asks
     'function memGet() { return null; }',
     'function rememberAudio(text, r) { return r; }',
@@ -51,7 +53,7 @@ const sandbox = { JSON, Math, Date, String, Number, Object, Array, Promise,
 vm.createContext(sandbox);
 vm.runInContext(CODE + '\nexports.api = () => ({ speakRoute, voiceRowById, '
     + 'vanillaSpeechCall, vanillaSpeechFetch, speakRequestFor, speakTransport, '
-    + 'chunkSource, memKey });',
+    + 'chunkSource, memKey, capChunks, macosSayVoice });',
     sandbox);
 const api = vm.runInContext('exports.api()', sandbox);
 const _calls = () => vm.runInContext('_calls', sandbox);
@@ -71,14 +73,67 @@ test('route defaults to uplift and only reads "vanilla" from storage', () => {
     store({ [ROUTE]: 'nonsense' });  assert.strictEqual(api.speakRoute(), 'uplift');
 });
 
-test('a macOS row crosses over as the model token that engine addresses', () => {
+/* The swap (omlx-tts-say retired, upstream PR #5076 vendored as
+   omlx-tts-macos-say) means the vanilla door no longer understands uplift's
+   'say:<tail>' token: it has ONE model id and takes the voice in `voice`.
+   These rows are the real store shapes on kocour, not invented ones. */
+test('a macOS row maps onto the vanilla engine\'s single model id', () => {
     store({ [ROUTE]: 'vanilla' });
-    voices([SAY_ROW]);
+    voices([{ id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' }]);
     const call = api.vanillaSpeechCall('zuzana', 'Ahoj.');
     assert.strictEqual(call.url, '/v1/audio/speech');
-    assert.strictEqual(call.body.model, 'say:com.apple.voice.premium.cs-CZ.Zuzana');
+    assert.strictEqual(call.body.model, 'macos-say');
+    assert.strictEqual(call.body.voice, 'Zuzana');
     assert.strictEqual(call.body.input, 'Ahoj.');
-    assert.ok(!('voice' in call.body), 'the say model token carries the voice');
+    assert.strictEqual(call.body.response_format, 'wav');
+});
+
+test('a full AV identifier travels intact (say accepts it like a name)', () => {
+    voices([SAY_ROW]);
+    const call = api.vanillaSpeechCall('zuzana', 'Ahoj.');
+    assert.strictEqual(call.body.model, 'macos-say');
+    assert.strictEqual(call.body.voice, 'com.apple.voice.premium.cs-CZ.Zuzana');
+});
+
+test('a locale cannot travel on that door, so no voice is claimed', () => {
+    // 'say:<name>:<locale>' is uplift addressing; the OpenAI request has no
+    // language field, so the name goes and the engine's own autodetect decides
+    voices([{ id: 'e', name: 'Eloquence', model: 'say:Eloquence:cs-CZ' }]);
+    assert.strictEqual(api.vanillaSpeechCall('e', 'Čau.').body.voice, 'Eloquence');
+    // a locale-only tail names no voice at all -> bare model, never a 400
+    voices([{ id: 'cs', name: 'Czech', model: 'say:cs-CZ' }]);
+    const bare = api.vanillaSpeechCall('cs', 'Čau.');
+    assert.strictEqual(bare.body.model, 'macos-say');
+    assert.ok(!('voice' in bare.body), 'a locale is not a voice name');
+    // bare 'say' (SAY-2) likewise
+    voices([{ id: 's', name: 'System', model: 'say' }]);
+    assert.ok(!('voice' in api.vanillaSpeechCall('s', 'Hi').body));
+});
+
+test('a model row is unaffected by the macOS mapping', () => {
+    voices([MODEL_ROW]);
+    const call = api.vanillaSpeechCall('aiden', 'Hello.');
+    assert.strictEqual(call.body.model, 'mlx-community--Qwen3-TTS');
+    assert.strictEqual(call.body.voice, 'aiden');
+    assert.notStrictEqual(call.body.model, 'macos-say');
+});
+
+/* The vanilla door rejects input over 4096 characters; the plan is built once
+   and a route flip mid-read must never hand it an oversized chunk. */
+test('plan chunks stay under the vanilla door\'s input cap', () => {
+    const long = 'word '.repeat(1500);            // 7500 chars, one 'sentence'
+    const out = api.capChunks([long]);            // no arg = the door's own cap
+    assert.ok(out.length >= 2, 'a 7500-char chunk is split, not sent');
+    assert.ok(out.every(c => c.length <= 4096), out.map(c => c.length).join(','));
+    assert.strictEqual(out.join(' ').replace(/\s+/g, ' ').trim(),
+        long.trim(), 'nothing is lost or duplicated by the split');
+    // Array.from: capChunks returns a cross-realm Array from the vm sandbox,
+    // and deepStrictEqual compares prototypes, so the vm's [] !== the test's []
+    assert.deepStrictEqual(Array.from(api.capChunks(['short one.', 'two.'], 4096)),
+        ['short one.', 'two.'], 'normal chunks pass through untouched');
+    const nospace = 'x'.repeat(9000);
+    assert.ok(api.capChunks([nospace], 4096).every(c => c.length <= 4096),
+        'no word break still cannot exceed the cap');
 });
 
 test('a stored or model row splits into {model, voice}', () => {

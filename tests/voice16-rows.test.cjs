@@ -111,7 +111,7 @@ test('matcher: a chunk spanning lines links to the line it ENDS on', () => {
 
 // (2) the plan rules --------------------------------------------------------
 test('planChunks: sentence mode sanitizes, line and paragraph stay raw', () => {
-    const S = load(['planChunks'], {
+    const S = load(['capChunks', 'planChunks'], {
         SIO: () => IO,
     });
     // (the splitter's floor merges short sentences, so these stand alone)
@@ -140,7 +140,7 @@ test('planChunks: sentence mode sanitizes, line and paragraph stay raw', () => {
 test('planChunks: a streamed plan and a rebuilt one are the same list', () => {
     // the invariant the rows depend on: reload re-derives the SAME chunks, so
     // the stored numbers still point at the stored audio
-    const S = load(['planChunks'], { SIO: () => IO });
+    const S = load(['capChunks', 'planChunks'], { SIO: () => IO });
     const REPLY = 'Alpha one two three. Beta four five six.\n\nGamma seven eight.\n';
     const streamed = [];
     const z = IO.createSpeechSplitter({ mode: 'sentence' });
