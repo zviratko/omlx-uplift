@@ -1,10 +1,10 @@
 diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
-index b3cf00b..04f2481 100644
+index 7a85058..3ef671d 100644
 --- a/omlx/engine/vlm.py
 +++ b/omlx/engine/vlm.py
-@@ -2539,10 +2539,24 @@ class VLMBatchedEngine(BaseEngine):
-         # Without separate Rust tokenizer backends, concurrent access causes
-         # "RuntimeError: Already borrowed".
+@@ -2457,10 +2457,24 @@ class VLMBatchedEngine(BaseEngine):
+         # Sharing a Rust tokenizer backend with the executor's padded calls
+         # causes "RuntimeError: Already borrowed".
          # See: https://github.com/huggingface/tokenizers/issues/537
 -        if hasattr(self._processor, "tokenizer"):
 -            self._tokenizer = copy.deepcopy(self._processor.tokenizer)
