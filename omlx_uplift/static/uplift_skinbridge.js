@@ -135,35 +135,54 @@ function contrast(a, b) {
     return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/* Drop a foreground that would fail classic's floor on any mapped ground.
-   The GROUND always stays (it is the surface the page paints), so a bad ink
-   falls back to classic's own readable stock value. */
-function filterContrast(vals) {
-    const out = Object.assign({}, vals), dropped = [];
-    for (const [fg, grounds] of CONTRAST_RULES) {
-        if (!out[fg]) continue;
-        for (const g of grounds) {
-            if (!out[g]) continue;
-            if (contrast(out[fg], out[g]) + 1e-9 < MIN_CONTRAST) {
-                delete out[fg];
-                dropped.push(fg);
-                break;
-            }
-        }
-    }
-    return { vals: out, dropped };
-}
-
 /* Which tokens the user already set in classic's own editor — parsed from
    the frame's <style id="omlx-custom-theme"> text, which is the single
    place classic commits them. */
 function userSetTokens(cssText) {
-    const set = new Set();
+    return new Set(Object.keys(userTokenValues(cssText)));
+}
+
+/* Same parse, keeping the VALUES: they take part in the contrast check
+   below. A ground the operator owns and an ink we ship are one pair as far
+   as the reader is concerned, so the pair has to clear the floor even
+   though only one side came from us (live QA 2026-11-04: an operator
+   '#334455' ground under a dark crate's ink measured 2.4:1 and nothing
+   flagged it while the check only saw our own tokens). */
+function userTokenValues(cssText) {
+    const out = {};
     const s = String(cssText || '');
-    const re = /--([a-z0-9-]+)\s*:/g;
+    const re = /--([a-z0-9-]+)\s*:\s*([^;]+);/g;
     let m;
-    while ((m = re.exec(s))) set.add(m[1]);
-    return set;
+    while ((m = re.exec(s))) {
+        const hex = normalizeHex(m[2]);
+        if (hex) out[m[1]] = hex;
+        else if (!(m[1] in out)) out[m[1]] = null;   // set, but not a colour we can judge
+    }
+    for (const k of Object.keys(out)) if (!out[k]) delete out[k];
+    return out;
+}
+
+/* Drop anything that would fail classic's floor. Foregrounds go first: the
+   grounds define the page, and a dropped ink falls back to classic's own
+   readable value. A ground only goes when the failing foreground is the
+   OPERATOR's, since that is the half we are allowed to withdraw. */
+function filterContrast(vals, theirs) {
+    const out = Object.assign({}, vals), other = theirs || {}, dropped = [];
+    const eff = k => (k in out ? out[k] : (k in other ? other[k] : null));
+    for (const [fg, grounds] of CONTRAST_RULES) {
+        for (const g of grounds) {
+            const a = eff(fg), b = eff(g);
+            if (!a || !b) continue;
+            const fgOurs = fg in out, gOurs = g in out;
+            if (!fgOurs && !gOurs) continue;   // both the operator's: not ours to police
+            if (contrast(a, b) + 1e-9 < MIN_CONTRAST) {
+                const victim = fgOurs ? fg : g;
+                delete out[victim];
+                if (dropped.indexOf(victim) < 0) dropped.push(victim);
+            }
+        }
+    }
+    return { vals: out, dropped };
 }
 
 function buildCss(vals) {
@@ -174,12 +193,18 @@ function buildCss(vals) {
 }
 
 /* cls = the skins API entry's `classic` object ({theme, enhanced, colors,
-   palette}); opts.stock = Set of tokens the user set in classic. */
+   palette}). opts.stockText = the frame's <style id="omlx-custom-theme">
+   text (the normal call: it gives both the skip list and the values the
+   contrast check needs); opts.stock = a pre-parsed Set, for callers that
+   only know which tokens are taken. */
 function bridge(cls, opts) {
     const o = opts || {};
     if (!cls || cls.colors === false)
         return { css: '', vals: {}, dropped: [], reason: 'off' };
-    const stock = o.stock || new Set();
+    const theirs = o.stockText != null ? userTokenValues(o.stockText)
+                 : (o.theirs || {});
+    let stock = o.stock;
+    if (!(stock instanceof Set)) stock = new Set(Object.keys(theirs));
     const pal = cls.palette || {};
     const vals = {};
     for (const [ct, ut] of CROSSWALK) {
@@ -188,7 +213,7 @@ function bridge(cls, opts) {
         const hex = normalizeHex(pal[ut]);
         if (hex) vals[ct] = hex;
     }
-    const r = filterContrast(vals);
+    const r = filterContrast(vals, theirs);
     const css = buildCss(r.vals);
     return { css, vals: r.vals, dropped: r.dropped,
              reason: css ? '' : 'empty' };
@@ -198,5 +223,5 @@ return { CLASSIC_TOKENS, CROSSWALK, CLASSIC_BRIDGE_TOKENS, CONTRAST_RULES,
          MIN_CONTRAST,
          STYLE_ID, SCOPE_ATTR, CLASSIC_STYLE_ID,
          normalizeHex, toRgb, luminance, contrast, filterContrast,
-         userSetTokens, buildCss, bridge };
+         userSetTokens, userTokenValues, buildCss, bridge };
 });

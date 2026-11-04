@@ -84,6 +84,14 @@ test('userSetTokens reads what classic theme editor already committed', () => {
     assert.strictEqual(B.userSetTokens(null).size, 0);
 });
 
+test('userTokenValues keeps the values, for cross-ownership contrast', () => {
+    const v = B.userTokenValues(':root[data-theme="light"] { --bg-primary: #334455;'
+        + ' --surface-scale-white: 51 68 85; }');
+    assert.deepStrictEqual(v, { 'bg-primary': '#334455' },
+        'a token that is not a colour is not a token we can judge');
+    assert.deepStrictEqual(B.userTokenValues(''), {});
+});
+
 test('bridge maps the full crosswalk from a full palette', () => {
     const r = B.bridge(cls(FULL), {});
     assert.ok(r.css.includes(':root[' + B.SCOPE_ATTR + ']'),
@@ -119,6 +127,39 @@ test('bridge: a token the user set in classic wins', () => {
     assert.ok(!('link-color' in r.vals), 'user edit must not be overwritten');
     assert.ok('timeline-accent' in r.vals,
         'a different classic token is still fair game');
+});
+
+/* The pair the reader sees is (their ground, our ink) as much as it is
+   (our ground, our ink) — the live QA pass caught this on inkwell under an
+   operator '#334455' ground: 1.7:1, and nothing flagged it. */
+test('bridge: our ink is checked against the operator\'s ground', () => {
+    const inkwell = { bg: '#f7f7f5', card: '#fdfdfb', panel: '#ececea',
+                      ink: '#1a1a1a', dim: '#5f5f5c', edge: '#d2d2cc',
+                      accent: '#14566b' };
+    const r = B.bridge(cls(inkwell),
+        { stockText: ':root[data-theme="light"] { --bg-primary: #334455;'
+                   + ' --surface-scale-white: 51 68 85; }' });
+    assert.ok(!('bg-primary' in r.vals), 'the operator owns that token');
+    assert.ok(!('text-primary' in r.vals),
+        'dark crate ink on the operator\'s dark ground is unreadable');
+    assert.ok(r.dropped.includes('text-primary'));
+    assert.ok('bg-secondary' in r.vals && 'border-faint' in r.vals,
+        'the rest of the crate still ships');
+});
+
+test('bridge: our grounds are withdrawn under the operator\'s ink', () => {
+    // light crate, light operator ink: the grounds are the half we own, so
+    // they go and classic paints its own ground under the operator's text
+    const light = { bg: '#f7f7f5', card: '#fdfdfb', panel: '#ececea',
+                    ink: '#1a1a1a', dim: '#5f5f5c', edge: '#d2d2cc',
+                    accent: '#14566b' };
+    const r = B.bridge(cls(light),
+        { stockText: ':root { --text-primary: #f0f0f0; }' });
+    assert.ok(!('bg-primary' in r.vals),
+        'a light ground under the operator\'s near-white ink is not ours to paint');
+    assert.ok(!('bg-secondary' in r.vals) && !('bg-tertiary' in r.vals));
+    assert.ok(!('text-primary' in r.vals), 'their token, never sent either way');
+    assert.ok('border-faint' in r.vals, 'a token no rule covers still ships');
 });
 
 test('bridge: an unreadable skin ink falls back instead of poisoning classic', () => {

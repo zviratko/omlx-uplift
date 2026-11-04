@@ -945,7 +945,7 @@ function applySkinBridge(de, st) {
         if (node) node.remove();
     };
     if (!st || st.colors === false || !st.palette) { off(); return; }
-    const r = B.bridge(st, { stock: B.userSetTokens(own && own.textContent) });
+    const r = B.bridge(st, { stockText: own ? own.textContent : '' });
     if (!r.css) { off(); return; }
     de.setAttribute(B.SCOPE_ATTR, '');
     if (node) node.textContent = r.css;
