@@ -127,15 +127,17 @@ const GS_LABELS = {
         local: 'Local', cloud: 'Cloud',
         opus: 'Opus Model', sonnet: 'Sonnet Model', haiku: 'Haiku Model',
         ph: 'Pick or type a model' },
-    // Vendored omlx-tts-macos-say (PR #5076). Plain English fallbacks, one per
-    // row string: the settings form translates by OVERLAYING the catalog key
-    // 'uplift.gs.' + the dotted label path after the catalog loads, and
-    // GS_LABELS itself is built at script-load time, so a C.tf call here can
-    // only ever see its own fallback (the older C.tf entries in this literal,
-    // gen.fallback_desc and api_key_placeholder, are English-only for exactly
-    // that reason; see UP-69). The six uplift.gs.say.* values are the upstream
-    // translations of the classic card, copied into all 10 locale files, so the
-    // board and the classic page cannot drift in wording or in coverage.
+    // Vendored omlx-tts-macos-say (PR #5076). Plain English literals, one per
+    // row string. Translation for this form happens LATER and only one way:
+    // gsLocalize() walks the literal after the catalog lands and overwrites each
+    // entry from the catalog key 'uplift.gs.' + its dotted label path. A C.tf
+    // call inside this literal is therefore dead weight — GS_LABELS is built at
+    // script-load time, before the catalog exists, so it can only return its own
+    // fallback, and the overlay is what actually paints the row. (Paths ending
+    // in _placeholder are excluded from the overlay on purpose.)
+    // The six uplift.gs.say.* values are the upstream translations of the
+    // classic card, copied into all 10 locale files, so the board and the
+    // classic page cannot drift in wording or in coverage.
     // (Keep this comment free of apostrophes: the GS_LABELS extractor in
     // tests/gsys-label-keys.test.cjs brace-walks the literal without stripping
     // comments, so a stray quote swallows real delimiters and the eval dies.)
