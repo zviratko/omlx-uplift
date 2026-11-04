@@ -158,22 +158,15 @@ class OmlxDev < Omlx
   end
 
   # Same resources as jundot/omlx (subclass specs start empty - re-declared).
-  # THIS REVISION IS A DEPENDENCY COORDINATE, NOT A COMMENT: the inherited
-  # install() stages resource("mlx-audio") and pip-installs it LAST, so a stale
-  # revision here silently rewrites the dependency set the source just built.
-  # Upstream 3a5a6b2 (2026-10-29) moved its own resource 5175326 (0.4.3) ->
-  # 8c244a1 (0.6.3) AND deleted the `inreplace "mlx-lm==0.31.1"` patch, because
-  # 0.6.3 requires mlx-lm>=0.31.1 instead of ==0.31.1. With the patch gone from
-  # the parent and 0.4.3 staged from here, that last pip step downgraded
-  # mlx-lm 0.32.3.dev8+g0d4d3d04f -> 0.31.1, which has no GenerationBatch, and
-  # omlx/scheduler.py:33 raised at boot on a keg that built "successfully".
-  # Keep this in step with upstream's Formula/omlx.rb and with the
-  # mlx-audio pin in the source tree's pyproject.toml.
-  resource "mlx-audio" do
-    url "https://github.com/Blaizzy/mlx-audio.git",
-        revision: "8c244a1faff44cfa69e3151c195f52a4c1c90be5"
-  end
-
+  # SYNC-1 fire 18: the `resource "mlx-audio"` re-declaration is GONE. Upstream
+  # 9de79bc deleted its own resource and switched install() to
+  # `buildpath[audio]` / `[audio,grammar]`, so the inherited install() never
+  # stages a mlx-audio resource any more - ours was dead weight that made
+  # `brew fetch` clone a repository upstream no longer uses (and 54877cf moved
+  # that dependency Blaizzy -> Neywa-Labs, so the URL here was stale twice
+  # over). The UP-60 guard compares resources that EXIST on both sides, so a
+  # deleted one cannot mask skew. If a future parent install() stages a
+  # resource again, re-declare it with the parent's exact coordinate.
   resource "en-core-web-sm" do
     url "https://github.com/explosion/spacy-models/releases/download/" \
         "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
