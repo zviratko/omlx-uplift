@@ -83,6 +83,16 @@ const GS_MAP = {
     // applied like the rest of claude_code; the server auto-configures /
     // restores the Desktop JSON on the OFF->ON / ON->OFF edge.
     claude_code_desktop_enabled: ['claude_code','desktop_enabled'],
+    // Vendored omlx-tts-macos-say (upstream PR #5076): the vanilla macOS
+    // speech engine's Settings > Integrations card. routes.py reads these
+    // three BARE off the POST body (not in INTEG_PREFIXED below) and applies
+    // them per request, so no restart badge. macos_say_available is READ-ONLY
+    // and stays unmapped on purpose: an unmapped key is never sent, and it is
+    // also the flag that decides whether the rows exist at all — a server
+    // without the engine reports nothing, so the card hides itself.
+    macos_say_enabled: ['integrations','macos_say_enabled'],
+    macos_say_autodetect: ['integrations','macos_say_autodetect'],
+    macos_say_language: ['integrations','macos_say_language'],
 };
 /* Keys the classic saveGlobalSettings() includes in its full payload.
    base_path is launch-time only (read-only row); api_key is sent masked and

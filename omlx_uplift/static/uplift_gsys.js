@@ -127,6 +127,29 @@ const GS_LABELS = {
         local: 'Local', cloud: 'Cloud',
         opus: 'Opus Model', sonnet: 'Sonnet Model', haiku: 'Haiku Model',
         ph: 'Pick or type a model' },
+    // Vendored omlx-tts-macos-say (PR #5076). These labels REUSE the classic
+    // catalog keys: the engine ships its Integrations card with upstream
+    // translations for 11 locales, and t() resolves classic keys through the
+    // merged catalog at runtime. Minting uplift.gs.say.* instead would
+    // duplicate 6 strings into 10 files and drift from upstream wording.
+    // (No apostrophes in this comment: the GS_LABELS extractor in
+    // tests/gsys-label-keys.test.cjs brace-walks the literal without stripping
+    // comments, so a stray quote swallows real delimiters and the eval dies.)
+    say: { enabled: C.tf('settings.integrations.macos_say.enabled',
+                'Enable macos-say'),
+        enabled_hint: C.tf('settings.integrations.macos_say.enabled_hint',
+                'Serve /v1/audio/speech with the built-in macOS say command. '
+                + 'No model download and no extra memory.'),
+        autodetect: C.tf('settings.integrations.macos_say.autodetect',
+                'Detect language'),
+        autodetect_hint: C.tf('settings.integrations.macos_say.autodetect_hint',
+                'Choose the voice from the language of each request.'),
+        language: C.tf('settings.integrations.macos_say.language',
+                'Default language'),
+        language_hint: C.tf('settings.integrations.macos_say.language_hint',
+                'Used when detection is off or unsure, e.g. en-GB or cs-CZ. '
+                + 'Empty: the system voice.'),
+        ph: 'en-GB' },
     gen: { max_ctx: 'Max Context Window',
         max_ctx_hint: 'Largest context a request may claim.',
         max_policy: 'Max Context Policy',
@@ -701,6 +724,11 @@ function gsToggle(flat, on, confirmMsg) {
     t.onchange = () => {
         if (confirmMsg && t.checked && !window.confirm(confirmMsg)) { t.checked = false; return; }
         gsQueueSave(flat, t.checked);
+        // Vendored omlx-tts-macos-say: the engine switch greys its dependent
+        // rows. gsVisibilitySync (which also runs the disabled pass) fires on
+        // selects only, so a toggle needs its own nudge — same precedent as the
+        // ui_language live-commit line in gsSelect.
+        if (flat === 'macos_say_enabled') gsDisabledSync();
     };
     return t;
 }
@@ -2258,6 +2286,22 @@ const GS_SPEC = [
     {sec: 'net', lab: 'net.ca_bundle', hint: 'net.ca_hint', ctl: {
         k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'}},
 
+    // Vendored omlx-tts-macos-say (upstream PR #5076): classic's Integrations
+    // card, mirrored row for row. The group hides unless the server reports the
+    // engine (read-only macos_say_available) — a Linux host or a keg without
+    // the patch has nothing to configure, and classic hides its card the same
+    // way. Turning the engine off greys the two dependent rows rather than
+    // removing them (gsDisabledSync), like classic's :disabled bindings.
+    {sec: 'say', lab: 'say.enabled', hint: 'say.enabled_hint', ctl: {
+        k: 'tog', sec: 'integrations', field: 'macos_say_enabled',
+        flat: 'macos_say_enabled'}, show: (ctx) => ctx.sayAvail},
+    {sec: 'say', lab: 'say.autodetect', hint: 'say.autodetect_hint', ctl: {
+        k: 'tog', sec: 'integrations', field: 'macos_say_autodetect',
+        flat: 'macos_say_autodetect'}, show: (ctx) => ctx.sayAvail},
+    {sec: 'say', lab: 'say.language', hint: 'say.language_hint', ctl: {
+        k: 'text', sec: 'integrations', field: 'macos_say_language',
+        flat: 'macos_say_language', ph: 'say.ph'}, show: (ctx) => ctx.sayAvail},
+
     {t: 'Advanced'},
     {sec: 'adv', lab: 'adv.distributed_enabled', hint: 'adv.distributed_hint', ctl: {
         k: 'tog', sec: 'server', field: 'distributed_inference_enabled',
@@ -2351,6 +2395,18 @@ function gsDisabledSync() {
         srow.title = loop ? '' : C.tf('js.error.api_key_required_network',
             'An API key is required when the server is reachable beyond localhost.');
     }
+    // Vendored omlx-tts-macos-say (PR #5076): classic greys the language
+    // controls while the engine is off (:disabled="!macos_say_enabled"). Reads
+    // the QUEUED value (gsEffFlat), not the saved one, so the grey-out lands on
+    // the click. The stored values stay visible rather than faking an OFF like
+    // classic's `autodetect && enabled` does — a greyed row that shows what is
+    // saved is the honest state, and the payload keeps the real value.
+    const sayOn = gsEffFlat('macos_say_enabled') !== false;
+    for (const f of ['macos_say_autodetect', 'macos_say_language']) {
+        const row = document.querySelector('#gs-body [data-flat="' + f + '"]');
+        const ctl = row && row.querySelector('input,select');
+        if (ctl) ctl.disabled = !sayOn;
+    }
 }
 function gsBodySanitize() {
     // UP-19 (6): classic gives the API-key row an eye button. Uplift keeps
@@ -2379,6 +2435,9 @@ function gsCtxNow() {
         gdn: gsEffFlat('gdn_snapshot_storage'),
         gdnEff: gsGdnEff(),
         prec: gsEffFlat('gdn_sidecar_precision'),
+        // Vendored omlx-tts-macos-say: strict === true, because a server
+        // without the engine omits the flag and the card must not appear.
+        sayAvail: gsGet('integrations', 'macos_say_available') === true,
     };
 }
 /* MGC-1: the Custom ceiling starts at the server's own auto policy —

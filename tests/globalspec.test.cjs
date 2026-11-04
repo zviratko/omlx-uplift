@@ -154,6 +154,52 @@ test('MODEL_TYPE_OPTIONS mirrors the classic model-type <option> list', { skip: 
         `classic model types missing from MODEL_TYPE_OPTIONS: ${missing.join(', ')}`);
 });
 
+/* ---- fields OUR OWN curated patches add to GlobalSettingsRequest ---- */
+/* The schema gate above parses the VANILLA checkout, so it cannot see a field a
+   vendored patch introduces. That hole is how the macOS speech engine shipped a
+   whole Settings > Integrations card (omlx-tts-macos-say, PR #5076) that no gate
+   ever asked Uplift to carry. git puts the enclosing class in the @@ header, so
+   added `    key: type = None` lines under `class GlobalSettingsRequest` are the
+   patch's accepted request fields. */
+function patchAddedGSFields() {
+    const dir = path.join(__dirname, '..', 'curated_patches', 'default');
+    const found = new Map();
+    for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.diff'))) {
+        let inCls = false;
+        for (const line of fs.readFileSync(path.join(dir, name), 'utf8').split('\n')) {
+            if (/^\+\+\+ b\//.test(line)) { inCls = false; continue; }
+            const h = line.match(/^@@[^\n]*@@\s*(.*)$/);
+            if (h) { inCls = /^\s*class GlobalSettingsRequest\b/.test(h[1]); continue; }
+            if (!inCls || line[0] !== '+' || line[1] === '+') continue;
+            const f = line.match(/^\+\s{4}([a-z_0-9]+)\s*:/);
+            if (f) found.set(f[1], name);
+        }
+    }
+    return found;
+}
+
+test('curated patches cannot add a global-settings field Uplift does not carry', () => {
+    const added = patchAddedGSFields();
+    // Anti-vacuity: the parser must still find the keys that proved the hole.
+    // If this fails, FIX THE PARSER — a blind guard is what let the card ship.
+    for (const k of ['macos_say_enabled', 'macos_say_autodetect', 'macos_say_language'])
+        assert.ok(added.has(k), `patch parser went blind: ${k} not found in any .diff`);
+    // Read-only: the server reports it, the request never accepts it. Unmapped
+    // is correct, and the rows hide without it.
+    const READ_ONLY = new Set(['macos_say_available']);
+    const gsys = fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_gsys.js'), 'utf8');
+    for (const [key, from] of added) {
+        if (READ_ONLY.has(key)) continue;
+        assert.ok(Object.prototype.hasOwnProperty.call(GSPEC.GS_MAP, key),
+            `${key} (added by ${from}) is missing from GS_MAP`);
+        assert.ok(!GSPEC.INTEG_PREFIXED.has(key),
+            `${key} saves bare in the patch's handler; INTEG_PREFIXED would send integrations_${key}`);
+        assert.ok(new RegExp("flat:\\s*'" + key + "'").test(gsys),
+            `${key} is mapped but has no row — not reachable in the editor`);
+    }
+});
+
 // P1A-7 interop: Uplift-style global-settings round-trip against the REAL
 // oMLX must leave settings.json untouched. Skips (exit 2) when no local
 // oMLX answers, so CI without a running server stays green.
