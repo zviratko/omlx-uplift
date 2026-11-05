@@ -145,6 +145,13 @@ def _cli_capture(monkeypatch, result=None):
                                             returncode=0, lines=[],
                                             tip=TIP, sync_ref="origin/main",
                                             base_sha=BASE, cfg={})
+    # CLI-wiring tests target an EXISTING lane: on CI there is no
+    # dev.json, and the one-command-lane auto-bootstrap (998cb36) would
+    # correctly refuse a scripted no-config install before the stubbed
+    # build was ever reached. Pin the lane in place.
+    monkeypatch.setattr(devsrc, "load_config",
+                        lambda *a, **k: {"origin": "file:///x",
+                                         "sync_ref": "origin/main"})
     monkeypatch.setattr(devsrc, "run_dev_build", fake_build)
     monkeypatch.setattr(cli, "_dev_next_steps", lambda *a, **k: None)
     restarts = []
