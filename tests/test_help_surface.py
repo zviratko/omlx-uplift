@@ -127,7 +127,8 @@ class TestHelpSurface(unittest.TestCase):
         self.assertIn("--restart", out)
         text = Path(helpmod.man_path()).read_text(encoding="utf-8")
         self.assertIn(
-            "Ic bootstrap | status | patches | install | upgrade | reconfigure",
+            "Ic install | setup | bootstrap | configure | status | patches"
+            " | upgrade | reconfigure",
             text)
         self.assertNotIn("legacy alias", text)
         self.assertEqual(text.count(".Ic upgrade"), 1,

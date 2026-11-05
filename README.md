@@ -53,17 +53,20 @@ brew tap jundot/omlx https://github.com/jundot/omlx
 brew tap zviratko/uplift https://github.com/zviratko/omlx-uplift
 brew trust jundot/omlx zviratko/uplift
 brew install omlx-uplift
-omlx-uplift dev bootstrap        # a few questions, once (--yes takes the defaults)
-omlx-uplift dev install          # builds the omlx-dev keg
-omlx-uplift install              # connects Uplift to the dev build
+omlx-uplift dev install          # one command: on a fresh box it asks a
+                                 # few questions first (--yes takes the
+                                 # defaults), builds the omlx-dev keg,
+                                 # and connects Uplift to it
 brew services start omlx-dev
 ```
+
+Want to answer the questions again later (origin, build options, port)? `omlx-uplift dev setup`.
 
 Then open **http://127.0.0.1:8001/uplift/** and create your key as in option 1. Both options can run side by side on one Mac. Details: [docs/dev-builds.md](docs/dev-builds.md).
 
 ### Good to know
 
-- **After `brew upgrade omlx`**, run `omlx-uplift install` again and `brew services restart omlx`. A new keg comes with a new Python, and Uplift must connect to it again.
+- **After `brew upgrade omlx`** (classic lane), run `omlx-uplift install` again and `brew services restart omlx`. A new keg comes with a new Python, and Uplift must connect to it again. The dev lane does both inside `dev install`.
 - **Updating the dev build:** `omlx-uplift dev upgrade --restart`. It rebuilds only when upstream or your patches moved, reconnects Uplift, and restarts the service after a rebuild.
 - **Power and temperature charts** need [macmon](https://github.com/vladkens/macmon): `brew install macmon`. Without it, those charts stay hidden.
 - **Voice input** needs a speech-recognition model (for example a Whisper model from Models > Downloader). Browsers allow the microphone only on `http://127.0.0.1`, `http://localhost` or HTTPS, not on plain `http://` LAN addresses.
@@ -120,7 +123,9 @@ Everything has a dashboard control, but the CLI is useful for scripts and for re
 
 | Command | What it does |
 |---|---|
-| `omlx-uplift install` | Connect Uplift to oMLX. Run it again after every `brew upgrade` of oMLX. |
+| `omlx-uplift install` | Connect Uplift to the classic oMLX keg. Run it again after every `brew upgrade` of oMLX. (The dev lane does this inside `dev install`.) |
+| `omlx-uplift dev install` | Build the patched dev engine and connect Uplift - one command, first-run setup included (`--yes` takes the defaults). |
+| `omlx-uplift dev setup` | Re-run the dev lane questions: origin, build options, port. |
 | `omlx-uplift uninstall` | Disconnect Uplift from oMLX. |
 | `omlx-uplift serve` | Run oMLX with Uplift in the foreground. Takes the same options as `omlx serve`. |
 | `omlx-uplift patch status` | List your patches and whether each one is applied. |

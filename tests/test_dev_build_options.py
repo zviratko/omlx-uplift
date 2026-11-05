@@ -25,9 +25,13 @@ def answers(monkeypatch):
     return _feed
 
 
-def test_ask_build_options_default_is_custom_kernel(answers, capsys):
+def test_ask_build_options_default_is_kernels_and_grammar(answers, capsys):
+    # one-command lane (user 2026-11-05): both options are the default —
+    # omlx-dev users are expected to run Xcode, kernels are the fastest
+    # engine build, xgrammar joined the defaults by the same decision
     answers("")
-    assert devsrc._ask_build_options() == ["--with-custom-kernel"]
+    assert devsrc._ask_build_options() == ["--with-custom-kernel",
+                                           "--with-grammar"]
     out = capsys.readouterr().out
     assert "RECOMMENDED, you almost certainly" in out, \
         "kernels must be worded as the choice the user wants"
@@ -72,13 +76,27 @@ def test_install_config_saves_answer(tmp_path, monkeypatch, answers):
     assert cfg["build_options"] == ["--with-custom-kernel"]
 
 
-def test_install_config_yes_saves_nothing(tmp_path, monkeypatch):
+def test_install_config_yes_saves_documented_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(devsrc, "detect_origin",
                         lambda src_hint=None: {"origin": "https://x/omlx.git",
                                                "source": "test"})
     cfg = devsrc.install_config(yes=True, base_dir=str(tmp_path))
-    # never asked => never stored => the box keeps receipt inheritance
-    assert "build_options" not in cfg
+    # one-command lane (user 2026-11-05): --yes TAKES the defaults — a
+    # fresh scripted box has no receipt to inherit and must not silently
+    # get the slow plain build
+    assert cfg["build_options"] == devsrc.DEFAULT_BUILD_OPTIONS
+
+
+def test_install_config_yes_never_overwrites_a_stored_answer(tmp_path,
+                                                             monkeypatch):
+    monkeypatch.setattr(devsrc, "detect_origin",
+                        lambda src_hint=None: {"origin": "https://x/omlx.git",
+                                               "source": "test"})
+    devsrc.save_config({"origin": "https://x/omlx.git",
+                        "build_options": []}, base_dir=str(tmp_path))
+    cfg = devsrc.install_config(yes=True, base_dir=str(tmp_path))
+    # [] = the human chose a plain build; --yes must respect it
+    assert cfg["build_options"] == []
 
 
 # ---- build-time resolution -------------------------------------------------

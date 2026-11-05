@@ -1349,7 +1349,9 @@ def _ask_build_options() -> list:
           "(~2 GB)")
     print("  0  plain build           — no extra formula options")
     print("     (other --with-* options of the formula can be typed too)")
-    ans = ask("Build options [1]: ").strip().lower() or "1"
+    # 1,2 is the documented default (user 2026-11-05) — the same pair
+    # --yes / auto-bootstrap stores (DEFAULT_BUILD_OPTIONS)
+    ans = ask("Build options [1,2]: ").strip().lower() or "1,2"
     flags, unknown = [], []
     for tok in ans.replace(",", " ").split():
         if tok in ("0", "none"):
@@ -1439,6 +1441,12 @@ def install_config(src_hint: str | None = None, yes: bool = False,
         # is NOT the same as never being asked (that path keeps the pre-
         # 2026-10-22 receipt inheritance)
         cfg["build_options"] = build_options
+    elif yes and cfg.get("build_options") is None:
+        # one-command lane (user 2026-11-05): --yes TAKES the documented
+        # defaults instead of leaving a fresh box on receipt inheritance —
+        # with no receipt there is nothing to inherit but the slow plain
+        # build. An existing stored answer is never overwritten.
+        cfg["build_options"] = list(DEFAULT_BUILD_OPTIONS)
     save_config(cfg, base_dir=base)
     return cfg
 
@@ -1448,6 +1456,15 @@ def install_config(src_hint: str | None = None, yes: bool = False,
 # ---------------------------------------------------------------------------
 
 RUNTIME_DEFAULTS = {"port": 8001, "base_path": "~/.omlx-dev"}
+
+# One-command dev lane (user 2026-11-05): what a scripted bootstrap
+# (--yes, or `dev install` on a fresh box) stores when nobody was asked.
+# Custom Metal kernels are the fastest engine build and omlx-dev users are
+# expected to run Xcode; xgrammar joined the defaults by the same
+# decision. Opt out with `dev setup`, or clear build_options in dev.json —
+# a kernel build on a Mac without the toolchain fails fast at the
+# pre-launch gate and restores the previous pin itself.
+DEFAULT_BUILD_OPTIONS = ["--with-custom-kernel", "--with-grammar"]
 SHARE_DEFAULTS = {"models": True, "settings": False,
                   "model_settings": False, "model_profiles": False}
 # knob name -> path under the base dirs (knob names omit the .json suffix)
@@ -2595,9 +2612,12 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     cfg["built_at"] = _patches.now_iso()
     save_config(cfg)
     res.cfg = cfg
-    brewutil.mount_into_dev_keg()
+    mounted = brewutil.mount_into_dev_keg()
     _emit(res, "out", f"omlx-dev built from {tip[:12]}; .pth mount "
-                      "refreshed")
+                      + ("refreshed" if mounted else
+                         "skipped (python minor mismatch — the uplift "
+                         "carry below may heal it; the mount proof is "
+                         "the judge)"))
     # KEG-VERSIONED retention: newest keg_stash_keep build dirs plus the
     # active keg survive; older Cellar directories (and the legacy HEAD-*
     # one this scheme replaces) are dropped here, deliberately — brew's
@@ -2634,8 +2654,45 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     except Exception as exc:
         _emit(res, "err", f"uplift carry probe failed (engine build "
                           f"unaffected): {exc}")
+    # MOUNT PROOF (one-command close, user 2026-11-05): the README and the
+    # SYNC-1 fire stop at 'dev install' now, so the proof that used to
+    # live in the trailing 'omlx-uplift install' runs here — after the
+    # carry, which may just have healed a minor mismatch.
+    if _mount_proof(brewutil, lambda s, t: _emit(res, s, t)) is False:
+        res.ok, res.returncode, res.stage = False, 1, "mount"
+        return res
     res.ok, res.returncode, res.stage = True, 0, "ok"
     return res
+
+
+def _mount_proof(brewutil, emit) -> bool | None:
+    """Mount retry + import proof at build close. True proved, None
+    nothing to prove (no keg python resolvable — test/CI harnesses),
+    False broken mount (emit names the fix). The .pth alone proves
+    nothing: probe the target env the way the server boots it, same
+    contract as cmd_install's mount check."""
+    dtp = getattr(brewutil, "default_target_python", None)
+    eng_py = dtp("omlx-dev") if dtp else None
+    if eng_py is None:
+        emit("warn", "mount proof skipped: no omlx-dev keg python "
+                     "resolvable from this process")
+        return None
+    if not brewutil.mount_into_dev_keg():
+        emit("err", "uplift .pth NOT mounted into the new keg (python "
+                    "minor mismatch survived the carry) — connect Uplift "
+                    "by hand: omlx-uplift install --formula omlx-dev")
+        return False
+    from .cli import _verify_mount
+    ok, detail = _verify_mount(str(eng_py))
+    if ok:
+        emit("out", "mount check: OK (omlx.server imports with Uplift "
+                    "mounted)")
+        return True
+    emit("err", "build OK and the keg is active, but the UPLIFT MOUNT "
+                f"PROOF FAILED — /uplift/ will 404 until fixed:\n  "
+                f"{detail}\n  retry by hand: omlx-uplift install "
+                "--formula omlx-dev")
+    return False
 
 
 def _build_patches_from_commits(commits: list[dict], patchsource) -> list[dict]:

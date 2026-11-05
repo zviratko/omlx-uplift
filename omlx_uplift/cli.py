@@ -64,6 +64,15 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
     from . import diffapply
     from . import patches as _patches_mod
 
+    # RUNTIME-MOUNT doctrine mirror (patchsync.reconcile): a dev-keg tree
+    # mounts omlx-scope overlays only — dev/both diffs ride the uplift-dev
+    # branch build. Previewing them as runtime overlays produced the
+    # misleading 'reverts cleanly — upstream likely picked it up' warnings
+    # on every dev box (the false-signal class the fire procedure spent a
+    # refutation ritual on; 2026-11-05: the preview must not lie either).
+    on_dev_tree = _patches_mod.detect_patch_target(
+        os.path.join(tree_root, "omlx")) == "dev"
+
     out: list[dict] = []
     try:
         manifest = store.load()
@@ -80,6 +89,13 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 _patches_mod.patch_scope(patch)):
             continue  # dev-scope: never applied to a keg (DEV-1)
         rev = bool(patch.get("reversal"))
+        if on_dev_tree and _patches_mod.patch_scope(patch) \
+                == _patches_mod.SCOPE_BOTH:
+            out.append({"id": pid, "verdict": "applied",
+                        "detail": "rides the uplift-dev branch build "
+                                  "(no runtime overlay on the dev tree)",
+                        "reversal": rev})
+            continue
         # PAT-TABLE: preview what THIS keg will actually mount — a pinned
         # runtime surface re-checks its pinned copy, not the shared desired
         ver = store.get_version(
@@ -568,10 +584,11 @@ def cmd_install(argv=None) -> int:
     if not target:
         print("ERROR: no omlx keg found to mount into — uplift rides an "
               "existing server, it is not one.\n"
-              "  classic lane:  brew install omlx\n"
-              "  dev lane:      omlx-uplift dev bootstrap && "
-              "omlx-uplift dev install\n"
-              "then re-run: omlx-uplift install", file=sys.stderr)
+              "  classic lane:  brew install omlx, then re-run this "
+              "command\n"
+              "  dev lane:      omlx-uplift dev install   (one command: "
+              "sets the lane up on a fresh box, builds the keg, mounts "
+              "and proves the Uplift connection)", file=sys.stderr)
         return 1
     sp = _resolve_site_packages(target)
     # python312-trial guard: uplift's libexec site-packages joins the
@@ -1309,9 +1326,111 @@ def _warn_link_sync(r: dict) -> None:
               file=sys.stderr)
 
 
+def cmd_dev_setup(args) -> int:
+    """omlx-uplift dev setup [--yes] — lane questionnaire + dev-src clone +
+    dev.json + uplift-dev formula branch (aliases: dev bootstrap,
+    dev configure). Re-runnable: an existing lane's values are the
+    questionnaire defaults and reconfiguring asks first (E2E-4), so a
+    second run REPAIRS (missing clone, unseeded branch) or adjusts - it
+    never silently resets. `dev install` runs this itself when the lane
+    does not exist yet: a fresh box needs ONE command (user 2026-11-05)."""
+    from . import devsrc
+
+    print("Setting up the omlx-dev lane (the build-patch companion "
+          "install).\n")
+    cfg = devsrc.install_config(src_hint=args.src, yes=args.yes,
+                                origin=args.origin,
+                                sync_ref=args.sync_ref)
+    path = devsrc.ensure_clone(cfg)
+    print(f"[1/3] dev-src clone: {path}")
+    # the formula branch must exist BEFORE any brew build (bare
+    # `brew install omlx-dev` clones it by name — a missing branch is a
+    # git-128 wall for people who skipped the CLI). Empty branch at the
+    # sync tip: zero patch commits until dev install materializes them.
+    try:
+        devsrc.fetch_sync_ref(cfg)
+        seeded = devsrc.ensure_formula_branch(cfg)
+    except devsrc.DevsrcError as exc:
+        print(f"[2/3] WARNING: could not seed the "
+              f"{cfg.get('formula_branch') or devsrc.DEV_BRANCH_DEFAULT}"
+              f" branch: {exc}", file=sys.stderr)
+        seeded = None
+    branch = cfg.get("formula_branch") or devsrc.DEV_BRANCH_DEFAULT
+    if seeded:
+        print(f"[2/3] formula branch {branch} created at "
+              f"{cfg['sync_ref']} ({seeded[:12]})")
+    print(f"[3/3] config: {devsrc.dev_json_path()}")
+    # port is a user choice, not a constant: ask during the setup
+    # questionnaire (dev often REPLACES vanilla and wants its port — the
+    # service block injects OMLX_PORT, which overrides whatever
+    # port the copied settings.json says). --yes keeps 8001.
+    if not args.yes and args.port is None and sys.stdin.isatty():
+        vp = devsrc.vanilla_port()
+        ans = input(f"Dev server port "
+                    f"[{devsrc.RUNTIME_DEFAULTS['port']}] "
+                    f"(vanilla omlx uses {vp}): ").strip()
+        if ans:
+            args.port = int(ans) if ans.isdigit() else None
+            if args.port is None:
+                print(f"not a number — keeping default "
+                      f"{devsrc.RUNTIME_DEFAULTS['port']}")
+    # DEV-4 work item 3: runtime/sharing questionnaire lives in
+    # reconfigure (one code path); setup runs it as a quiet
+    # sub-step (sharing questionnaire + warnings, no duplicate JSON)
+    rc = cmd_dev_reconfigure(args, cfg=cfg, quiet=True)
+    if rc not in (0,):
+        return rc
+    _dev_next_steps(cfg, fresh=True)
+    return 0
+
+
+def _auto_bootstrap_for_install(args) -> int:
+    """One-command dev lane (user 2026-11-05): `dev install` on a box that
+    was never set up runs the setup itself instead of naming another
+    command. TTY: the same questions `dev setup` asks. --yes: the
+    documented defaults (custom Metal kernels + xgrammar, port 8001).
+    Scripted without --yes: refuse — those defaults mean an Xcode-grade
+    kernel build and ~2 GB of torch, and a surprise that big belongs to a
+    human or to an explicit --yes, never to a typo."""
+    from . import devsrc
+
+    if not sys.stdin.isatty():
+        if not getattr(args, "yes", False):
+            print("omlx-dev is not set up yet, and this is not a terminal: "
+                  "refusing to pick build options silently.\n"
+                  "  questions once:       omlx-uplift dev setup\n"
+                  "  documented defaults:  omlx-uplift dev install --yes\n"
+                  "                        (custom Metal kernels + "
+                  "xgrammar, port 8001)\n"
+                  "  plain build:          omlx-uplift dev setup --yes, "
+                  "then clear\n"
+                  "                        build_options in "
+                  "~/.omlx/uplift/dev.json", file=sys.stderr)
+            return 2
+        print("omlx-dev is not set up yet — bootstrapping with the "
+              "documented defaults (--yes): custom Metal kernels + "
+              "xgrammar, port 8001.", file=sys.stderr)
+    else:
+        print("omlx-dev is not set up yet — a few questions first "
+              "(the same `dev setup` asks):")
+    rc = cmd_dev_setup(args)
+    if rc:
+        return rc
+    cfg = devsrc.load_config() or {}
+    port = devsrc.runtime_config(cfg)["port"]
+    if port != devsrc.vanilla_port() and devsrc.port_in_use(port):
+        print(f"ERROR: dev port {port} is already in use by something "
+              "else — choose another: omlx-uplift dev setup --port N",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_dev(argv=None) -> int:
     """omlx-dev management (DEV queue). Subcommands:
-      bootstrap   questionnaire + dev-src clone + dev.json + uplift-dev branch
+      setup       questionnaire + dev-src clone + dev.json + uplift-dev
+                  branch (aliases: bootstrap, configure; `dev install`
+                  runs it automatically on a fresh box)
       status      dev-src state as JSON (branch/tip/drift)
       install     materialize build patches + rebuild the keg — ALWAYS
                   rebuilds (DEV-3)
@@ -1323,7 +1442,8 @@ def cmd_dev(argv=None) -> int:
     import json as _json
 
     ap = argparse.ArgumentParser(prog="omlx-uplift dev")
-    ap.add_argument("action", choices=["bootstrap", "install", "status",
+    ap.add_argument("action", choices=["bootstrap", "setup", "configure",
+                                       "install", "status",
                                        "reconfigure", "upgrade", "patches",
                                        "kegs", "stash-keg", "use", "prune",
                                        "rollback", "auto-build"])
@@ -1392,58 +1512,8 @@ def cmd_dev(argv=None) -> int:
 
     from . import devsrc, patchsource
 
-    if args.action == "bootstrap":
-        existing = devsrc.load_config()
-        if existing and os.path.isdir(
-                os.path.join(devsrc.src_path(existing), ".git")):
-            print("dev-src is already bootstrapped — see: omlx-uplift dev "
-                  "status", file=sys.stderr)
-            return 1
-        print("Bootstrapping omlx-dev (the build-patch companion install).\n")
-        cfg = devsrc.install_config(src_hint=args.src, yes=args.yes,
-                                    origin=args.origin,
-                                    sync_ref=args.sync_ref)
-        path = devsrc.ensure_clone(cfg)
-        print(f"[1/3] dev-src clone: {path}")
-        # the formula branch must exist BEFORE any brew build (bare
-        # `brew install omlx-dev` clones it by name — a missing branch is a
-        # git-128 wall for people who skipped the CLI). Empty branch at the
-        # sync tip: zero patch commits until dev install materializes them.
-        try:
-            devsrc.fetch_sync_ref(cfg)
-            seeded = devsrc.ensure_formula_branch(cfg)
-        except devsrc.DevsrcError as exc:
-            print(f"[2/3] WARNING: could not seed the "
-                  f"{cfg.get('formula_branch') or devsrc.DEV_BRANCH_DEFAULT}"
-                  f" branch: {exc}", file=sys.stderr)
-            seeded = None
-        branch = cfg.get("formula_branch") or devsrc.DEV_BRANCH_DEFAULT
-        if seeded:
-            print(f"[2/3] formula branch {branch} created at "
-                  f"{cfg['sync_ref']} ({seeded[:12]})")
-        print(f"[3/3] config: {devsrc.dev_json_path()}")
-        # port is a user choice, not a constant: ask during the bootstrap
-        # questionnaire (dev often REPLACES vanilla and wants its port —
-        # the service block injects OMLX_PORT, which overrides whatever
-        # port the copied settings.json says). --yes keeps 8001.
-        if not args.yes and args.port is None and sys.stdin.isatty():
-            vp = devsrc.vanilla_port()
-            ans = input(f"Dev server port "
-                        f"[{devsrc.RUNTIME_DEFAULTS['port']}] "
-                        f"(vanilla omlx uses {vp}): ").strip()
-            if ans:
-                args.port = int(ans) if ans.isdigit() else None
-                if args.port is None:
-                    print(f"not a number — keeping default "
-                          f"{devsrc.RUNTIME_DEFAULTS['port']}")
-        # DEV-4 work item 3: runtime/sharing questionnaire lives in
-        # reconfigure (one code path); bootstrap runs it as a quiet
-        # sub-step (sharing questionnaire + warnings, no duplicate JSON)
-        rc = cmd_dev_reconfigure(args, cfg=cfg, quiet=True)
-        if rc not in (0,):
-            return rc
-        _dev_next_steps(cfg, fresh=True)
-        return 0
+    if args.action in ("bootstrap", "setup", "configure"):
+        return cmd_dev_setup(args)
 
     if args.action in ("install", "upgrade"):
         # 'upgrade' stays accepted as a legacy alias — no note, the single
@@ -1843,8 +1913,17 @@ def cmd_dev_install(args) -> int:
     function only decides what to print — the patch table, the colored
     header, the next-step hints — and (upgrade) whether a rebuild is even
     due. --restart kickstarts the service after an actual rebuild; a
-    skipped upgrade leaves the running server alone."""
+    skipped upgrade leaves the running server alone.
+
+    One-command lane (user 2026-11-05): on a box with no dev.json this
+    runs the setup first (questions on a TTY, documented defaults with
+    --yes, refusal when scripted without either)."""
     from . import devsrc
+
+    if not devsrc.load_config():
+        rc = _auto_bootstrap_for_install(args)
+        if rc:
+            return rc
 
     def _print(stream, text):
         print(text, file=stream, flush=(stream is sys.stdout and False))

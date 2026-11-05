@@ -213,7 +213,7 @@ Extract a skin crate into
 .Aq name - Ns Aq mtime Ns / .
 Never overwrites an existing directory — that one may carry hand edits.
 .It Xo Ic dev
-.Ic bootstrap | status | patches | install | upgrade | reconfigure
+.Ic install | setup | bootstrap | configure | status | patches | upgrade | reconfigure
 .Xc
 Manage the
 .Em omlx-dev
@@ -221,16 +221,31 @@ companion install (see
 .Sx DEV PATCHES AND OMLX-DEV .
 .Bl -tag -width Ds
 .It Ic dev
-.Ic bootstrap
+.Ic setup
 .Op Fl -yes
 .Op Fl -src Ar PATH
 .Op Fl -origin Ar URL
 .Op Fl -sync-ref Ar REF
+.Op Fl -port Ar N
 Questionnaire, dev-src clone,
 .Pa dev.json ,
 and creation of the (initially empty)
 .Em uplift-dev
 formula branch at the sync-ref tip.
+Aliases:
+.Ic dev
+.Ic bootstrap ,
+.Ic dev
+.Ic configure .
+Re-runnable: existing lane values are the defaults and reconfiguring asks
+first, so a second run repairs or adjusts, never silently resets.
+.Ic dev
+.Ic install
+runs this itself on a box without
+.Pa dev.json
+(questions on a terminal, documented defaults with
+.Fl -yes ) ,
+so a fresh machine needs one command.
 The branch must exist before any build: bare
 .Ic "brew install omlx-dev"
 clones it by name.
@@ -268,8 +283,21 @@ branch, re-gate them against the new base, then build the
 formula from that tip: always a full rebuild.
 Each build installs a fresh per-build versioned keg beside the live one,
 which switches over when the build finishes.
-Kernel/grammar flags default to the flags recorded in your existing build
-receipt.
+On a box without
+.Pa dev.json
+the lane is set up first (see the
+.Ic setup
+verb).
+The build closes by mounting the Uplift
+.Pq .pth
+into the new keg and proving the mount the way the server boots it, so
+this single command leaves a working dashboard; no separate
+.Ic "omlx-uplift install"
+is needed on the dev lane.
+Kernel/grammar flags default to the saved setup answer, else the flags
+recorded in your existing build receipt; a scripted first setup
+.Fl -yes
+stores the documented defaults (custom Metal kernels + xgrammar).
 .Ic dev
 .Ic upgrade
 runs the same pipeline but rebuilds only when the synced omlx tip or the
@@ -615,7 +643,10 @@ Works only after
 .Em omlx-dev
 has been set up
 ( Ic dev
-bootstrap ) .
+setup ;
+.Ic dev
+.Ic install
+runs it on a fresh box ) .
 .Sh "OMLX UPGRADE WORKFLOW"
 Any omlx keg upgrade replaces the keg and silently unmounts Uplift (the .pth
 dies with the old keg).
