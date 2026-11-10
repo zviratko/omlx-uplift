@@ -13,20 +13,10 @@ users never see.
 
 ## Unreleased
 
-- **Settings > Integrations gained the macOS speech card.** Enable macos-say, per-request language detection and a default language can now be edited on the board, not only on the classic page. The card appears only where the engine exists, and switching the engine off greys the two language rows.
-- **macOS speech on the plain API is now the upstream design.** The patched-in `say` engine on `POST /v1/audio/speech` is gone: that door answers `model: "macos-say"` instead, from the minimal version we submitted upstream (PR #5076), with the voice named in the `voice` field and language detection in Settings > Integrations. Nothing else moved: the board's own voice engine keeps `say`, its voice favourites, long-reply stitching and the audio ceiling, and the chat reads aloud through it as before. Anything outside the board that posts `model: "say"` to `/v1/audio/speech` must switch to `macos-say`, and that door caps one request at 4096 characters.
-- **The embedded classic pages now wear your skin.** Chat, Bench and Cluster used to open in classic's own slate no matter what the board was wearing. The skin's ground, ink, border and accent colours now carry across. A colour you set yourself in classic's theme editor still wins, a colour the skin does not define stays classic's own, and a skin can decline the whole thing with `classic: {colors: false}`.
-- **The Claude Code command no longer prints your API key on screen.** The rendered command carried the real `ANTHROPIC_AUTH_TOKEN` value, visible to anyone looking at the screen or a screenshot. It now shows bullets and the copy button still puts the working command on the clipboard.
-- **Saving a model no longer switches off prefill accelerators you never touched.** INT8 activation prefill and DeepSeek V4.1 CED prefill became "on unless you save it off" upstream; the editor was still writing an explicit off for every model it saved, including ones whose row was hidden.
-- **A patch the catalog retires is marked RETIRED, not broken.** A machine that still had one we dropped failed every upgrade with `source re-gate failed -- HTTP 404` while its card said applied. It is now switched off, labelled RETIRED on the card, in the upgrade log and in `omlx-uplift patches`, and kept with its stored version until you remove it.
-- **The Enable Thinking switch is back.** It disappeared for models the server reports no thinking default for; it now shows for every text or vision model, as classic always did.
-- **Editing a chat-template parameter lights up SAVE.** Reasoning effort and the other parameter rows counted in CHANGES but never enabled the button, so the change could not be saved from the tab holding it.
-- **Context length no longer reloads the model behind your back.** A window above the model's own default now asks for RESTART MODEL; one at or below it saves and applies live. The activation recast switch asks for a reload on every model.
-- **Chat history rows are compact and carry a "..." menu.** Rename and delete now sit in a per-row menu next to the pin, and you can delete any chat from its row, not only the open one.
-- **Metrics history keeps 7 days by default (was 30), and the metrics store is much smaller.** Expired samples are also removed at every server start. Beyond 7 days, the token-rate, request-rate and cache-efficiency charts keep hourly history from omlx's own usage data; the other charts show 7 days. Change the period under Layout settings (gear icon, "Metrics history (days)") if you want more.
-- **The patches page shows the omlx-dev build status in under a second (was about 3 s).** The restart dialog no longer loads the server while it comes back up.
-- **The Status board uses less browser CPU.** Metric cards outside the visible area, and cards with no new data, are no longer redrawn every second.
-- **Live token rate in the header.** A chip next to the temperature and uptime shows what the engine moves right now, input (prompt processing) and output (generation) in tokens per second, refreshed about every second while it runs.
+## [3.3] - 2026-11-10
+
+- **macOS speech on the plain API is now the upstream design.** The patched-in `say` engine on `POST /v1/audio/speech` is gone: that door answers `model: "macos-say"` instead, from the minimal version we submitted upstream (PR #5076), with the voice named in the `voice` field and language detection in Settings > Integrations. Anything outside the board that posts `model: "say"` to `/v1/audio/speech` must switch to `macos-say`, and that door caps one request at 4096 characters.
+- **Followed upstream changes.** The board mirrors the latest upstream omlx release (through run 21): its new models and settings semantics reach the dashboard with this update.
 
 ## [3.2] - 2026-11-02
 
