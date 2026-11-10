@@ -403,6 +403,15 @@ function seBind(kind, key, opts) {
     const name = document.createElement('span');
     // localize by field key; the passed literal is the English fallback
     name.textContent = C.tf('uplift.se.' + key, opts && opts.label ? opts.label : key);
+    // SYNC-1 run 21 (upstream faafcf15 #5155): classic marks the
+    // numerics-changing A8 row with an amber chip next to the label.
+    // opts.badge paints the same element, already-resolved text.
+    if (opts && opts.badge) {
+        const qb = document.createElement('span');
+        qb.className = 'se-qual-badge';
+        qb.textContent = opts.badge;
+        name.append(' ', qb);
+    }
     // FE-6 step 1: DOM shapes come from uplift_widgets.js (golden-pinned
     // by tests/widgets-registry.test.cjs); kind normalization + event name
     // ride back from the builder. Host keeps ALL state rules below.
@@ -1373,13 +1382,20 @@ function renderEditorFields(container) {
         // INT8 tensor units but a paired Prefill Accelerator Mac does
         // (modal.model_settings.qwen_oq_a8_helper_only, same condition:
         // a8_prefill_supported !== true && prefill_helper_node_id).
+        // SYNC-1 run 21 (upstream faafcf15 #5155 + 1ed39eb #5083): the row
+        // gains the amber 'May reduce quality' chip (classic
+        // qwen_oq_a8_quality_badge, resolves through the mounted catalog),
+        // the hint EN text now names MiniMax M3 too, and unset A8 reads as
+        // OFF on the server - buildState mirrors the rule.
         const a8Hint = C.tf('modal.model_settings.qwen_oq_a8_hint',
-            'Runs prefill with INT8 activations on supported Qwen and DeepSeek V4.1 models. Requires M5 or newer and the native kernels. Output quality may change, and it cannot be combined with ANE prefill. Applies after the model reloads.');
+            'Runs prefill with INT8 activations on supported Qwen, DeepSeek V4.1 and MiniMax M3 models. Requires M5 or newer and the native kernels. Output quality may change, and it cannot be combined with ANE prefill. Applies after the model reloads.');
         const a8HelperOnly = !!((m && m.a8_prefill_supported !== true)
                                 && seValues.prefill_helper_node_id);
         seFam(g, 'a8_prefill_enabled',
             seBind('bool', 'a8_prefill_enabled',
                 { label: C.tf('modal.model_settings.qwen_oq_a8', 'INT8 Activation Prefill'),
+                  badge: C.tf('modal.model_settings.qwen_oq_a8_quality_badge',
+                      'May reduce quality'),
                   hint: a8HelperOnly
                       ? a8Hint + ' ' + C.tf('modal.model_settings.qwen_oq_a8_helper_only',
                           'This Mac has no INT8 tensor units, so only the layers on the Prefill Accelerator Mac use INT8 activations.')

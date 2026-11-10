@@ -167,25 +167,25 @@
 
     const normType = t => String(t || '').toLowerCase().replace(/-/g, '_');
     const isDiffusion = m => DIFFUSION_CONFIG_MODEL_TYPES.has(normType(m && m.config_model_type));
-    // UP-18 (5) + SYNC-1 fire 13 (upstream 18fe1c3 #4946): the classic family
-    // (dashboard.js isA8PrefillModel) — routed-expert A8 lives on qwen4_exp
-    // and deepseek_v41 (exact matches), not only the qwen3_5/6/8 prefixes.
+    // UP-18 (5) + SYNC-1 fire 13 (upstream 18fe1c3 #4946) + run 21
+    // (upstream 1ed39eb #5083): the classic family (dashboard.js
+    // isA8PrefillModel) — routed-expert A8 lives on the exact-match
+    // validated families (qwen4_exp, deepseek_v41, minimax_m3,
+    // minimax_m3_vl), not only the qwen3_5/6/8 prefixes.
     const isA8PrefillModel = m => {
         const t = normType(m && m.config_model_type);
-        return t === 'qwen4_exp' || t === 'deepseek_v41'
+        return ['qwen4_exp', 'deepseek_v41', 'minimax_m3', 'minimax_m3_vl']
+            .includes(t)
             || ['qwen3_5', 'qwen3_6', 'qwen3_8'].some(p => t.startsWith(p));
     };
     /* SYNC-1 fire 18 (upstream f6897ff #5065): a8_prefill_enabled and
-       deepseek_v41_ced_prefill_enabled became TRI-STATE on the server
-       (Optional[bool] = None, and None means ON). model_settings.py
-       a8_prefill_on / ced_prefill_on are the two rules; mirror them verbatim
-       or every RELOAD badge and every payload fold reads the wrong way. */
-    const a8PrefillOn = d => {
-        const v = d && d.a8_prefill_enabled;
-        if (v === null || v === undefined)
-            return !(d && d.qwen35_ane_prefill_enabled);
-        return !!v;
-    };
+       deepseek_v41_ced_prefill_enabled became TRI-STATE (Optional[bool] =
+       None). SYNC-1 run 21 (upstream faafcf15 #5155) FLIPPED the A8 rule:
+       unset now means OFF ('A8 prefill only when it was saved on: it
+       changes numerics'); CED keeps unset = ON. model_settings.py
+       a8_prefill_on / ced_prefill_on are the two rules; mirror them
+       verbatim or every RELOAD badge and every payload fold reads wrong. */
+    const a8PrefillOn = d => !!(d && d.a8_prefill_enabled);
     const cedPrefillOn = d => !d || d.deepseek_v41_ced_prefill_enabled !== false;
     // UP-18 (5) + SYNC-1 fire 18: classic showsA8Prefill — the kernels need
     // native INT8 tensor ops (M5-series or newer, server verdict
@@ -361,9 +361,11 @@
                 ? 4 : (s.turboquant_kv_bits || 4),
             moe_expert_offload_enabled: !diffusion && !!(model && model.moe_expert_offload_supported === true) && !!s.moe_expert_offload_enabled,
             moe_expert_offload_resident_fraction: s.moe_expert_offload_resident_fraction ?? 0.25,
-            // SYNC-1 fire 18: unset means ON unless ANE prefill claims the
-            // same projections (classic dashboard.js a8_prefill_on mirror).
-            a8_prefill_enabled: s.a8_prefill_enabled ?? !s.qwen35_ane_prefill_enabled,
+            // SYNC-1 run 21 (upstream faafcf15 #5155): unset means OFF now
+            // ("A8 prefill only when it was saved on"); classic reads
+            // s.a8_prefill_enabled || false. The old unset-yields-to-ANE rule
+            // is gone - the server no longer turns A8 on by itself.
+            a8_prefill_enabled: s.a8_prefill_enabled || false,
             a8_prefill_min_tokens: s.a8_prefill_min_tokens ?? 128,
             qwen35_ane_prefill_enabled: s.qwen35_ane_prefill_enabled || false,
             qwen35_ane_prefill_sequence_length: s.qwen35_ane_prefill_sequence_length || 2048,
@@ -695,11 +697,11 @@
             payload.embedding_audio_enabled = !!ms.embedding_audio_enabled;
             payload.embedding_audio_max_seconds = sec > 0 ? sec : null;
         }
-        // SYNC-1 fire 18 (upstream f6897ff #5065): the two keys whose whole
-        // point is "unset means on" leave the payload when their row is hidden,
-        // exactly like classic (dashboard.js buildModelSettingsPayload). An
-        // unconditional `false` here would pin the feature OFF on every model
-        // the operator never opened.
+        // SYNC-1 fire 18 (upstream f6897ff #5065) + run 21 (faafcf15 #5155):
+        // these keys leave the payload when their row is hidden, exactly like
+        // classic (dashboard.js buildModelSettingsPayload). CED's point is
+        // still "unset means on"; A8 now defaults off, but a hidden row must
+        // still not materialize a stored value classic never renders.
         if (ms.deepseek_v41_ced_prefill_supported) {
             payload.deepseek_v41_ced_prefill_enabled = !!ms.deepseek_v41_ced_prefill_enabled;
         }
@@ -756,8 +758,8 @@
                 // SYNC-1 fire 18: a8_prefill_enabled is NO LONGER zeroed here.
                 // It left the always-sent base and is written only when
                 // showsA8Prefill passes (a diffusion config type never joins the
-                // A8 family), so writing `false` would save an OFF the field
-                // classic leaves UNSET (= on).
+                // A8 family), so classic's hidden row stays UNSET - the same
+                // OFF that unset now means on the server (run 21, #5155).
             });
         }
         return payload;

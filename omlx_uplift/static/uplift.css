@@ -1024,6 +1024,12 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.fill
     /* UX-2 (user 2026-10-03): badges never wrap their own text — a badge
        split over two lines read as a glitched box (Model Type row) */
     white-space: nowrap; }
+/* SYNC-1 run 21 (upstream faafcf15 #5155): classic's amber 'May reduce
+   quality' chip on the A8 row - same palette, its own meaning, no tooltip */
+.se-qual-badge { margin-left: 6px; font: 500 8px/1 var(--mono); letter-spacing: 0.08em;
+    color: var(--amber-text); background: rgba(220, 160, 0, 0.14);
+    border: 1px solid rgba(160, 120, 0, 0.5); padding: 2px 4px;
+    vertical-align: middle; white-space: nowrap; }
 /* item 4 (recoloured 2026-10-11, user): RUNTIME DIVERGENCE is the SERIOUS
    banner — saved profile will disagree with the RUNNING engine until
    RESTART — so it carries red; request drift below is expected state and

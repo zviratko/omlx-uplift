@@ -794,22 +794,42 @@ test('SYNC-1 f13: validate mirrors the tip A8 messages', () => {
 });
 
 /* ---- SYNC-1 fire 18 (upstream f6897ff #5065): Prefill Accelerator + the
-   a8/CED tri-state. Both booleans became Optional[bool] = None where UNSET
-   means ON, and classic moved them out of its always-sent payload; a save
-   that still writes `false` would switch the feature off on every model the
-   operator never opened. ---- */
-test('f18: unset a8_prefill_enabled reads as ON, saved false stays off', () => {
+   a8/CED tri-state. Both booleans became Optional[bool] = None and classic
+   moved them out of its always-sent payload. CED keeps UNSET = ON; SYNC-1
+   run 21 (upstream faafcf15 #5155) FLIPPED A8: UNSET now means OFF ("A8
+   prefill only when it was saved on: it changes numerics"). ---- */
+test('f21 (run 21): unset a8_prefill_enabled reads as OFF, saved true is the only on', () => {
     const m8 = base({ a8_prefill_supported: true });
-    assert.strictEqual(S.buildState(m8, {}).a8_prefill_enabled, true,
-        'unset = on (model_settings.a8_prefill_on)');
-    assert.strictEqual(S.buildState(m8, { a8_prefill_enabled: false }).a8_prefill_enabled, false,
-        'a saved false is the only thing that turns it off');
-    // unset yields to ANE prefill, which claims the same projections
+    assert.strictEqual(S.buildState(m8, {}).a8_prefill_enabled, false,
+        'unset = off (model_settings.a8_prefill_on, flipped by #5155)');
+    assert.strictEqual(S.buildState(m8, { a8_prefill_enabled: true }).a8_prefill_enabled, true,
+        'a saved true is the only thing that turns it on');
+    assert.strictEqual(S.buildState(m8, { a8_prefill_enabled: false }).a8_prefill_enabled, false);
+    // the old unset-yields-to-ANE rule is GONE: ANE no longer implies A8 on
     assert.strictEqual(S.buildState(m8, { qwen35_ane_prefill_enabled: true }).a8_prefill_enabled, false);
-    assert.strictEqual(S.a8PrefillOn({}), true);
+    assert.strictEqual(S.a8PrefillOn({}), false);
     assert.strictEqual(S.a8PrefillOn({ qwen35_ane_prefill_enabled: true }), false);
     assert.strictEqual(S.a8PrefillOn({ a8_prefill_enabled: false, qwen35_ane_prefill_enabled: true }), false);
     assert.strictEqual(S.a8PrefillOn({ a8_prefill_enabled: true }), true);
+});
+test('f21 (run 21): MiniMax M3/M3.1 join the exact-match A8 family', () => {
+    // upstream 1ed39eb #5083 (classic isA8PrefillModel + oq_a8_model_supported)
+    assert.ok(S.isA8PrefillModel(base({ config_model_type: 'minimax_m3' })));
+    assert.ok(S.isA8PrefillModel(base({ config_model_type: 'minimax-m3-vl' })),
+        'dashes normalize like every other family name');
+    assert.ok(!S.isA8PrefillModel(base({ config_model_type: 'minimax_m3_vl2' })),
+        'exact matches admit nothing else (unvalidated checkpoints)');
+    assert.ok(S.showsA8Prefill(base({ config_model_type: 'minimax_m3',
+        a8_prefill_supported: true })),
+        'the row renders for MiniMax on INT8 hardware');
+    // unset on a supported MiniMax reads off in state, payload and signature
+    const mm = base({ config_model_type: 'minimax_m3', a8_prefill_supported: true });
+    const st = S.buildState(mm, {});
+    assert.strictEqual(st.a8_prefill_enabled, false);
+    assert.strictEqual(S.buildPayload(st, mm).a8_prefill_enabled, false,
+        'classic sends !!state on a shown row - an untouched model saves off');
+    const sig = S.runtimeSignature({ a8_prefill_enabled: false }, base());
+    assert.strictEqual(String(sig.a8_prefill_enabled), 'false');
 });
 test('f18: unset deepseek_v41_ced_prefill_enabled reads as ON', () => {
     const v41 = base({ config_model_type: 'deepseek_v41' });
@@ -822,17 +842,20 @@ test('f18: unset deepseek_v41_ced_prefill_enabled reads as ON', () => {
 });
 test('f18: CED + A8 keys leave the payload when their row is hidden', () => {
     // A non-DeepSeek model: classic never renders the CED row, so it never
-    // sends the key — the stored value stays UNSET (= on) instead of false.
+    // sends the key — the stored value stays UNSET (= on for CED).
     const p = S.buildPayload(S.buildState(base(), {}), base());
     assert.ok(!('deepseek_v41_ced_prefill_enabled' in p),
         'an untouched model must not be saved with CED off');
-    // A machine without INT8 units and no helper Mac: same story for A8.
+    // A machine without INT8 units and no helper Mac: the A8 row never
+    // renders, so the key stays out (classic: "a hidden setting stays
+    // unset"). Run 21: an UNSET A8 now means OFF on the server anyway.
     assert.ok(!('a8_prefill_enabled' in p) && !('a8_prefill_min_tokens' in p),
-        'hidden A8 row stays unset (classic: "a hidden A8 toggle stays unset (on)")');
+        'hidden A8 row never sends the key');
     // The row shows for the family on INT8 hardware, and for a paired helper.
     const onInt8 = base({ a8_prefill_supported: true });
     assert.strictEqual(S.buildPayload(S.buildState(onInt8, {}), onInt8)
-        .a8_prefill_enabled, true);
+        .a8_prefill_enabled, false,
+        'shown row + unset saves off (f21: unset means OFF since #5155)');
     const withHelper = Object.assign(S.buildState(base(), {}),
         { prefill_helper_node_id: 'node-2' });
     assert.strictEqual('a8_prefill_enabled' in S.buildPayload(withHelper, base()), true,
