@@ -622,7 +622,8 @@ function nativeSurfaceOn(tab, sub) {
 }
 /* SPLIT-3: native chat part files, loaded before the core uplift_chat.js.
    Same list as CHAT_FILES in tests/static-src.cjs (a node test pins both). */
-const CHAT_PARTS = ['./uplift_chat_voice.js', './uplift_chat_stt.js'];
+const CHAT_PARTS = ['./uplift_chat_voice.js', './uplift_chat_actions.js',
+                    './uplift_chat_stt.js'];
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
     if (!card) return;

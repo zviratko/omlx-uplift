@@ -322,7 +322,7 @@ test('the stop rule keeps UP-34/40 semantics (settle, not silent abandon)', () =
     // Escape is classic-rule EXACTLY as UP-40(3) landed it: ev.target only
     // (light DOM), so Esc keeps stopping the stream where it did before this
     // card — the sheet is the only thing allowed to preempt it.
-    assert.match(SRC, /if \(!_streaming \|\| isTypingTarget\(ev, false\)\) return;\s*\n\s*stopAndSettle\(\);/);
+    assert.match(SRC, /if \(!CORE\._streaming \|\| isTypingTarget\(ev, false\)\) return;\s*\n\s*stopAndSettle\(\);/);
     assert.match(SRC, /if \(closeShortcutsHelp\(\)\) return;/,
                  'classic :7894 — the sheet owns Escape first');
     // '?' is PRINTABLE, so it must see through the composer's shadow root

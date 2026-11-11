@@ -350,7 +350,7 @@ test('UP-43: onMessage claims the stash in the reversed order; regen/edit replay
     assert.equal((SRC.match(/submit\.files = replay;/g) || []).length, 2,
         'msgRegenerate AND commitEdit replay the live preview files');
     assert.match(extract('msgRegenerate'), /var replay = attPreviewOf\(prev\);/);
-    assert.match(extract('commitEdit'), /var replay = attPreviewOf\(_conv\.messages\[idx\]\);/);
+    assert.match(extract('commitEdit'), /var replay = attPreviewOf\(CORE\._conv\.messages\[idx\]\);/);
     // classic's audio-regen refusal is untouched (UP-32-era code path)
     assert.match(SRC, /\^\\\[audio\\\] \//);
 });

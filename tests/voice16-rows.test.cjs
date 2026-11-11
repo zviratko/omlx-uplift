@@ -233,7 +233,7 @@ test('editor: its own controls are brought into view, a blocked save says why', 
     const body = slice('openEditor');
     assert.match(body, /scrollIntoChatView\(bar\)/, 'the Save/Cancel row is scrolled in');
     assert.match(body, /requestAnimationFrame/, 'and re-checked after the bubble is hidden');
-    assert.match(body, /if \(_streaming\) \{ editWaitToast\(\); return; \}/,
+    assert.match(body, /if \(CORE\._streaming\) \{ editWaitToast\(\); return; \}/,
                  'a save blocked by an in-flight reply keeps its text and explains');
     const sc = slice('scrollIntoChatView');
     assert.match(sc, /block: 'end'/, 'the BOTTOM edge is what must be visible');

@@ -30,7 +30,8 @@ function allStaticJs() {
    files that register on UpliftChatParts before it. Tests that read or run
    "the chat" use these two helpers, so they keep working as code moves
    between the chat files. Order = browser load order (uplift.js). */
-const CHAT_FILES = ['uplift_chat_voice.js', 'uplift_chat_stt.js', 'uplift_chat.js'];
+const CHAT_FILES = ['uplift_chat_voice.js', 'uplift_chat_actions.js',
+                    'uplift_chat_stt.js', 'uplift_chat.js'];
 
 function chatSource() {
     return CHAT_FILES

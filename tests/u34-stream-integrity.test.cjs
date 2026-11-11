@@ -46,7 +46,7 @@ test('9d: stop cancels the in-flight reader before aborting (classic cancelStrea
 
 test('1d: msgDelete truncates classic-style and auto-deletes an emptied chat', () => {
     const s = section('function msgDelete(idx) {', '\n}');
-    assert.match(s, /if \(_streaming\) return;/);
+    assert.match(s, /if \(CORE\._streaming\) return;/);
     // user row -> drop from index; assistant row -> back to (and including)
     // its user turn: the reverse scan for role 'user' is the sliceToUserTurn port
     assert.match(s, /if \(m\.role !== 'user'\)/);

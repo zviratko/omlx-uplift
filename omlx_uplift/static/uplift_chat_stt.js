@@ -16,6 +16,11 @@ var W = CORE.W, D = CORE.D, errText = CORE.errText, t = CORE.t,
     el = CORE.el, gid = CORE.gid, onPageEdited = CORE.onPageEdited,
     encodeWav = CORE.encodeWav, tf2 = CORE.tf2;
 
+// Other chat parts' functions, late-bound (looked up at call time).
+function lsGet() { return CORE.lsGet.apply(null, arguments); }
+function lsSet() { return CORE.lsSet.apply(null, arguments); }
+function speakBusy() { return CORE.speakBusy.apply(null, arguments); }
+
 // ---- VOICE-12: voice INPUT as a setting (model/language/auto-send/mode) ----
 // Decoupled from the chat model (policy ae5647c moved audio_stt rows OUT of
 // the picker; this completes the move). localStorage carries the browser
@@ -38,15 +43,15 @@ var _mic = null,       // 6/6b: live mic recording session
     _sttPop = null,    // VOICE-12: open voice-input popover
     _sttXfer = null;   // VOICE-12: live transcribe session
 
-function sttModel() { return CORE.lsGet(STT_MODEL_KEY) || ''; }
-function sttLang() { return CORE.lsGet(STT_LANG_KEY) || ''; }
+function sttModel() { return lsGet(STT_MODEL_KEY) || ''; }
+function sttLang() { return lsGet(STT_LANG_KEY) || ''; }
 // RETIRED CONTROL (user 2026-10-18): the point of the mic is hands-free —
 // every spoken utterance goes straight to the chat model. The Auto-send
 // row is gone from the Voice input popover; a stale localStorage key left
 // by an old profile is deliberately ignored.
 function sttAutoSend() { return true; }
 function sttMode() {
-    var m = CORE.lsGet(STT_MODE_KEY);
+    var m = lsGet(STT_MODE_KEY);
     return (m === 'off' || m === 'continuous') ? m : 'ptt';
 }
 function syncSttMic() {
@@ -145,7 +150,7 @@ function openSttPop(host) {
     });
     ms.value = sttModel();
     ms.addEventListener('change', function () {
-        CORE.lsSet(STT_MODEL_KEY, ms.value || '');
+        lsSet(STT_MODEL_KEY, ms.value || '');
         sttListenerStop(false);   // VOICE-13: a live session on the OLD model
                                   // must release the engine's one realtime slot
         syncSttMic();
@@ -164,7 +169,7 @@ function openSttPop(host) {
     });
     lsel.value = sttLang();
     lsel.addEventListener('change', function () {
-        CORE.lsSet(STT_LANG_KEY, lsel.value || '');
+        lsSet(STT_LANG_KEY, lsel.value || '');
         onPageEdited();        // ROUND 11
     });
     row('uplift.chat.stt_language', 'Language', lsel,
@@ -195,7 +200,7 @@ function openSttPop(host) {
         rb.name = 'chat-native-stt-mode'; rb.value = mo[0];
         rb.checked = sttMode() === mo[0];
         rb.addEventListener('change', function () {
-            CORE.lsSet(STT_MODE_KEY, mo[0]);
+            lsSet(STT_MODE_KEY, mo[0]);
             // mode change is a teardown point: a listener armed under the old
             // mode would keep the engine's one realtime slot open forever
             sttListenerStop(false);
@@ -780,10 +785,10 @@ function rtFrame(floats) {
         // echo guard: frames are DROPPED while the assistant talks (nothing
         // of its voice may reach the engine). The drain event resumes; this
         // check is the state-sync twin in case the queue settled first.
-        if (!CORE.speakBusy()) rtResumeSoon(s);
+        if (!speakBusy()) rtResumeSoon(s);
         return;
     }
-    if (CORE.speakBusy()) { rtPause(s); return; }
+    if (speakBusy()) { rtPause(s); return; }
     if (s.floorMs < RT_CAL_MS) {
         // VOICE-13a(c): estimate the room floor from the first ~500 ms of
         // live frames and set the session's endpoint gate to 3x it (clamped
@@ -1061,7 +1066,7 @@ function rtResumeSoon(s) {
     s.resumeTimer = setTimeout(function () {
         s.resumeTimer = 0;
         if (_rt !== s || s.dead || !s.paused) return;
-        if (CORE.speakBusy() || CORE._streaming) { rtResumeSoon(s); return; }
+        if (speakBusy() || CORE._streaming) { rtResumeSoon(s); return; }
         s.paused = false;
         rtResetUtterance(s);
         if (s.transport === 'realtime') rtOpen(s);
