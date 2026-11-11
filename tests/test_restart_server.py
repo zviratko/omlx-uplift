@@ -29,6 +29,16 @@ def test_launchd_job_detected_by_xpc_service_name():
         == "launchd:sh.brew.omlx"
 
 
+def test_formula_launchd_marker_keeps_the_job_label():
+    from omlx_uplift.routers.dev import _supervisor_kind
+
+    # both brew formulas set OMLX_SUPERVISED=launchd under brew services
+    assert _supervisor_kind({"OMLX_SUPERVISED": "launchd",
+                             "XPC_SERVICE_NAME": "sh.brew.omlx-dev"}) \
+        == "launchd:sh.brew.omlx-dev"
+    assert _supervisor_kind({"OMLX_SUPERVISED": "launchd"}) == "launchd"
+
+
 def test_blank_values_are_not_supervisors():
     from omlx_uplift.routers.dev import _supervisor_kind
 

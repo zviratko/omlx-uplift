@@ -198,7 +198,14 @@ class OmlxDev < Omlx
                           # canceled", exit 1). The notice-path env makes omlx
                           # apply the fallback itself and write the why to
                           # this file instead of blocking.
-                          OMLX_STARTUP_NOTICE_PATH: var/"startup-notice.txt"
+                          OMLX_STARTUP_NOTICE_PATH: var/"startup-notice.txt",
+                          # Same marker as the vanilla formula: launchd
+                          # KeepAlive respawns the process (restart button),
+                          # and with jundot/omlx#5179 (curated patch
+                          # supervised-console-log) the console keeps only
+                          # warnings and errors, so this never-rotated log
+                          # holds failures, not a copy of server.log.
+                          OMLX_SUPERVISED: "launchd"
   end
 
   def install

@@ -788,18 +788,21 @@ def _supervisor_kind(env: dict) -> Optional[str]:
     """Which watchdog respawns THIS process, or None when none is provable.
 
     Order = most specific marker first:
-      OMLX_SUPERVISED   — set by the menubar app (vanilla contract).
+      OMLX_SUPERVISED   — 'menubar' from the app, 'launchd' from the
+                          brew formulas (vanilla contract).
       XPC_SERVICE_NAME  — launchd injects the job label into EVERY job's
                           environment (verified via `launchctl print`);
                           a terminal `omlx serve` never carries it. PPID
                           is deliberately NOT a signal: a reparented CLI
                           run looks identical to a launchd child.
     """
-    if (env.get("OMLX_SUPERVISED") or "").strip():
-        return "menubar"
+    sup = (env.get("OMLX_SUPERVISED") or "").strip()
     label = (env.get("XPC_SERVICE_NAME") or "").strip()
-    if label:
-        return f"launchd:{label}"
+    # the formulas (vanilla and omlx-dev) set OMLX_SUPERVISED=launchd too
+    if sup == "launchd" or (not sup and label):
+        return f"launchd:{label}" if label else "launchd"
+    if sup:
+        return sup
     return None
 
 

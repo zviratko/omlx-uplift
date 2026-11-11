@@ -1,0 +1,7 @@
+{
+  "description": "Under brew services or the menubar app (OMLX_SUPERVISED set), the console log keeps warnings and errors only. The service log in var/log never rotates and was a second copy of server.log (51 MB on the devbox); server.log keeps everything and rotates daily, and crashes and startup errors still reach the service log. Vendored from OUR OWN upstream PR https://github.com/jundot/omlx/pull/5179 (branch fix/supervised-console-log, commit f02c5af1, based on 95a33f8) - on merge, drop this copy.",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "both"
+}
