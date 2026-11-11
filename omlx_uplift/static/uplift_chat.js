@@ -680,10 +680,16 @@ function newConv() {
              modelSettingsByModel: {},
              // U46: per-chat sampling overrides (classic session settings);
              // server persists the numeric subset (routers/chat.py).
-             generation: null, messages: [] };
+             generation: null,
+             // UP-65 (classic #4910): a temporary chat lives in this page's
+             // memory only. saveConv() never posts it, so it never reaches the
+             // history store, the list or the export; leaving it discards it.
+             temporary: false,
+             messages: [] };
 }
 function saveConv() {
     if (!_conv) return;
+    if (_conv.temporary) { refreshConvList(); return; }   // UP-65: memory only
     // keep the summary list in sync (picker + boot ordering): upsert
     var sum = { id: _conv.id, title: _conv.title, model: _conv.model,
                 message_count: (_conv.messages || []).length,
@@ -968,6 +974,43 @@ function doConvDelete(s, wasCurrent) {
         .catch(function (e) { d.toast(errText(e), 'error'); });
 }
 
+// UP-65 (classic toggleTemporaryChat): only an EMPTY chat can switch. A chat
+// that already has a row in the history list (saved by a model change) keeps
+// that row; the toggle starts a fresh temporary chat that carries its setup.
+function toggleTempConv() {
+    if (!_conv || _streaming || (_conv.messages || []).length) return;
+    var saved = _convs.some(function (c) { return c.id === _conv.id; });
+    if (!_conv.temporary && saved) {
+        var n = newConv();
+        ['model', 'systemPrompt', 'activeProfile', 'customPrompt', 'customState',
+         'generation', 'thinking', 'thinkingBudget'].forEach(function (k) {
+            n[k] = _conv[k];
+        });
+        n.temporary = true;
+        _conv = n;
+    } else {
+        _conv.temporary = !_conv.temporary;
+    }
+    refreshConvList();
+}
+function syncTempUi() {
+    var on = !!(_conv && _conv.temporary);
+    var locked = !!(_conv && (_conv.messages || []).length);
+    var b = gid('chat-native-temp-btn');
+    if (b) {
+        b.disabled = locked;
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on) b.classList.add('on'); else b.classList.remove('on');
+        b.title = locked
+            ? t('chat.temporary_chat_locked',
+                'Temporary chat can only be switched before the first message')
+            : (on ? t('chat.temporary_chat_on', 'Temporary chat is on. Click to turn it off')
+                  : t('chat.temporary_chat_off', 'Turn on temporary chat'));
+    }
+    var note = gid('chat-native-temp');
+    if (note) note.hidden = !on;
+}
+
 function refreshConvList() {
     // CHAT-3R: the picker became the LEFT history list (classic renders
     // conversations as rows, not a <select>). Same contract as before:
@@ -979,6 +1022,7 @@ function refreshConvList() {
     // (chat.html :1308), and the title filter box (filteredChatHistory
     // :8024 — classic also searches opened sessions; uplift keeps
     // summaries only, so the filter matches titles).
+    syncTempUi();   // UP-65: toggle lock + notice follow every list refresh
     var list = gid('chat-native-convs');
     if (!list) return;
     list.replaceChildren();
@@ -2627,6 +2671,10 @@ function toolbar() {
         refreshConvList();
         });
     });
+    var tempBtn = el('button', 'btn', t('chat.temporary_chat', 'Temporary chat'));
+    tempBtn.type = 'button'; tempBtn.id = 'chat-native-temp-btn';
+    tempBtn.setAttribute('aria-pressed', 'false');
+    tempBtn.addEventListener('click', toggleTempConv);
     var top = el('div', 'chat-native-bar chat-native-toprow');
     top.id = 'chat-native-bar';   // observeChatChrome watches THIS row
     var sel = el('select'); sel.id = 'chat-native-model';
@@ -2932,7 +2980,8 @@ function toolbar() {
                               'Are you sure you want to delete this chat?'))) return;
         var d = D();
         try {
-            await d.deleteJson(api() + '/chat/history/' + encodeURIComponent(_conv.id));
+            if (!_conv.temporary)   // UP-65: nothing stored to delete
+                await d.deleteJson(api() + '/chat/history/' + encodeURIComponent(_conv.id));
             _convs = _convs.filter(function (c) { return c.id !== _conv.id; });
             _conv = newConv();
             if (_dc) _dc.history = [];
@@ -3269,7 +3318,7 @@ function toolbar() {
     sch.placeholder = t('uplift.chat.search_ph', 'Search chats\u2026');
     sch.addEventListener('input', function () {
         _convSearch = sch.value || ''; refreshConvList(); });
-    hist.append(histTitle, newBtn, rowIO, sch, list, del, cacheChk, cacheClr);
+    hist.append(histTitle, newBtn, tempBtn, rowIO, sch, list, del, cacheChk, cacheClr);
     // CHAT-3R round 5/6 (user): Model | Preset | Save | Delete in the
     // top row; the naming MODAL rides in the bar's DOM but is fixed —
     // it covers the page instead of expanding the bar.
@@ -3485,7 +3534,9 @@ function beginSpeakTurn() {
     _livePlan = { mid: _turnMid, conv: (_conv || {}).id || '', mode: mode,
                   voice: chatVoiceId(), rev: 'r' + r6(), text: '', chunks: [],
                   rows: [], seqs: {}, planEl: null, bubble: null, live: true };
-    _livePlan.owner = { conv: _livePlan.conv, msg: _turnMid, rev: _livePlan.rev };
+    // UP-65: a temporary chat leaves no audio files on the server either
+    _livePlan.owner = (_conv && _conv.temporary) ? null
+        : { conv: _livePlan.conv, msg: _turnMid, rev: _livePlan.rev };
     _plans[_turnMid] = _livePlan;
     var q = queueFor(_livePlan);
     if (!q) { _livePlan = null; _turnMid = ''; return null; }
@@ -3812,7 +3863,8 @@ function makePlan(msg, text, mode, rev, voice) {
               voice: voice || chatVoiceId(), rev: rev || ('r' + r6()),
               text: String(text || ''), chunks: chunks, rows: [],
               planEl: null, seqs: {} };
-    p.owner = { conv: p.conv, msg: p.mid, rev: p.rev };
+    p.owner = (_conv && _conv.temporary) ? null   // UP-65: no disk cache
+        : { conv: p.conv, msg: p.mid, rev: p.rev };
     if (p.mid) _plans[p.mid] = p;
     if (msg) msg.speech = { mode: mode, n: chunks.length, rev: p.rev,
                             voice: p.voice, sum: sayDigest(text) };
@@ -4727,7 +4779,8 @@ function msgActionsEl(idx, role, editedLabel, editedKey, paramsText) {
         act('regen', t('chat.regenerate_tooltip', 'Regenerate'),
             t('chat.regenerate_tooltip', 'Regenerate'), openRegenMenu);
     }
-    if (role === 'user') {
+    if (role === 'user' && !(_conv && _conv.temporary)) {
+        // UP-65: classic hides Branch in a temporary chat (a branch is saved).
         // UP-29 (classic context menu :1435/:1710 'Branch here'): user-row
         // action; uplift has no context menu — the action bar IS its menu.
         act('branch', t('chat.branch_here', 'Branch from here'),
@@ -5646,7 +5699,8 @@ function msgDelete(idx) {
     if (!ms.length) {
         // classic: an emptied chat is auto-deleted (skipConfirm)
         var d = D();
-        d.deleteJson(api() + '/chat/history/' + encodeURIComponent(_conv.id))
+        (_conv.temporary ? Promise.resolve()   // UP-65: nothing stored
+            : d.deleteJson(api() + '/chat/history/' + encodeURIComponent(_conv.id)))
          .then(function () {
             _convs = _convs.filter(function (c) { return c.id !== _conv.id; });
             _conv = newConv();
@@ -7346,9 +7400,13 @@ function mount() {
     warn.hidden = true;
     warn.textContent = t('uplift.chat.history_warn',
         'This conversation is large; older turns may hit model limits.');
+    var tempNote = el('div', 'native-stub-note chat-temp-note');
+    tempNote.id = 'chat-native-temp'; tempNote.hidden = true;
+    tempNote.textContent = t('chat.temporary_chat_notice',
+        'Temporary chat: not saved to history');
     var boot = el('div', 'native-stub-note'); boot.id = 'chat-native-boot';
     boot.textContent = t('uplift.chat.booting', 'Loading chat…');
-    wrap.append(warn, boot);
+    wrap.append(warn, tempNote, boot);
     host.appendChild(wrap);
 
     Promise.all([

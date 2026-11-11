@@ -3350,6 +3350,9 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 .chat-native-group.chat-native-grow { flex: 1 1 180px; min-width: 140px; }
 .chat-native-group.chat-native-grow #chat-native-sys { width: 100%; }
 .chat-native-bar .btn { font-size: 11px; padding: 4px 8px; }
+/* UP-65: temporary-chat toggle pressed state + its notice */
+.chat-native-bar .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chat-temp-note { color: var(--accent); }
 /* U46: sampling override inputs — compact numeric fields under captions */
 /* U55: equal-width grid columns (flex let each group size to its label —
    'Presence Penalty' widened its cell and the row read ragged); captions

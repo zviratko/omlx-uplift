@@ -1096,8 +1096,8 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'hist LEFT | chat column | control rail RIGHT');
     // VOICE-16: the audio-cache pair joins the rail BELOW Delete chat —
     // the user asked for exactly that spot, and both are chat-store hygiene.
-    assert.ok(/hist\.append\(histTitle, newBtn, rowIO, sch, list, del,\s*cacheChk, cacheClr\)/.test(src),
-        'history rail: caption, new, export+import row, the list, DELETE, cache check+cleanup in-region');
+    assert.ok(/hist\.append\(histTitle, newBtn, tempBtn, rowIO, sch, list, del,\s*cacheChk, cacheClr\)/.test(src),
+        'history rail: caption, new, temporary toggle (UP-65), export+import row, the list, DELETE, cache check+cleanup in-region');
     assert.ok(/cacheChk\.id = 'chat-native-cache-check'/.test(src)
         && /cacheClr\.id = 'chat-native-cache-cleanup'/.test(src),
         'cache buttons are addressable (ids) and never automatic');
@@ -1413,4 +1413,58 @@ test('BUG-7: switching conversations restores thinking mode, budget and clean pr
     assert.equal(M._state().conv.thinking, 'auto', 'legacy boolean thinking coerced to auto');
     assert.equal(think.value, 'auto', 'select synced back to auto');
     assert.equal(bud.hidden, true, 'budget hidden again when leaving limit');
+});
+
+
+test('UP-65: a temporary chat never reaches the history store', async () => {
+    const h = makeHarness();
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = () => h.win.UpliftNativeChat._state();
+    const btn = h.byId['chat-native-temp-btn'];
+    const note = h.byId['chat-native-temp'];
+    assert.ok(btn && note, 'toggle and notice are mounted');
+    assert.strictEqual(note.hidden, true, 'notice hidden on a normal chat');
+    // a model change saves an EMPTY chat: it gets a history row
+    const sel = h.byId['chat-native-model'];
+    sel.value = 'M1'; sel.dispatch('change'); await tick();
+    const savedId = st().conv.id;
+    const before = h.posts.filter(p => p[0].endsWith('/chat/history')).length;
+    assert.ok(before >= 1, 'the normal empty chat was saved');
+    // toggling a SAVED chat starts a fresh temporary chat that keeps its setup
+    btn.dispatch('click'); await tick();
+    assert.strictEqual(st().conv.temporary, true);
+    assert.notStrictEqual(st().conv.id, savedId, 'saved row is left alone');
+    assert.strictEqual(st().conv.model, 'M1', 'setup carried over');
+    assert.strictEqual(note.hidden, false, 'notice shows');
+    // saves of the temporary chat post nothing, even with messages
+    sel.value = 'M2'; sel.dispatch('change'); await tick();
+    st().conv.messages.push({ role: 'user', content: 'secret' },
+                            { role: 'assistant', content: 'reply' });
+    sel.value = 'M1'; sel.dispatch('change'); await tick();
+    const after = h.posts.filter(p => p[0].endsWith('/chat/history')).length;
+    assert.strictEqual(after, before, 'no history POST for a temporary chat');
+    assert.strictEqual(btn.disabled, true, 'locked after the first message');
+    btn.dispatch('click'); await tick();
+    assert.strictEqual(st().conv.temporary, true, 'a locked toggle does nothing');
+    // New Chat discards it: a normal chat again, no server delete was needed
+    h.byId['chat-native-new'].dispatch('click');
+    await booted(h);
+    assert.strictEqual(st().conv.temporary, false);
+    assert.strictEqual(note.hidden, true);
+    assert.strictEqual(h.dels.length, 0, 'nothing stored, nothing deleted');
+});
+
+test('UP-65: an unsaved empty chat flips in place and back', async () => {
+    const h = makeHarness();
+    h.win.UpliftNativeChat.mount();
+    await booted(h);
+    const st = () => h.win.UpliftNativeChat._state();
+    const id = st().conv.id;
+    const btn = h.byId['chat-native-temp-btn'];
+    btn.dispatch('click'); await tick();
+    assert.strictEqual(st().conv.id, id);
+    assert.strictEqual(st().conv.temporary, true);
+    btn.dispatch('click'); await tick();
+    assert.strictEqual(st().conv.temporary, false);
 });
