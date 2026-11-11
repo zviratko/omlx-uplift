@@ -15,8 +15,9 @@
 // through CORE.<name> getters at call time, never copied.
 var W = CORE.W, C = CORE.C, D = CORE.D, errText = CORE.errText, t = CORE.t,
     el = CORE.el, gid = CORE.gid, renderHistory = CORE.renderHistory,
-    messageAt = CORE.messageAt, tf2 = CORE.tf2,
-    rtSpeakEvent = CORE.rtSpeakEvent;
+    messageAt = CORE.messageAt, tf2 = CORE.tf2;
+// late-bound: the voice-input part is created after this one
+function rtSpeakEvent() { return CORE.rtSpeakEvent.apply(null, arguments); }
 
 // ---- VOICE-1b: read-aloud state ------------------------------------------------
 // Voices are stored server-side (routers/voices.py); this shell only caches
