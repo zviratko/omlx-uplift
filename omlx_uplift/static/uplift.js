@@ -454,6 +454,7 @@ function applyTab() {
         caret.dataset.icon = 'caret';   // skin icon hook (rebuilt spans need it too)
         btn.append(span, ' ', caret);
     }
+    paintUpdateBadges();   // UP-64: the rebuild above wipes the Models badge
     for (const card of pageCards) {
         // NAT-6: a native shell can only paint when its surface is flagged
         // on server-side AND the viewer is not in classic-embed mode for
@@ -819,6 +820,50 @@ document.addEventListener('click', e => {
     const hash = '#' + tab + '/' + sub;
     if (location.hash === hash) applyTab(); else location.hash = hash;
 });
+// UP-64 (user 2026-11-11): a badge on Models and on Downloader when a
+// downloaded model has an update on the Hub that the user has not ignored.
+// The server keeps the check (routers/updates.py; a read starts a new check
+// when the last one is older than 6 h), so the board only re-reads the
+// small state every 30 min, and sooner while a check is running.
+// var, not const: applyTab() can paint before this line runs at boot
+var MUP = { view: null, timer: 0 };
+function updateBadge(host, n, tip) {
+    if (!host) return;
+    let b = host.querySelector('.nav-badge');
+    if (!n) { if (b) b.remove(); return; }
+    if (!b) {
+        b = document.createElement('span');
+        b.className = 'nav-badge';
+        host.append(b);
+    }
+    b.textContent = String(n);
+    b.title = tip;
+}
+function paintUpdateBadges() {
+    const n = (MUP && MUP.view && MUP.view.pending) || 0;
+    const tip = C.tf('models.manager.updates_found', 'Updates available: {count}', { count: n });
+    updateBadge($('dd-models-btn'), n, tip);
+    const menu = $('dd-models-menu');
+    updateBadge(menu && menu.querySelector('a[data-sub="downloader"]'), n, tip);
+}
+function setModelUpdates(view) {
+    MUP.view = view || null;
+    paintUpdateBadges();
+    document.dispatchEvent(new CustomEvent('uplift:model-updates', { detail: MUP.view }));
+}
+function refreshModelUpdates() {
+    clearTimeout(MUP.timer);
+    return fetchJson(`${API}/uplift/api/model-updates`).then(v => {
+        setModelUpdates(v);
+        // a check started by this read lands in about a second
+        if (v && v.running) MUP.timer = setTimeout(refreshModelUpdates, 4000);
+        return v;
+    }).catch(() => MUP.view);
+}
+window.Uplift.modelUpdates = { refresh: refreshModelUpdates, set: setModelUpdates,
+                               get view() { return MUP.view; } };
+refreshModelUpdates();
+setInterval(refreshModelUpdates, 30 * 60 * 1000);
 const DD_PAIRS = [['dd-status-btn', 'dd-status-menu'],
                   ['dd-models-btn', 'dd-models-menu'], ['dd-bench-btn', 'dd-bench-menu'],
                   ['dd-chat-btn', 'dd-chat-menu'], ['dd-settings-btn', 'dd-settings-menu']];

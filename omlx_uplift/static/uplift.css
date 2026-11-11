@@ -1475,6 +1475,10 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .dd { position: relative; display: inline-flex; }
 .dd-btn:hover { color: var(--ink); background: var(--edge); }
 .dd-btn.active { color: var(--bg); background: var(--ink); }
+/* UP-64: model update count on Models and Downloader */
+.nav-badge { margin-left: 6px; min-width: 16px; padding: 0 4px; display: inline-block;
+    font: 600 10px/1.6 var(--mono); text-align: center;
+    background: var(--accent); color: var(--ink-on-accent); }
 /* caret sits clear of the label (user ask: dropdown indicator needs more
    air from the menu text); touch-action kills the 300 ms tap delay */
 .dd-caret { font-size: 9px; margin-left: 5px; }
@@ -3705,6 +3709,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 
 /* the shared 'badge' family gains the info tone classic paints sky/violet */
 .badge.dl-b.info { color: var(--accent); border-color: var(--accent); }
+/* UP-64: model updates block at the top of the Downloads page */
+.dl-updates { margin-bottom: 12px; }
+.dl-upd-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.dl-upd-head h3 { margin: 0; }
+.dl-upd-status { color: var(--dim); font-size: 11px; flex: 1 1 auto; }
+.admin-table .urow.usage.dl-upd-row { grid-template-columns: minmax(0,4fr) minmax(0,2fr) 140px auto; }
+.dl-upd-row.ignored > span:first-child { color: var(--dim); }
 
 /* the Mac card */
 .rec-mac { border: 1px solid var(--edge); background: var(--card);

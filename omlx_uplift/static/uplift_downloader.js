@@ -1856,11 +1856,198 @@ function initDownloader() {
     else loadRecommended();
     renderTasks('dl-tasks', DL.provider);
     renderMsHistory();
+    initUpdates();   // UP-64
+}
+
+/* ---- UP-64 (user 2026-11-11): model updates on the Downloads page --------
+   The server keeps the Hub check (routers/updates.py, 6 h cadence, about one
+   second for 30 repos) and the ignore rules; uplift.js owns the menu badge
+   and the shared state (window.Uplift.modelUpdates). This section lists the
+   updates, checks now, updates one model through the existing file dialog
+   (update files preselected) or all of them, and ignores one version or a
+   whole model. Update all skips ignored rows and rows already downloading.
+   Labels: classic's models.manager.* keys where they exist. */
+const UPD = { busy: false, all: false, bound: false };
+const UPD_API = `${API}/uplift/api/model-updates`;
+function updView() {
+    const M = window.Uplift.modelUpdates;
+    return M ? M.view : null;
+}
+function updSet(v) {
+    const M = window.Uplift.modelUpdates;
+    if (M) M.set(v); else renderUpdates();
+}
+function ensureUpdatesHost() {
+    let host = D.$('dl-updates');
+    if (host) return host;
+    const ref = D.$('dl-results');
+    const body = ref && ref.parentNode;
+    if (!body || !body.insertBefore) return null;
+    host = document.createElement('div');
+    host.id = 'dl-updates'; host.className = 'dl-updates';
+    body.insertBefore(host, body.firstChild);
+    return host;
+}
+function updStatusText(v) {
+    if (UPD.busy || (v && v.running))
+        return C.tf('models.manager.checking_updates', 'Checking...');
+    if (!v) return '';
+    if (v.error && !v.checked_at)
+        return C.tf('models.manager.update_check_failed', 'Could not check for updates');
+    const parts = [];
+    if (v.checked_at)
+        parts.push(rtxt('uplift.updates.checked_at', 'Last check: {time}',
+            { time: new Date(v.checked_at * 1000).toLocaleString() }));
+    parts.push(v.pending
+        ? rtxt('models.manager.updates_found', 'Updates available: {count}', { count: v.pending })
+        : C.tf('models.manager.no_updates', 'No updates found'));
+    if ((v.failed || []).length)
+        parts.push(rtxt('models.manager.update_check_partial', '{count} could not be checked',
+            { count: v.failed.length }));
+    if (v.error)
+        parts.push(C.tf('models.manager.update_check_failed', 'Could not check for updates'));
+    return parts.join(' \u00b7 ');
+}
+function updBtn(key, en, fn, dis) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'se-btn';
+    b.textContent = rtxt(key, en);
+    b.disabled = !!dis;
+    b.onclick = fn;
+    return b;
+}
+function updRow(u) {
+    const row = document.createElement('div');
+    row.className = 'urow usage dl-upd-row' + (u.ignored ? ' ignored' : '');
+    row.dataset.repo = u.repo_id;
+    const size = u.files
+        ? rtxt('models.manager.update_tooltip', '{files} file(s) to fetch, {size}',
+               { files: u.files, size: C.fmtBytes(u.size) })
+        : '';
+    const state = u.downloading
+        ? dlBadge('info', rtxt('uplift.updates.downloading', 'Downloading'))
+        : u.ignored === 'version'
+            ? dlBadge('dim', rtxt('uplift.updates.skipped', 'Version skipped'))
+            : u.ignored === 'model'
+                ? dlBadge('dim', rtxt('uplift.updates.no_checks', 'Not checked'))
+                : dlBadge('ok', rtxt('models.manager.update_available', 'Update available'));
+    const acts = document.createElement('span'); acts.className = 'rowacts';
+    if (u.ignored) {
+        acts.append(updBtn('uplift.updates.unignore', 'Stop ignoring',
+            () => updIgnore(u.repo_id, 'none')));
+    } else {
+        acts.append(
+            updBtn('models.detail.update', 'Update', () => openModelFiles(u.repo_id),
+                   u.downloading || UPD.all),
+            updBtn('uplift.updates.skip_version', 'Skip this version',
+                   () => updIgnore(u.repo_id, 'version')),
+            updBtn('uplift.updates.ignore_model', 'Never for this model',
+                   () => updIgnore(u.repo_id, 'model')));
+    }
+    const st = document.createElement('span'); st.append(state);
+    row.append(DG.cell(u.repo_id), DG.cell(size), st, acts);
+    return row;
+}
+function updRows(v) {
+    const rows = ((v && v.updates) || []).slice()
+        .sort((a, b) => (a.ignored ? 1 : 0) - (b.ignored ? 1 : 0)
+                        || String(a.repo_id).localeCompare(String(b.repo_id)));
+    const listed = new Set(rows.map(u => u.repo_id));
+    for (const r of ((v && v.ignored_models) || []))
+        if (!listed.has(r)) rows.push({ repo_id: r, files: 0, size: 0, ignored: 'model' });
+    return rows;
+}
+function renderUpdates() {
+    const host = ensureUpdatesHost();
+    if (!host) return;
+    const v = updView();
+    host.textContent = '';
+    const head = document.createElement('div'); head.className = 'dl-upd-head';
+    const h = document.createElement('h3');
+    h.textContent = rtxt('uplift.updates.title', 'Model updates');
+    const st = document.createElement('span');
+    st.className = 'dl-upd-status'; st.id = 'dl-upd-status';
+    st.textContent = updStatusText(v);
+    const todo = ((v && v.updates) || []).filter(u => !u.ignored && !u.downloading);
+    const chk = updBtn('models.manager.check_updates', 'Check for updates', updCheck,
+                       UPD.busy || UPD.all || (v && v.running) || (v && v.available === false));
+    chk.id = 'dl-upd-check';
+    const all = updBtn('uplift.updates.update_all', 'Update all', updAll,
+                       !todo.length || UPD.all || UPD.busy);
+    all.id = 'dl-upd-all';
+    head.append(h, st, chk, all);
+    host.append(head);
+    const rows = updRows(v);
+    if (!rows.length) return;
+    const tbl = document.createElement('div');
+    tbl.className = 'admin-table dl-upd-table';
+    rows.forEach(u => tbl.append(updRow(u)));
+    host.append(tbl);
+}
+function updCheck() {
+    if (UPD.busy) return;
+    UPD.busy = true; renderUpdates();
+    DG.postJson(`${UPD_API}/check`, { hf_token: dlToken() })
+        .then(v => { UPD.busy = false; updSet(v); })
+        .catch(e => {
+            UPD.busy = false; renderUpdates();
+            DG.toast(C.tf('models.manager.update_check_failed', 'Could not check for updates')
+                     + ': ' + D.errText(e));
+        });
+}
+function updIgnore(repo, mode) {
+    DG.postJson(`${UPD_API}/ignore`, { repo_id: repo, mode })
+        .then(updSet)
+        .catch(e => DG.toast(D.errText(e)));
+}
+async function updAll() {
+    const v = updView();
+    if (!v || UPD.all) return;
+    const todo = (v.updates || []).filter(u => !u.ignored && !u.downloading);
+    if (!todo.length) return;
+    const total = todo.reduce((a, u) => a + (u.size || 0), 0);
+    if (!window.confirm(rtxt('uplift.updates.confirm_all',
+            'Download updates for {count} model(s), {size} in total? Skipped versions and ignored models are left out.',
+            { count: todo.length, size: C.fmtBytes(total) }))) return;
+    UPD.all = true; renderUpdates();
+    const token = dlToken();
+    let queued = 0;
+    const failed = [];
+    for (const u of todo) {
+        try {
+            const info = await DG.fetchJson(
+                `${API}/admin/api/hf/model-info?${new URLSearchParams({ repo_id: u.repo_id })}`,
+                token ? { headers: { 'X-HF-Token': token } } : undefined);
+            const files = (info && info.update_files) || [];
+            if (!files.length) continue;      // already current since the check
+            await DG.postJson(`${API}/admin/api/hf/download`,
+                { repo_id: u.repo_id, hf_token: token, files });
+            queued++;
+        } catch (e) {
+            failed.push(`${u.repo_id}: ${D.errText(e)}`);
+        }
+    }
+    UPD.all = false;
+    DG.toast(rtxt('uplift.updates.queued', 'Updates queued: {count}', { count: queued })
+             + (failed.length ? ' \u00b7 ' + failed.join('; ') : ''),
+             failed.length ? 8000 : undefined, failed.length ? 'error' : undefined);
+    renderTasks('dl-tasks', 'hf');
+    const M = window.Uplift.modelUpdates;
+    if (M) M.refresh(); else renderUpdates();
+}
+function initUpdates() {
+    if (!UPD.bound) {
+        UPD.bound = true;
+        document.addEventListener('uplift:model-updates', renderUpdates);
+    }
+    renderUpdates();
 }
 
 window.Uplift = window.Uplift || {};
 window.Uplift.downloader = { renderTasks, initDownloader,
     _dl14: { hfRepoIdFromInput, HFS, directDownload },
+    // UP-64 model updates (tests/up64-model-updates.test.cjs)
+    _up64: { UPD, updRows, updStatusText, renderUpdates, updAll, updIgnore, updCheck },
     // UP-22 ModelScope half + UP-23 hardware picks (tests/u22, tests/u23)
     _up22: { MS, DL, DLX, msRepoId, msTotalPages, msHistoryPush, msHistoryLoad, dlMsToken,
         msHistorySave, msStatus, msDownload, segBtn, ensureDlChrome, relabelDlChrome,

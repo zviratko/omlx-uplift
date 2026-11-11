@@ -203,7 +203,8 @@ def test_nat3_routes_are_last_block():
 
     VOICE-1 (2026-10-11) appended a NEW domain block after it, following
     the same rule — an addition must never shuffle existing positions.
-    The tail is therefore bench/chat/voices only; the golden ORDER list
+    UP-64 (2026-11-11) appended /model-updates the same way. The tail is
+    therefore bench/chat/voices/model-updates only; the golden ORDER list
     above still pins bench/chat relative order verbatim."""
     from omlx_uplift import router as up
 
@@ -211,7 +212,7 @@ def test_nat3_routes_are_last_block():
     idx_first_nat = next(i for i, (m, p) in enumerate(have)
                          if p.startswith("/bench") or p.startswith("/chat"))
     assert all(p.startswith("/bench") or p.startswith("/chat")
-               or p.startswith("/voices")
+               or p.startswith("/voices") or p.startswith("/model-updates")
                for m, p in have[idx_first_nat:])
 
 

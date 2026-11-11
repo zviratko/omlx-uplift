@@ -83,6 +83,9 @@ from .routers.voices import (          # VOICE-1: registration order last —
     voices_update, voices_delete,      # the /admin/api alias mount
     voices_speech, voices_preview,
 )
+from .routers.updates import (         # UP-64: Hub update check + ignore rules
+    model_updates_check, model_updates_ignore, model_updates_state,
+)
 
 __all__ = [
     'DevAutoUpdateRequest', 'DevBaseRequest', 'DevBootstrapRequest', 'DevBuildRequest', 'DevReconfigureRequest', 'LOGIN_BLOCK_MAX_S',
@@ -108,4 +111,5 @@ __all__ = [
     'uplift_login_page', 'uplift_root', 'uplift_root_legacy', 'uplift_static', 'uplift_static_legacy', 'upsert_model_profile',
     'upsert_model_settings',
 
-    'voices_create', 'voices_delete', 'voices_list', 'voices_preview', 'voices_speech', 'voices_update',]
+    'voices_create', 'voices_delete', 'voices_list', 'voices_preview', 'voices_speech', 'voices_update',
+    'model_updates_check', 'model_updates_ignore', 'model_updates_state',]
