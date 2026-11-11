@@ -86,7 +86,7 @@ function renderSoftware(a) {
     const keg = document.createElement('span');
     keg.append(code(a.keg));
     if (a.dev) keg.append(' ', chip(C.tf('uplift.about.dev_build', 'dev build')));
-    rows.push(urow('uplift.about.keg', 'Serving keg', keg));
+    rows.push(urow('uplift.about.keg', 'Installed package', keg));
     fill('about-software', rows);
 }
 

@@ -74,3 +74,17 @@ test('devpanel chips read the content classification, not the raw stale sha gap'
     assert.ok(!/if \(d\.stale\)\s*\n?\s*state\.append\(ptChip\(ptMsg\('uplift\.patches\.dev_needs_rebuild'/.test(devpanel),
         'warning chip still keyed on the raw stale sha fact');
 });
+
+/* U87 M20: build-source drift says NEEDS REBUILD (no DRIFT synonym) and never
+   paints a second NEEDS REBUILD chip next to the content-verdict one. */
+test('drift reuses the NEEDS REBUILD chip, once', () => {
+    assert.ok(!devpanel.includes("'uplift.patches.dev_drift'"),
+        'the DRIFT status word is gone');
+    const i = devpanel.indexOf('if (d.drift && d.drift.drift');
+    assert.ok(i > 0, 'drift branch present');
+    const branch = devpanel.slice(i, devpanel.indexOf('}', i));
+    assert.match(branch, /ptMsg\('uplift\.patches\.dev_needs_rebuild'/);
+    assert.match(branch, /dataset\.st === 'rebuild'/, 'dedupe guard');
+    assert.equal((devpanel.match(/\.dataset\.st = 'rebuild'/g) || []).length, 2,
+        'both NEEDS REBUILD chips are tagged for the guard');
+});

@@ -130,8 +130,8 @@ test('drift banner: unexpected drift paints path + count, alarm copy', async () 
     await new Promise(r => setImmediate(r));
     const el = sb.document.getElementById('pt-drift');
     assert.equal(el.hidden, false, 'banner shown on drift');
-    assert.match(el.textContent, /TREE DRIFT/);
-    assert.match(el.textContent, /2 installed oMLX files/);
+    assert.match(el.textContent, /INSTALLED FILES CHANGED/);
+    assert.match(el.textContent, /2 oMLX files differ from the installed package/);
     assert.match(el.textContent, /omlx\/a\.py/);
     assert.match(el.title, /missing omlx\/b\.py/, 'title lists every file');
 });

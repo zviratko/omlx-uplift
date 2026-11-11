@@ -165,7 +165,7 @@ test('target menu: capped list + one honest show-all expander', async () => {
     assert.equal(listed.length, 17, String(listed.length));
     const more = items(pop, 'pt-target-more');
     assert.equal(more.length, 1);
-    assert.ok(more[0].textContent.includes('show all 40 commits'),
+    assert.ok(more[0].textContent.includes('show all 40 source versions'),
               more[0].textContent);
     more[0].onclick();
     assert.equal(items(pop, 'pt-target-item').length, 41,
@@ -189,7 +189,7 @@ test('target menu: pinned row leads with the check, not duplicated below', async
     assert.equal(listed.length, 18, String(listed.length));
     assert.ok(listed[0].textContent.startsWith('follow upstream HEAD'),
               'pinned -> follow row is NOT checked');
-    assert.ok(listed[1].textContent.includes('pinned commit') &&
+    assert.ok(listed[1].textContent.includes('pinned source version') &&
               listed[1].textContent.startsWith('✓'), listed[1].textContent);
     const logTexts = listed.slice(2).map(n => n.textContent);
     assert.ok(!logTexts.some(t => t.includes('ab4 —')),

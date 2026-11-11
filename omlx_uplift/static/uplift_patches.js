@@ -119,8 +119,8 @@ async function ptAutoSyncCurated(force) {
             cw.hidden = !te;
             cw.textContent = te
                 ? ptMsg('uplift.patches.catalog_check_failed',
-                        'Could not check the bundled patches for updates - '
-                        + 'the patches you already have keep working. Press '
+                        'Could not check the bundled patches for updates. '
+                        + 'The patches you already have keep working. Press '
                         + 'Check for updates to try again.') + ' ' + te
                 : '';
         }
@@ -245,8 +245,8 @@ function targetsToast(scope, runtime, dev) {
     }
     if (runtime && dev) {
         return ptMsg('uplift.patches.targets_both',
-            'Selected for both: the server mounts it at the next restart, '
-            + 'omlx-dev compiles it at the next Build');
+            'Selected for both: applies at the next server restart and is '
+            + 'included in the next omlx-dev build');
     }
     if (runtime) {
         return ptMsg('uplift.patches.targets_runtime',
@@ -574,8 +574,8 @@ function patchRow(p, view) {
     vcb.type = 'checkbox';
     vcb.checked = !!(sf.runtime && sf.runtime.checked);
     vcb.title = ptMsg('uplift.patches.box_vanilla_title',
-        'runs in the server (vanilla + omlx-dev) — mounts at the next '
-        + 'restart; unchecking restores the vanilla bytes there');
+        'runs in the server (vanilla + omlx-dev); applies at the next '
+        + 'restart; unchecking restores the original files');
     const dcb = document.createElement('input');
     dcb.type = 'checkbox';
     dcb.checked = !!(sf.build && sf.build.checked);
@@ -851,11 +851,11 @@ function ptManage(p) {
         ['runtime', 'VANILLA',
          ptMsg('uplift.patches.surf_vanilla', 'VANILLA — the running server'),
          ptMsg('uplift.patches.surf_vanilla_hint',
-             'pruned overlay; mounts at the next restart')],
+             'applies at the next server restart')],
         ['build', 'DEV',
          ptMsg('uplift.patches.surf_dev', 'DEV — the omlx-dev build'),
          ptMsg('uplift.patches.surf_dev_hint',
-             'materialized on the uplift-dev branch at the next Build')],
+             'included in the next omlx-dev build')],
     ];
     for (const [target, short, title, hint] of SURFACES) {
         const sec = document.createElement('div');
@@ -916,7 +916,7 @@ function ptManage(p) {
             } else {
                 note.textContent = (p.dev_applied_v === eff && p.enabled)
                     ? ptMsg('uplift.patches.surf_build_live',
-                        'v{v} is on the branch').replace('{v}', eff)
+                        'v{v} is in the build sources').replace('{v}', eff)
                     : ptMsg('uplift.patches.surf_build_pending',
                         'v{v} lands at the next Build').replace('{v}', eff);
             }
@@ -1068,7 +1068,7 @@ function ptManage(p) {
             return;
         }
         if (!confirm(ptMsg('uplift.patches.remove_confirm',
-            'Remove this patch? Applied files are restored to vanilla bytes now.'))) return;
+            'Remove this patch? The original files are restored now.'))) return;
         await ptAction('remove', { id: p.id },
             ptMsg('uplift.patches.removed', 'Patch removed'));
         overlay.remove();
@@ -1341,7 +1341,7 @@ async function ptPreview() {
             : r.obsolete
             ? (rev
                 ? ptMsg('uplift.patches.reversal_nothing',
-                    'NOTHING TO UNDO — the merged change is not in the live tree')
+                    'NOTHING TO UNDO: the merged change is not in the running files')
                 : ptMsg('uplift.patches.obsolete', 'ALREADY PRESENT upstream — patch looks obsolete'))
             : (r.unchanged
                 ? ptMsg('uplift.patches.unchanged', 'stored version already matches the source')
@@ -1506,9 +1506,9 @@ function renderDriftBanner(rep) {
         .map(e => e.path).join(', ');
     const more = n > 3 ? ' …' : '';
     el.textContent = ptMsg('uplift.patches.drift_banner',
-        'TREE DRIFT — {n} installed oMLX files no longer match the wheel'
-        + ' they were built from ({files}). Model loads may fail.'
-        + ' Repair: brew reinstall omlx — uplift never rewrites the tree.')
+        'INSTALLED FILES CHANGED: {n} oMLX files differ from the installed'
+        + ' package ({files}). Model loads may fail.'
+        + ' Repair: brew reinstall omlx. Uplift does not modify these files.')
         .replace('{n}', n).replace('{files}', first + more);
     el.title = (rep.unexpected || []).map(e => e.kind + ' ' + e.path).join('\n');
 }

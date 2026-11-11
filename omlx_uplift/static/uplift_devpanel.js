@@ -138,7 +138,7 @@ function renderDev() {
 
     // status line: branch @ tip, N commits over base, behind sync ref
     const bits = [];
-    bits.push(ptMsg('uplift.patches.dev_branch', 'branch {b} @ {t}')
+    bits.push(ptMsg('uplift.patches.dev_branch', 'source {b} at {t}')
         .replace('{b}', d.branch || '—').replace('{t}', dvSha(d.tip)));
     if (typeof d.ahead === 'number')
         bits.push(ptMsg('uplift.patches.dev_ahead', '{n} commits over base')
@@ -172,10 +172,12 @@ function renderDev() {
         // cleanup hint (nothing is missing, the next Build tidies up).
         const warn = d.needs_rebuild === undefined ? true : d.needs_rebuild;
         if (warn) {
-            state.append(ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+            const rb = ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
                 'NEEDS REBUILD'), 'pt-st-warn',
                 d.build_reason || ptMsg('uplift.patches.dev_stale_hint',
-                    'the enabled patches changed since the last build — press Build to apply')));
+                    'the enabled patches changed since the last build — press Build to apply'));
+            rb.dataset.st = 'rebuild';
+            state.append(rb);
         } else if (d.build_ahead) {
             state.append(ptChip(ptMsg('uplift.patches.dev_cleanup_build',
                 'OLD CONTENT'), 'pt-st-dim',
@@ -188,9 +190,15 @@ function renderDev() {
             'RESTART NEEDED'), 'pt-st-warn',
             ptMsg('uplift.patches.dev_restart_hint',
                 'the running omlx-dev service started before the last build — restart to load it')));
-    if (d.drift && d.drift.drift)
-        state.append(ptChip(ptMsg('uplift.patches.dev_drift', 'DRIFT'),
-            'pt-st-warn', d.drift.detail || ''));
+    // U87 M20: the build sources disagreeing with the enabled patches IS a
+    // needed rebuild - one status word, and never a second identical chip
+    if (d.drift && d.drift.drift
+        && ![...state.children].some(c => c.dataset && c.dataset.st === 'rebuild')) {
+        const rb = ptChip(ptMsg('uplift.patches.dev_needs_rebuild',
+            'NEEDS REBUILD'), 'pt-st-warn', d.drift.detail || '');
+        rb.dataset.st = 'rebuild';
+        state.append(rb);
+    }
     if (d.build && d.build.running)
         state.append(ptChip(ptMsg('uplift.patches.dev_building', 'BUILDING'),
             'pt-st-update', (d.build.log || []).slice(-1)[0] || ''));
@@ -226,8 +234,7 @@ function renderDev() {
         const _lead = d.build_state === 'version-fallback'
             ? (d.build_reason || '')
             : ptMsg('uplift.patches.dev_drift_banner',
-                'WARNING - the omlx-dev build sources do not match the '
-                + 'patches you enabled.');
+                'WARNING: omlx-dev does not include the patches you enabled.');
         warn.textContent = [_lead, _dr.detail].filter(Boolean).join(' ');
     }
 
@@ -332,8 +339,8 @@ function renderDev() {
         meta.append(dvMeta('span', 'dv-meta-sep', '·'),           // i18n-exempt
                     dvMeta('b', 'dv-meta-clash',
                            ptMsg('uplift.patches.dev_port_clash',
-                                 ' — POTENTIAL PORT CONFLICT')
-                           .replace(/^[\s—–-]+/, '')));
+                                 ' · POTENTIAL PORT CONFLICT')
+                           .replace(/^[\s·—–-]+/, '')));
     }
     shareBox.append(meta);
     // LANE P: the per-file toggles read as a list of settings, not as
@@ -379,7 +386,7 @@ function renderDev() {
             row.append(ptChip(ptMsg('uplift.patches.dev_share_mismatch',
                 'OUT OF SYNC'), 'pt-st-warn',
                 ptMsg('uplift.patches.dev_share_mismatch_hint',
-                    'the file on disk does not match the setting — run '
+                    'the file on disk does not match the setting. Run '
                     + 'omlx-uplift dev reconfigure')));
         isoGrid.append(row);
     }
@@ -450,7 +457,7 @@ function dvTargetMenu(btn, d) {
         'follow upstream HEAD') + ' (' + dvSha(d.base) + ')',
         !pinned, ''));
     if (pinned) pop.append(mk(`${dvSha(pinned)} — `
-        + ptMsg('uplift.patches.dev_base_pinned', 'pinned commit'),
+        + ptMsg('uplift.patches.dev_base_pinned', 'pinned source version'),
         true, pinned));
     const head = document.createElement('div');
     head.className = 'pt-target-load pt-detail';
@@ -467,7 +474,7 @@ function dvTargetMenu(btn, d) {
         head.remove();
         if (!commits) {
             head.textContent = ptMsg('uplift.patches.dev_commits_fail',
-                'commit list unavailable');
+                'source version list unavailable');
             pop.append(head);
             return;
         }
@@ -479,7 +486,7 @@ function dvTargetMenu(btn, d) {
             more.type = 'button';
             more.className = 'pt-target-item pt-target-more';
             more.textContent = ptMsg('uplift.patches.dev_base_show_all',
-                'show all {n} commits').replace('{n}', rest.length);
+                'show all {n} source versions').replace('{n}', rest.length);
             more.onclick = () => {
                 more.remove();
                 hidden.forEach(drawRow);
