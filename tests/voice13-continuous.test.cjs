@@ -764,7 +764,7 @@ test('VOICE-13: the mic button toggles off through a FLUSH, then commits', async
     assert.equal(h.sockets.length, 1, 'and nothing reopens behind it');
 });
 
-test('VOICE-14 stop-flush: toggling off mid-utterance keeps the tail (mruu report)', async () => {
+test('VOICE-14 stop-flush: toggling off mid-utterance keeps the tail (user-machine report)', async () => {
     // A whole-buffer backend commits ONLY after a pause. The user stops
     // before any pause ever happened: the OLD client halted the socket here
     // and the just-spoken sentence vanished. Now: stop frame -> server
@@ -797,10 +797,10 @@ test('VOICE-14 stop-flush: a dead server cannot strand the listener', async () =
     assert.equal(h.sockets.length, 1, 'no ghost reopen');
 });
 
-test('VOICE-14 mruu: the stop-flush wait covers a whole-buffer decode', async () => {
+test('VOICE-14 user-machine: the stop-flush wait covers a whole-buffer decode', async () => {
     // Server-side endpointing means a qwen3 answer can arrive seconds after
     // the client's stop frame. The OLD 5 s streaming-tuned wait tore the
-    // session down mid-decode and the commit hit a dead socket (mruu field
+    // session down mid-decode and the commit hit a dead socket (user-machine field
     // report: fans spinning, dashboard 'transcribing', nothing ever landed).
     const h = await makeHarness({ localStorage: Object.assign({}, CONT,
         { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
@@ -817,7 +817,7 @@ test('VOICE-14 mruu: the stop-flush wait covers a whole-buffer decode', async ()
               'the slow flush still reaches the composer');
 });
 
-test('VOICE-14 mruu: a silent 30 s stalls honestly and tears down', async () => {
+test('VOICE-14 user-machine: a silent 30 s stalls honestly and tears down', async () => {
     const h = await makeHarness({ localStorage: Object.assign({}, CONT,
         { 'omlx-uplift-stt-model': 'mlx-community/Qwen3-ASR-0.6B-6bit' }) }).booted();
     const ws = await h.listen();

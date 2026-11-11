@@ -940,7 +940,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         # the UI can show what Enable would require
         gate_ver = desired or (p.get("versions", [])[-1] if p.get("versions") else {})
         inactive_reason = None
-        # BUILD-STAMP honesty (user report 2026-10-19, mruu): on the dev
+        # BUILD-STAMP honesty (user report 2026-10-19, user-machine): on the dev
         # board the truth for a dev/both patch is the BRANCH, and every
         # build re-cuts it. When the build ran WITHOUT an enabled patch
         # (the resolver's 'continue without it'), the stored global state
@@ -975,7 +975,7 @@ def view(store, tree_root: str, keg: str | None) -> dict:
         else:
             active = (_patches.scope_touches_keg(scope)
                       and bool(p.get("enabled")))
-        # RE-APPLY honesty (mruu false alarm, 2026-10-18): the chip means
+        # RE-APPLY honesty (user-machine false alarm, 2026-10-18): the chip means
         # 'a restart here mounts this patch'. A dev/both patch NEVER mounts
         # on the dev keg — the uplift-dev branch carries it — so 'not
         # applied here' on the dev board is by design, not drift, and
@@ -1467,7 +1467,7 @@ def update_patch(store, patch_id: str, tree_root: str,
     ('validated, not enabled' — auto-promote is enabled-only by design,
     check_all owns that lane), which made 'patch update' a verb that
     fetched the fix, stored the fix, and then applied the OLD desired
-    version at the next restart (live mruu case 2026-10-09: v2 bytes on
+    version at the next restart (live user-machine case 2026-10-09: v2 bytes on
     disk, desired stuck at broken v1). Explicit request = the human
     decision the auto-promote gate waits for: promote after storing.
 
@@ -2023,7 +2023,7 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
             latest.get("content_sha256") != sha or
             (head and latest.get("source_head_sha") and
              latest.get("source_head_sha") != head)))
-        # FALSE-OBSOLETE guard (user report 2026-10-20, mruu + kocour):
+        # FALSE-OBSOLETE guard (user report 2026-10-20, user machine + devbox):
         # all-'already' read from a tree that still carries the PATCH'S
         # OWN hunks is self-confirmation, never evidence of upstream. The
         # pristine strip is keyed by the tree's content-hash keg id and
@@ -2126,7 +2126,7 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                     reports[pid] = {"check": "obsolete_reversed"}
                     changed_any = True
                     continue
-            # ADOPTION GAP (mruu report 2026-10-29): a candidate can already
+            # ADOPTION GAP (user-machine report 2026-10-29): a candidate can already
             # be stored and un-adopted when this line is reached — it drifted
             # while the patch was disabled, or AUTO UPDATE was switched on
             # afterwards, or a safeguard hold blocked promote() and no later
@@ -2160,7 +2160,7 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
                 # its chip on the STATE, and a Build that landed the older
                 # version had already written 'applied' over the candidate —
                 # which is how a stored v2 went invisible behind an APPLIED
-                # row (mruu: 'it has auto-update enabled', showing v1)
+                # row (user-machine: 'it has auto-update enabled', showing v1)
                 store.set_state(p, "update_available",
                                 "v%s is stored but not in use — press Promote"
                                 % newest_u)
@@ -2323,7 +2323,7 @@ def mark_dev_applied(store, commits: list[dict],
     instead of a pending state that reconcile (which ignores these) will
     never clear.
 
-    BUILD-STAMP honesty (user report 2026-10-19, mruu): a build RE-CUTS the
+    BUILD-STAMP honesty (user report 2026-10-19, user-machine): a build RE-CUTS the
     branch from the base, so a stamp left over from an earlier build names a
     commit that no longer exists. A patch the VER-1 resolver skipped
     ('continue without it') kept its 'APPLIED — applied to the omlx-dev
@@ -2511,11 +2511,11 @@ def build_residue_pool(store, enabled: list[dict]) -> list[dict]:
     """Stored diffs that EXPLAIN build/branch content without it being a
     hand edit: every patch's desired-version bytes NOT in the enabled
     build set — disabled, retired, or rescoped away (BUILD-ZONE honesty,
-    mruu report 2026-10-18: a curated 'both' patch narrowed to runtime
+    user-machine report 2026-10-18: a curated 'both' patch narrowed to runtime
     keeps its old materialized commit on the branch until the next
     build; that residue must not light the DRIFT warning).
 
-    A VERSION FALLBACK rides along for the same reason (mruu report
+    A VERSION FALLBACK rides along for the same reason (user-machine report
     2026-10-29): a patch whose newest stored version no longer applies onto
     the current base is materialized at an OLDER stored version by the
     ladder. The branch then legitimately carries that older version's lines

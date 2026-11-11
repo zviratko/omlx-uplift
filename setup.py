@@ -4,7 +4,7 @@
 stored catalog patches carry raw URLs built from it
 (`raw.githubusercontent.com/zviratko/omlx-uplift/HEAD/curated_patches/...`), so
 moving that directory 404s every machine that has not updated yet - it did, on
-the first attempt at this change (mruu report, five re-gate failures from
+the first attempt at this change (user-machine report, five re-gate failures from
 `dev upgrade`).
 
 The artifact still needs a copy INSIDE the package, because that is what lets an

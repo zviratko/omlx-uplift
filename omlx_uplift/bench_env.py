@@ -26,7 +26,7 @@ Card rules implemented here (all deliberate, tests pin them):
   still refuses an unpinned torch that snuck in transitively: the guard
   is pin-driven now, not absolute (see _guard_heavy_dep).
 - Disk hygiene: pip runs --no-cache-dir, so an uplift build leaves no
-  cache behind. Measured on kocour 2026-10-14 with the real 70-pin
+  cache behind. Measured on the devbox 2026-10-14 with the real 70-pin
   requirements file: install with NOTHING cached (what --no-cache-dir
   means here) 29 s, ~117 MB downloaded; the same install served from a
   warm uplift-owned cache dir 15 s. Buying those 14 s per pin bump with a
@@ -75,7 +75,7 @@ MARKER = "uplift-bench-env.json"
 GUARD_MODULE = "torch"
 
 # Wall-clock budget per size walk in status() (see _dir_bytes). Measured
-# on kocour 2026-10-14 (warm FS cache, scandir): bench-env (604 MB / 33k
+# on the devbox 2026-10-14 (warm FS cache, scandir): bench-env (604 MB / 33k
 # files) 150-300 ms, mteb-env (1.5 GB / 47k files) 250-390 ms, the uplift
 # HF dataset cache (614 MB / 5k files) 50-60 ms. 0.3 s is therefore
 # 'always answers for bench-env, usually for mteb-env' while still

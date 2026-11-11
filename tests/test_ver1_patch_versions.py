@@ -213,7 +213,7 @@ class Ver1Fixture(unittest.TestCase):
         """The ladder says WHICH base the older version was tested on.
         `_alternate_versions` never carried `tested_base`, so this line has
         printed "(tested ?)" since VER-1 landed — next to a real commit
-        distance, which reads as a form half-filled in (mruu log 2026-10-29).
+        distance, which reads as a form half-filled in (user-machine log 2026-10-29).
         A stamped version must name it; an unstamped one must say so in words
         rather than with a question mark."""
         devsrc.ensure_clone(self.cfg)
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     unittest.main()
 
     def test_residue_pool_carries_the_built_alternate_version(self):
-        # Drift-classifier input (mruu report 2026-10-29): an ENABLED patch
+        # Drift-classifier input (user-machine report 2026-10-29): an ENABLED patch
         # whose newest version no longer applies sits on the branch as an
         # older version. Those bytes must reach the pool, tagged, or the
         # dashboard blames the operator for the build's own fallback.

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CI-2: nightly full-suite watcher for omlx-uplift (kocour only).
+<!-- CI-2: nightly full-suite watcher for omlx-uplift (devbox only).
      Zero LLM: plain shell nightly run of the test suites; result lines
      land in ~/.omlx/uplift/reports/nightly.jsonl, last failure log next
      to it. No laptop, no inference, no tokens.

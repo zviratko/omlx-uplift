@@ -168,7 +168,7 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 # bytes are a legitimate intermediate state. The tree
                 # state is ours, verified — saying 'upstream likely
                 # picked it up' here accused upstream of our own work
-                # (user report 2026-10-20, mruu install preview).
+                # (user report 2026-10-20, user-machine install preview).
                 out.append({"id": pid, "verdict": "applied",
                             "detail": ("already applied to this install — "
                                        "content verified in place"),
@@ -399,7 +399,7 @@ def _verify_mount(python: str, *, timeout: int = 120) -> tuple[bool, str]:
     from a server whose mount never happened; this turns 'install printed
     success' into 'mount actually works' (or names the failure).
 
-    VERIFY-MOUNT-DEADLOCK (mruu 2026-10-18): the old shape used
+    VERIFY-MOUNT-DEADLOCK (user-machine 2026-10-18): the old shape used
     subprocess.run(capture_output=True, timeout=...). 'import omlx.server'
     can leave helper children/grandchildren that INHERIT the capture
     pipes; when the probe then timed out, run()'s kill + second
@@ -1009,7 +1009,7 @@ def cmd_patches(argv=None) -> int:
     # adopt, curated and the listing itself read and write only
     # ~/.omlx/uplift, yet every one of them refused on a box where
     # /opt/homebrew/opt/omlx-dev named a keg directory that no longer existed
-    # (mruu, 2026-10-29) - precisely the moment an operator has to see what is
+    # (user-machine, 2026-10-29) - precisely the moment an operator has to see what is
     # applied and drop the patch that broke the build. Only verbs that touch
     # tree bytes, or gate a candidate against a tree, may require one.
     _NEEDS_TREE = ("apply", "check", "update-all", "add", "update")
@@ -1196,7 +1196,7 @@ def cmd_patches(argv=None) -> int:
 # ------------------------------------------------------------- patch targets
 # Two installs can share one uplift store: the vanilla omlx keg and the
 # omlx-dev keg. Every tree-facing CLI verb must say WHICH one it acted on
-# (user report 2026-10-19, mruu: a dev-only box saw four RE-APPLY lines for
+# (user report 2026-10-19, user-machine: a dev-only box saw four RE-APPLY lines for
 # a vanilla keg it never runs). 'omlx' resolves the way the process always
 # has; 'dev' resolves through the keg's own python without importing it.
 _TARGET_LABELS = {"omlx": ("omlx", "1;36"), "dev": ("omlx-dev", "1;33")}
@@ -1256,7 +1256,7 @@ def _repair_advice(t: str) -> None:
     """How to get the tree back, in the order that actually applies. The old
     text jumped straight to 'run dev bootstrap', which is wrong - and reads as
     an insult - on a box that IS bootstrapped and merely has a dangling
-    /opt/homebrew/opt/<keg> (a keg directory removed under the link). mruu hit
+    /opt/homebrew/opt/<keg> (a keg directory removed under the link). user-machine hit
     that on 2026-10-29 and 'dev bootstrap' correctly answered 'already
     bootstrapped', leaving no way out of the loop."""
     if t != "dev":
@@ -1291,7 +1291,7 @@ def _missing_target_error(missing, action=None) -> None:
 
 def _missing_target_note(missing, treeless=False, base_dir=None) -> None:
     """A tree is absent but the verb does not need one - say so on stderr and
-    let the store answer. Silence here is what made the mruu refusal look like
+    let the store answer. Silence here is what made the user-machine refusal look like
     a broken install rather than a missing directory."""
     what = ", ".join(missing or [])
     store_dir = os.path.expanduser("~/.omlx/uplift")

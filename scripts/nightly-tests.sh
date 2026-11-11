@@ -1,5 +1,5 @@
 #!/bin/sh
-# CI-2: nightly full-suite run for omlx-uplift on kocour — plain launchd,
+# CI-2: nightly full-suite run for omlx-uplift on the devbox — plain launchd,
 # zero LLM involvement (design constraint 2026-10-02: nothing runs the
 # laptop inference unattended). Runs the README 'Development' recipe:
 # keg-python pytest (clone BEFORE keg on PYTHONPATH) + node --check +

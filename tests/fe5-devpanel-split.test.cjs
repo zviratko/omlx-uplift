@@ -62,7 +62,7 @@ test('panel absent => patches page still boots (graceful seam, vm)', () => {
     assert.equal(vm.runInContext('typeof window.Uplift.patches.pollDev', sb), 'undefined');
 });
 
-/* BUILD-ZONE honesty (mruu report, 2026-10-18): the warning chip follows
+/* BUILD-ZONE honesty (user-machine report, 2026-10-18): the warning chip follows
    the server's CONTENT verdict (needs_rebuild), retired-patch residue
    gets the quiet OLD CONTENT hint (build_ahead), and base movement is a
    status-line note (base_stale) — never a patch-zone alarm. */

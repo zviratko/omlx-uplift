@@ -26,7 +26,7 @@ test('hostPresetOf maps binds to classic presets, everything else custom', () =>
     // custom covers blank, real addresses and comma lists (UP-19 multi-host)
     assert.strictEqual(G.hostPresetOf(''), 'custom');
     assert.strictEqual(G.hostPresetOf(null), 'custom');
-    assert.strictEqual(G.hostPresetOf('192.168.1.5'), 'custom');
+    assert.strictEqual(G.hostPresetOf('192.0.2.5'), 'custom');
     assert.strictEqual(G.hostPresetOf('127.0.0.1,::1'), 'custom');
     assert.strictEqual(G.hostPresetOf('localhost'), 'custom');
 });

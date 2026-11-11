@@ -76,7 +76,7 @@ test('route defaults to uplift and only reads "vanilla" from storage', () => {
 /* The swap (omlx-tts-say retired, upstream PR #5076 vendored as
    omlx-tts-macos-say) means the vanilla door no longer understands uplift's
    'say:<tail>' token: it has ONE model id and takes the voice in `voice`.
-   These rows are the real store shapes on kocour, not invented ones. */
+   These rows are the real store shapes on the devbox, not invented ones. */
 test('a macOS row maps onto the vanilla engine\'s single model id', () => {
     store({ [ROUTE]: 'vanilla' });
     voices([{ id: 'zuzana', name: 'Zuzana', model: 'say:Zuzana' }]);

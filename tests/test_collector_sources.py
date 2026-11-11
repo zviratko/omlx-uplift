@@ -395,7 +395,7 @@ class UpstreamEnforcer:
     actual memory usage"): the collector probed ``getattr(enf, "enabled",
     lambda: False)()``, i.e. an attribute upstream never had. The default
     answered False on every box, so the series silently rode the pool's
-    model-FILE estimate (kocour: 0.76 GiB shown against 1.31 GiB real).
+    model-FILE estimate (devbox: 0.76 GiB shown against 1.31 GiB real).
     A fake that carries the same invented method hides the same bug in the
     fixture — this class deliberately has none."""
 
@@ -434,7 +434,7 @@ class EstimatePool(FakePool):
     """Pool whose model-size estimate is DELIBERATELY different from the
     footprint, so a mix-up of the two accountings cannot pass silently."""
 
-    current_model_memory = 819_918_159        # 0.76 GiB (kocour 2026-10-19)
+    current_model_memory = 819_918_159        # 0.76 GiB (devbox 2026-10-19)
 
     def _get_final_ceiling(self):
         return 27_425_917_184                 # 25.5 GiB
@@ -556,7 +556,7 @@ def test_u38_memory_budget_lines(monkeypatch):
 
 
 class HitsOnlySched:
-    """mruu 2026-10-04 shape (specprefill-enabled model): prefix_cache
+    """user-machine 2026-10-04 shape (specprefill-enabled model): prefix_cache
     stats carry 'hits' but NO 'misses' key. d_h + d_m raised TypeError,
     the collector's except swallowed it, and the WHOLE family died —
     pfx.*, hot.* and queue.* all stopped being written."""
@@ -579,7 +579,7 @@ class HitsOnlySched:
 
 
 def test_hits_without_misses_does_not_kill_the_family(monkeypatch):
-    """Regression (mruu 2026-10-04 TypeError): the lookup-hit guard must
+    """Regression (user-machine 2026-10-04 TypeError): the lookup-hit guard must
     check BOTH operands; a missing 'misses' counter drops only
     pfx.lookup_hit_pct, never hot.*/queue.*."""
     import time as _t

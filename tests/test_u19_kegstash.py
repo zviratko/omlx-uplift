@@ -387,7 +387,7 @@ class TestLinkState(KegstashTestCase):
         # consistent: repair is a no-op
         rec = self._write_record("HEAD-" + "8" * 8)
         self.assertIsNone(kegstash.repair_link_record())
-        # stale record pointing at a DIFFERENT live keg (mruu case)
+        # stale record pointing at a DIFFERENT live keg (user-machine case)
         _make_keg(self.prefix, "HEAD-" + "9" * 8, "9" * 8)
         self._write_record("HEAD-" + "9" * 8)
         msg = kegstash.repair_link_record()
@@ -408,7 +408,7 @@ class TestLinkState(KegstashTestCase):
         self.assertFalse(os.path.lexists(rec))
 
     def test_repair_adopts_record_keg_when_opt_missing(self):
-        """Shape B (the mruu failure state): the failed reinstall left no
+        """Shape B (the user-machine failure state): the failed reinstall left no
         opt/omlx-dev at all while the record still points at a live keg —
         repair must re-adopt that keg so brew sees a consistent install."""
         cellar = _make_keg(self.prefix, "HEAD-" + "6" * 8, "6" * 8)

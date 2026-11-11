@@ -10,7 +10,7 @@
       Server side, pinned in tests/test_collector_sources.py.
    2. The card header (#mem-label) and the chart's live columns stamped all
       THREE figures with the footprint's timestamp, so a ceiling the
-      collector stopped writing stayed "fresh" forever. Measured on kocour:
+      collector stopped writing stayed "fresh" forever. Measured on the devbox:
       "iogpu wired limit 28" rendered off a row from 6 days earlier
       (/metrics/latest answers the newest row per key regardless of age).
 

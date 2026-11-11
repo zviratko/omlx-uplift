@@ -109,7 +109,7 @@ async function ptAutoSyncCurated(force) {
             notesEl.hidden = !notes.length;
             notesEl.textContent = notes.join(' · ');
         }
-        // A tier that could not be listed is NOT a note (mruu report
+        // A tier that could not be listed is NOT a note (user-machine report
         // 2026-10-29): the GitHub refusal only ever reached the muted
         // line under the table, so an update check that never ran looked
         // exactly like an update check that found nothing.

@@ -1,0 +1,17 @@
+#!/bin/sh
+# HYGIENE-2: commit messages are public too - same rules as pre-commit
+# (private IPv4 ranges always, private names from the untracked patterns file).
+pat_file="${OMLX_UPLIFT_PRIVATE_PATTERNS:-$HOME/.config/omlx-uplift/private-patterns}"
+ip='(^|[^0-9.])(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)'
+msg=$(grep -v '^#' "$1")
+hits=$(printf '%s\n' "$msg" | grep -nE "$ip")
+if [ -r "$pat_file" ]; then
+  names=$(grep -vE '^[[:space:]]*(#|$)' "$pat_file" | paste -sd '|' -)
+  [ -n "$names" ] && hits="$hits
+$(printf '%s\n' "$msg" | grep -niE "$names")"
+fi
+hits=$(printf '%s\n' "$hits" | sed '/^$/d')
+[ -z "$hits" ] && exit 0
+echo "commit-msg: private host name or LAN address in the commit message:" >&2
+printf '%s\n' "$hits" | cut -c1-160 >&2
+exit 1

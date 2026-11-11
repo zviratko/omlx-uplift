@@ -542,7 +542,7 @@ def collect_cache(pool: Any, *, prev_ctr: dict, dt: float,
         d_saved = _d("pfx.tokens_saved")
         d_rest = _d("pfx.tokens_restored")
         # BOTH operands must exist: an engine whose prefix_cache stats
-        # carry 'hits' but not 'misses' (mruu 2026-10-04: specprefill-
+        # carry 'hits' but not 'misses' (user-machine 2026-10-04: specprefill-
         # enabled model) made d_h + d_m raise TypeError, and the swallowed
         # exception killed the WHOLE family — hot.* and queue.* died with
         # it. Honest absence of lookup_hit_pct, everything else flows.
@@ -699,7 +699,7 @@ class MacmonCollector:
         if total is None or total <= 0:
             # sys_power is the whole-die SMC reading (CPU+GPU+ANE+DRAM+SoC) —
             # verified equal to mactop's total_power across idle/CPU/DRAM/GPU
-            # load states (kocour 2026-09-29). all_power is the component sum
+            # load states (devbox 2026-09-29). all_power is the component sum
             # (CPU+GPU+ANE) and omits DRAM/system; on some builds it reads 0
             # or is absent. Use it only as a fallback so the card is never
             # dead, not as primary (was inverted pre-2026-09-29 — under-

@@ -263,7 +263,7 @@ class DevsrcFixture(unittest.TestCase):
         self.assertIn("hand.py", st["drift"]["detail"])
 
     def test_rescoped_patch_content_is_residue_not_drift(self):
-        # BUILD-ZONE honesty (mruu, 2026-10-18): a patch that LEFT the build
+        # BUILD-ZONE honesty (user-machine, 2026-10-18): a patch that LEFT the build
         # set (narrowed to runtime by curated sync) keeps its materialized
         # commit until the next build. Its content is residue — the next
         # Build drops it — and must never be blamed on a hand edit. The
@@ -334,7 +334,7 @@ class DevsrcFixture(unittest.TestCase):
         self.assertTrue(st["drift"]["drift"], st["drift"])
 
     def test_fallback_version_is_named_not_blamed(self):
-        # mruu report 2026-10-29: the build ladder chose an OLDER saved
+        # user-machine report 2026-10-29: the build ladder chose an OLDER saved
         # version of an enabled patch because the newest one stopped
         # applying. With the pool entry present (patchsource adds it) the
         # branch's v1-only lines are EXPLAINED, the verdict is named after
@@ -374,7 +374,7 @@ class DevsrcFixture(unittest.TestCase):
         what applies, so v2's added lines are absent from the branch. The card
         must NOT list those files as 'branch content differs from stored
         patches' — that phrasing blames a hand edit for the ladder's own choice,
-        and it did exactly that on mruu 2026-10-29, five i18n files listed
+        and it did exactly that on a user machine 2026-10-29, five i18n files listed
         straight next to the sentence that already explained the cause."""
         devsrc.ensure_clone(self.cfg)
         devsrc.fetch_sync_ref(self.cfg)

@@ -18,7 +18,7 @@ test('UP-19: loopback verdict mirrors classic exactly', () => {
     assert.ok(lb('127.0.0.1,localhost'), 'multi-host all-loopback');
     assert.ok(!lb('127.0.0.1,0.0.0.0'), 'one public host taints the list');
     assert.ok(!lb('0.0.0.0'));
-    assert.ok(!lb('10.20.31.250'));
+    assert.ok(!lb('192.0.2.10'));
     assert.ok(!lb(''), 'empty is NOT loopback (classic refuses)');
     assert.ok(!lb('[::1]'), 'bracketed form rejected exactly like classic');
 });

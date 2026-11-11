@@ -6324,7 +6324,7 @@ function sttDeliver(text) {
 // dropped. A rejection still arrives as a clean error frame and the listener
 // drops to SEGMENTED capture. ONE realtime session per engine, so a refusal
 // or a drop is surfaced ONCE and never retried in a loop.
-// Measured on omlx HEAD-c3595bc (kocour, Qwen3-ASR-1.7B-8bit, 16k s16le):
+// Measured on omlx HEAD-c3595bc (devbox, Qwen3-ASR-1.7B-8bit, 16k s16le):
 // ready 0.1s, first commit 10.4s into a paced 16s dictation (delta arrives
 // WHILE the mic is still feeding), Czech auto-language 5.1s end-to-end, text
 // identical to POST /v1/audio/transcriptions, and a stop with no silence tail
@@ -6349,7 +6349,7 @@ var RT_MAX_MS = 120000;      // hard utterance cap -> force stop + deliver
 // arrives only after the server's 0.7 s endpoint + decode. The 6 s
 // zero-delta stuck-escape assumes
 // true-streaming cadence and would restart-loop mid-sentence, discarding
-// every uncommitted buffer each time (mruu report: nothing transcribed,
+// every uncommitted buffer each time (user-machine report: nothing transcribed,
 // engine forever busy). Such models ride the 120 s cap instead.
 var RT_WB_ID = /qwen3[-_. ]?asr/i;
 var RT_GAP_MS = 300;         // session reopen / echo-guard resume tail
@@ -6357,7 +6357,7 @@ var RT_HANDSHAKE_MS = 10000; // the server's OWN handshake budget, client copy
 var RT_DONE_MS = 5000;       // bounded wait for transcript.done after stop
 var RT_DONE_WB_MS = 30000;   // whole-buffer models decode AFTER the server's
                              // own endpoint; a streaming-tuned 5 s wait aborts
-                             // mid-decode and commits to a dead socket (mruu
+                             // mid-decode and commits to a dead socket (user-machine
                              // field report) — cover the capped decode instead
 // segmented fallback windows (the card's numbers, client VAD over the tap)
 var RT_SEG_PREROLL_MS = 300;   // speech started before the first voiced frame
@@ -6475,7 +6475,7 @@ function sttListenerStop(commit) {
     // the server only closes uncommitted audio over a LIVE socket (the
     // segmented backend commits whole utterances after a pause), so halting
     // straight away silently ate the words spoken since the last pause
-    // (mruu report).
+    // (user-machine report).
     // commit=false (context switched under the user) drops the provisional
     // line instead — never flush what the user no longer owns.
     var s = _rt;

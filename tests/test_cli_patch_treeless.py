@@ -1,6 +1,6 @@
 """CLI: patch verbs on a machine whose omlx tree cannot be resolved.
 
-The shape that produced this file (mruu, 2026-10-29): a keg directory was
+The shape that produced this file (user-machine, 2026-10-29): a keg directory was
 removed from the Cellar while /opt/homebrew/opt/omlx-dev still pointed at it, so
 no tree resolved. `patch status` then refused, and so did every verb that only
 reads and writes ~/.omlx/uplift - which is the one moment an operator needs to

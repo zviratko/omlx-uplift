@@ -46,7 +46,7 @@ _log = logging.getLogger("omlx_uplift.curated")
 CURATED_REPO = "zviratko/omlx-uplift"
 # The repository path is a PUBLISHED COORDINATE: every installed uplift and
 # every stored catalog patch carries raw URLs built from it. Moving the
-# directory broke re-gating on machines that had not updated yet (mruu report,
+# directory broke re-gating on machines that had not updated yet (user-machine report,
 # five HTTP 404s from `dev upgrade`), so the catalog stays where it always was
 # and the wheel gets a copy of it at build time (see setup.py). What the copy
 # buys is the seed: an installed uplift knows its own catalog without the
@@ -296,7 +296,7 @@ def list_remote(fetch=None) -> dict:
             d = str(meta.get("description") or "").strip()
             if len(d) > 300:
                 # word-boundary cut — a description ending "...fed a repetiti"
-                # reads as corruption (mruu store, 2026-10-18)
+                # reads as corruption (user-machine store, 2026-10-18)
                 cut = d[:300]
                 sp = cut.rfind(" ")
                 d = (cut[:sp] if sp > 200 else cut).rstrip(" ,;:") + "…"
@@ -507,13 +507,13 @@ def sync(store, tree_root: str, fetch=None, build_root: str | None = None) -> di
                          "stored version stays until you remove it")
     for tier, reason in (listing.get("degraded") or {}).items():
         # served, just not from the repository: the operator must be able to
-        # tell "older than upstream" from "catalog unavailable" (mruu
+        # tell "older than upstream" from "catalog unavailable" (user-machine
         # 2026-10-29: the refusal printed like a quiet no-op)
         notes.append("tier %s: served from the catalog bundled with this "
                      "uplift version (%s); a patch added upstream since then "
                      "is not listed - update uplift to see it"
                      % (tier, reason))
-    # Structured form for the card (mruu report 2026-10-29): a tier that
+    # Structured form for the card (user-machine report 2026-10-29): a tier that
     # could not be listed is a FAILURE the operator must see — it used to
     # arrive in the same muted note line as the informational per-patch
     # chatter, which read as "nothing happened".

@@ -1,4 +1,4 @@
-"""SAY-6: parity with the vanilla macOS-speech work (kocour, 2026-10-29).
+"""SAY-6: parity with the vanilla macOS-speech work (devbox, 2026-10-29).
 
 Two things came over from `feat/tts-macos-say`:
 

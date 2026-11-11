@@ -1,5 +1,5 @@
 'use strict';
-/* CARD-TOP WARNINGS (mruu ask 2026-10-29).
+/* CARD-TOP WARNINGS (user-machine ask 2026-10-29).
    Two warnings used to render where nobody looks:
      * the omlx-dev build drift line sat at the BOTTOM of the DEV zone,
      * a failed bundled-patch update check printed in the muted note line

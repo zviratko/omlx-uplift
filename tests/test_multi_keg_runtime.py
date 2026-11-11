@@ -152,7 +152,7 @@ class ViewPerBoard(MultiKegFixture):
         self.assertIsNone(d.get("inactive_reason"))
 
     def test_dev_board_silent_for_both_scope(self):
-        # PATCH-ZONES (mruu false alarm, 2026-10-18): a 'both' patch is
+        # PATCH-ZONES (user-machine false alarm, 2026-10-18): a 'both' patch is
         # applied on the vanilla keg and NEVER mounts on the dev keg —
         # the uplift-dev branch carries it there. 'not applied here' is
         # by design, not drift: the dev board must not light

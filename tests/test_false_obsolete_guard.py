@@ -1,4 +1,4 @@
-"""FALSE-OBSOLETE guard (user report 2026-10-20, mruu + kocour).
+"""FALSE-OBSOLETE guard (user report 2026-10-20, user machine + devbox).
 
 The upstreamed-probe's KEG fallback gated the stored diff against the
 DEV KEG — a tree carrying the patches' OWN hunks (baked from the

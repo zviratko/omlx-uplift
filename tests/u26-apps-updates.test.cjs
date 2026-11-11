@@ -51,8 +51,8 @@ test('claudeCodeCommand cloud mode unsets the env (classic literal)', () => {
 test('claudeCodeCommand local mode: host/port + assigned models + LSP deny', () => {
     const c = G.claudeCodeCommand(
         { mode: 'local', opus_model: 'o', sonnet_model: 's', haiku_model: 'h' },
-        { host: '192.168.1.10', port: 8000, apiKey: 'omlx-key' });
-    assert.ok(c.includes("ANTHROPIC_BASE_URL='http://192.168.1.10:8000'"), c);
+        { host: '192.0.2.20', port: 8000, apiKey: 'omlx-key' });
+    assert.ok(c.includes("ANTHROPIC_BASE_URL='http://192.0.2.20:8000'"), c);
     assert.ok(c.includes("ANTHROPIC_AUTH_TOKEN='omlx-key'"));
     assert.ok(c.includes("ANTHROPIC_DEFAULT_OPUS_MODEL='o'"));
     assert.ok(c.includes("ANTHROPIC_DEFAULT_SONNET_MODEL='s'"));
@@ -72,7 +72,7 @@ test('claudeCodeCommand edges: default port, model placeholders, no key', () => 
    carry the API key — classic shows bullets on screen and copies the real
    thing. Uplift had the same exposure on its Claude Code row. */
 test('f18: claudeCodeCommand mask variant hides the key, keeps the shape', () => {
-    const conn = { host: '10.0.0.5', port: 8000, apiKey: 'omlx-secret-key' };
+    const conn = { host: '198.51.100.5', port: 8000, apiKey: 'omlx-secret-key' };
     const real = G.claudeCodeCommand({ mode: 'local' }, conn);
     const shown = G.claudeCodeCommand({ mode: 'local' }, conn, { mask: true });
     assert.ok(real.includes("ANTHROPIC_AUTH_TOKEN='omlx-secret-key'"));
@@ -102,7 +102,7 @@ test('displayHostFor mirrors classic formatDisplayHost (dashboard.js:3655)', () 
     assert.strictEqual(G.displayHostFor('localhost'), '127.0.0.1');
     assert.strictEqual(G.displayHostFor('::1'), '[::1]');
     assert.strictEqual(G.displayHostFor('[::1]'), '[::1]');
-    assert.strictEqual(G.displayHostFor('192.168.1.5'), '192.168.1.5');
+    assert.strictEqual(G.displayHostFor('192.0.2.5'), '192.0.2.5');
 });
 
 /* ---- item 3: update-check verdict (classic dashboard.js:1163) --------- */

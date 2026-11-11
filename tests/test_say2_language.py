@@ -224,7 +224,7 @@ def test_selected_voice_beats_the_factory_flag(monkeypatch, on_mac):
 def test_flag_answers_when_no_selection_is_known(on_mac):
     # probe blind (non-Mac layout, deleted voice): the factory flag keeps
     # answering its language — quality alone must not invent a default
-    # (kocour truth: bare say == flagged Samantha although an Enhanced
+    # (devbox truth: bare say == flagged Samantha although an Enhanced
     #  en-US row is installed)
     on_mac._cache.update(ts=9e15, voices=[dict(r) for r in ZUZ_PAIR])
     assert SE.selected_row() is None

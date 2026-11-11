@@ -286,7 +286,7 @@ class AutoUpdateTest(_Base):
                 "safeguards": {}, "advisories": []}
 
     def test_candidate_stored_while_disabled_is_adopted_on_enable(self):
-        """mruu report 2026-10-29: specprefill-alias-fix sat on v1 with AUTO
+        """user-machine report 2026-10-29: specprefill-alias-fix sat on v1 with AUTO
         UPDATE switched on while v2 sat stored and gated. Promotion rode the
         DRIFT EDGE only — once the source stopped changing, nothing adopted the
         candidate and the check answered 'up_to_date' indefinitely. A stored

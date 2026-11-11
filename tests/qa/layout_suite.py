@@ -5,9 +5,9 @@ Hermes browser harness):
 
   1. scripts/qa-suite.sh start   # QA omlx on :8099 + staging HTTP on :8797
   2. in a browser_exec call:
-         m = fetch http://<kocour>:8797/qa_manifest.json
+         m = fetch http://<devbox>:8797/qa_manifest.json
          fetch <m.base_url>/uplift/login  (POST {api_key: m.qa_key})
-         txt = fetch http://<kocour>:8797/layout_suite.py
+         txt = fetch http://<devbox>:8797/layout_suite.py
          RUN = types.ModuleType("RUN")
          exec(compile(txt, "layout_suite.py", "exec"), RUN.__dict__)
          print(RUN.run(js, cdp, m.base_url))

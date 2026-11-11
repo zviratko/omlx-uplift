@@ -66,7 +66,7 @@ def test_soft_import_falls_back_without_omlx(monkeypatch):
 def test_throttle_blocks_after_limit_and_resets_on_success():
     from omlx_uplift.routers import pages as router
 
-    ip = "10.9.9.9"
+    ip = "198.51.100.9"
     router._login_fails.clear()
     assert router._login_blocked(ip) == 0.0
     for _ in range(router.LOGIN_FAIL_LIMIT - 1):

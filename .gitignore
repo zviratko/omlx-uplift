@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+# HYGIENE-2: work plans stay out of the public tree
+.hermes-plans/
+/plan-*.md

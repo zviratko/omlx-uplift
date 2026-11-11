@@ -114,7 +114,7 @@ class ScopeGateTest(unittest.TestCase):
         self.assertIsNone(self.store.find(m, "kern"))
 
     def test_dev_build_root_follows_dev_json_across_base_split(self):
-        """mruu regression: bootstrap ran with OMLX_BASE_PATH set (dev.json
+        """user-machine regression: bootstrap ran with OMLX_BASE_PATH set (dev.json
         + dev-src live under ~/.omlx/uplift), the add ran with a different
         (or no) OMLX_BASE_PATH — the gate must find dev-src via dev.json,
         exactly like `dev status` does. The old hardcoded <base>/dev-src

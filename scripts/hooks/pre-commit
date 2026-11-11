@@ -1,0 +1,36 @@
+#!/bin/sh
+# HYGIENE-2: block commits that add private host names or LAN addresses.
+#
+# This repository is public. The names to block are private too, so they are
+# NOT in this file: put one extended regex per line in
+#   ~/.config/omlx-uplift/private-patterns
+# (or point OMLX_UPLIFT_PRIVATE_PATTERNS at another file). Private IPv4
+# ranges (10/8, 172.16/12, 192.168/16) are always blocked.
+# Only added lines of the staged diff are checked; bench datasets are skipped.
+# Install once per clone:  git config core.hooksPath scripts/hooks
+# One-off bypass (think twice):  git commit --no-verify
+
+pat_file="${OMLX_UPLIFT_PRIVATE_PATTERNS:-$HOME/.config/omlx-uplift/private-patterns}"
+ip='(^|[^0-9.])(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)'
+
+added=$(git diff --cached -U0 --no-color --diff-filter=ACMR -- . \
+          ':(exclude)omlx_uplift/bench_tasks/**' | awk '
+  /^\+\+\+ b\// { f = substr($0, 7); next }
+  /^@@/ { split($3, a, ","); n = substr(a[1], 2) + 0; next }
+  /^\+/ { print f ":" n ": " substr($0, 2); n++ }')
+[ -z "$added" ] && exit 0
+
+hits=$(printf '%s\n' "$added" | grep -E "$ip")
+if [ -r "$pat_file" ]; then
+  names=$(grep -vE '^[[:space:]]*(#|$)' "$pat_file" | paste -sd '|' -)
+  [ -n "$names" ] && hits="$hits
+$(printf '%s\n' "$added" | grep -iE "$names")"
+else
+  echo "pre-commit: no $pat_file - only private IP addresses are checked" >&2
+fi
+hits=$(printf '%s\n' "$hits" | sed '/^$/d' | sort -u)
+[ -z "$hits" ] && exit 0
+echo "pre-commit: private host name or LAN address in the staged change:" >&2
+printf '%s\n' "$hits" | cut -c1-160 >&2
+echo "Use 'the devbox', 'a user machine' or a documentation address (192.0.2.x)." >&2
+exit 1

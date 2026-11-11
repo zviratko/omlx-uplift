@@ -54,7 +54,7 @@ def load_config(base_dir: str | None = None) -> dict | None:
     env/canonical base is tried first, then the standard coexistence
     layout (~/.omlx-dev/uplift): bootstrap may have run in a shell whose
     OMLX_BASE_PATH differed from this process's — dev.json must still be
-    found (mruu split, 2026-09-24)."""
+    found (user-machine split, 2026-09-24)."""
     if base_dir is not None:
         try:
             with open(dev_json_path(base_dir), "r", encoding="utf-8") as fh:
@@ -430,7 +430,7 @@ def gate_failure_detail(res: dict | None, limit: int = 3) -> str:
     status, reason}, ...]}, and every surface printed only the reason — the
     console said "source re-gate failed — one or more files failed" while the
     same dict already held 'omlx/api/audio_routes.py: context mismatch'
-    (mruu log 2026-10-29). UP-61 settled this rule for the dashboard: name the
+    (user-machine log 2026-10-29). UP-61 settled this rule for the dashboard: name the
     evidence instead of pointing at a log file."""
     if res is None:
         return ""
@@ -490,7 +490,7 @@ def _alternate_versions(store, pid: str, wanted_v: int, base_sha: str,
         dist = base_distance(repo, base_sha, ver.get("tested_base"))
         # tested_base rides along for the report. VER-1 never copied it here,
         # so the ladder's log line has printed "(tested ?)" for EVERY version
-        # since — including stamped ones (mruu log 2026-10-29: "tested ?, 11
+        # since — including stamped ones (user-machine log 2026-10-29: "tested ?, 11
         # commits away": a real distance, measured from a base the same line
         # claimed not to know)
         out.append({"v": v, "diff_bytes": data, "distance": dist,
@@ -843,7 +843,7 @@ def tree_of(path: str, ref: str) -> str | None:
 def classify_build(path: str, built_sha: str | None, built_base: str | None,
                    exp: dict, patches_to_apply: list[dict],
                    residue_patches: list[dict] | None = None) -> dict:
-    """BUILD-ZONE chip honesty (mruu report, 2026-10-18): a sha mismatch
+    """BUILD-ZONE chip honesty (user-machine report, 2026-10-18): a sha mismatch
     between the installed build and the replayed expected tip is NOT
     automatically an alarm. Classify by CONTENT:
 
@@ -859,7 +859,7 @@ def classify_build(path: str, built_sha: str | None, built_base: str | None,
                      version (its newest one does not apply to these
                      sources, so Build chose the older one). Not a hand
                      edit, and Build will not fix it — the reason names
-                     the patch and both versions (mruu report 2026-10-29).
+                     the patch and both versions (user-machine report 2026-10-29).
       neither        content-current — a sha gap caused by the base
                      advancing alone (base_stale covers it informationally).
 
@@ -1091,7 +1091,7 @@ def drift_check(path: str, base_sha: str, tip: str,
     merged patch lands as skipped/already-present), so expecting its lines
     on the branch would false-alarm 'expected content missing'.
 
-    BUILD-ZONE honesty (mruu report, 2026-10-18): residue_patches are the
+    BUILD-ZONE honesty (user-machine report, 2026-10-18): residue_patches are the
     stored diffs of patches NOT in the enabled build set (disabled, retired,
     or rescoped away — e.g. a curated 'both' patch that became runtime).
     Extra content they explain is RESIDUE: the next Build drops it, nothing
@@ -1161,7 +1161,7 @@ def drift_check(path: str, base_sha: str, tip: str,
     # v1 applies onto these sources, so the branch carries v1 and v2's added
     # lines are missing by the ladder's own choice. Listing those files as
     # "branch content differs from stored patches" blames the operator for it
-    # (mruu report 2026-10-29: five i18n files appeared that way inside the very
+    # (user-machine report 2026-10-29: five i18n files appeared that way inside the very
     # same verdict that said "built from an older saved version"). The excuse is
     # only granted once the older version is PROVEN to be what the tree holds —
     # every line it adds must be present — so a patch that merely has a newer
@@ -1202,7 +1202,7 @@ def drift_check(path: str, base_sha: str, tip: str,
         _bucket(p, actual_map[p])
     # SURPLUS lines on paths an enabled patch also touches: residue from a
     # rescoped patch sharing files with an enabled one must not hide behind
-    # the per-path expectation (mruu shape), and anything on those files
+    # the per-path expectation (user-machine shape), and anything on those files
     # explained by neither is hand content.
     for p in set(expected) & set(actual_map):
         beyond = actual_map[p] - expected[p]
@@ -1756,7 +1756,7 @@ def _brewutil_ref():
 def _remount_cmd(runner=subprocess.run) -> list:
     """The remount must NOT go through PATH: the swap just unlinked and
     re-linked the bin shim, and brew re-installing the SAME HEAD sha can
-    leave a dangling symlink (exec -> ENOENT, seen on mruu 2026-10-27).
+    leave a dangling symlink (exec -> ENOENT, seen on a user machine 2026-10-27).
     Newest keg's own interpreter is the ground truth; fall back to PATH
     only if the cellar cannot be read."""
     try:
@@ -2130,7 +2130,7 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
 
     Without a vanilla keg the dev keg stands in as the gate tree (DEC-1):
     the omlx-scope mount lands on it at boot, so it is the honest target
-    (an empty tree_root silently skipped every new catalog entry — mruu
+    (an empty tree_root silently skipped every new catalog entry — user-machine
     live bug: `dev upgrade` never installed bench-force-tg)."""
     import tempfile
 
@@ -2144,7 +2144,7 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
         # DEC-1 (2026-10-20): a machine may have NO vanilla keg — then the
         # DEV keg is the runtime tree the omlx-scope mount lands on
         # (RUNTIME-MOUNT), and gating catalog entries against '' could never
-        # install one (mruu live: `dev upgrade` silently skipped
+        # install one (user-machine live: `dev upgrade` silently skipped
         # bench-force-tg while the dashboard, gating against the serving
         # tree, installed it fine). Resolve the dev keg through its OWN
         # interpreter probe (brewutil) — never by importing omlx here.
@@ -2156,7 +2156,7 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
     # materialize will cut from — and not the live dev-src checkout, which
     # sits on the uplift-dev branch at the PREVIOUS base. A fresh catalog
     # patch whose context includes upstream commits newer than that branch
-    # was gate-rejected there (kocour 2026-10-29: the first dev-scope
+    # was gate-rejected there (devbox 2026-10-29: the first dev-scope
     # vendor refused 'gate refused — one or more files failed' while the
     # same bytes gated clean at the sync ref), and the box would only
     # converge one build after its base moved. The console path

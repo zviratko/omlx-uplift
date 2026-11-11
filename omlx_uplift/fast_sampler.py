@@ -102,7 +102,7 @@ class FastSampler:
         # DEADLINE scheduling (SMOOTH-2, user 2026-10-10: "the 2hz timing
         # is not very accurate"): the old loop slept a fixed tick AFTER
         # finishing work, so every sample landed at tick + work + GIL
-        # handoff (measured 585-650 ms on kocour) and the x-axis vertices
+        # handoff (measured 585-650 ms on the devbox) and the x-axis vertices
         # carried that spacing noise. Samples now land on a fixed grid of
         # t0 + n*tick: the wait runs until the NEXT deadline, and a tick
         # that overruns (a huge batch walk, a paused process) skips ahead

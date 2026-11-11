@@ -302,7 +302,7 @@ class DevBuildPatchTable(unittest.TestCase):
 
 
 class TargetHeader(unittest.TestCase):
-    """Per-target CLI (user ask 2026-10-19, mruu dev-only box): the header
+    """Per-target CLI (user ask 2026-10-19, user-machine dev-only box): the header
     names the target AND the concrete keg, in a per-target colour; the
     RE-APPLY note speaks of the tree it describes."""
 
@@ -426,7 +426,7 @@ class TargetWiring(unittest.TestCase):
                          ["omlx", "dev"])
 
     def test_missing_dev_keg_still_lists_the_store(self):
-        # TREE-LESS RECOVERY (mruu 2026-10-29): the listing reads only the
+        # TREE-LESS RECOVERY (user-machine 2026-10-29): the listing reads only the
         # manifest, so a keg that cannot be resolved must not blank it - that
         # is the moment the operator needs it. It answers, and says plainly
         # that no disk tree was read.

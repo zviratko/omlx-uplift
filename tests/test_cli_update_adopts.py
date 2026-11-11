@@ -1,4 +1,4 @@
-"""UPDATE-ADOPT (2026-10-09, user ask after the mruu pr4206 stuck state):
+"""UPDATE-ADOPT (2026-10-09, user ask after the user-machine pr4206 stuck state):
 'patch update' re-fetched, gated and stored the fixed bytes, then left
 desired_version pointing at the OLD broken version and the patch disabled
 — the add flow deliberately does that (auto-promote is enabled-only), so
@@ -93,7 +93,7 @@ class _Base(unittest.TestCase):
 
 class UpdateAdopts(_Base):
     def test_update_adopts_new_bytes_for_a_stale_disabled_patch(self):
-        """The mruu shape: disabled, desired=1, source now serves NEW
+        """The user-machine shape: disabled, desired=1, source now serves NEW
         content -> stored v2 AND adopted (pending + enabled + desired=2)."""
         self.store.save({"patches": [self._entry("pr1", versions=["1"])]})
         with mock.patch.object(patchsource, "fetch_url",

@@ -249,7 +249,7 @@ def _dev_status_sync() -> dict:
     out["built_sha"] = built
     out["expected_tip"] = exp.get("tip")
     out["stale"] = bool(exp.get("ok")) and built != exp.get("tip")
-    # BUILD-ZONE honesty (mruu report, 2026-10-18): stale is a fact about
+    # BUILD-ZONE honesty (user-machine report, 2026-10-18): stale is a fact about
     # shas, not a verdict. Classify by CONTENT so the warning chip lights
     # only when the enabled patch set is genuinely not in the installed
     # build — residue from a rescope gets a quiet cleanup hint, and the
@@ -278,7 +278,7 @@ def _dev_status_sync() -> dict:
     _state = out.get("build_state")
     if _state != _LAST_BUILD_STATE.get("state"):
         _LAST_BUILD_STATE["state"] = _state
-        # name WHAT changed, not just that something did (mruu ask
+        # name WHAT changed, not just that something did (user-machine ask
         # 2026-10-29): drift_check already resolves the evidence down to
         # files and versions, and it used to ride a hover tooltip only.
         # The same sentence the card shows now reaches the server log.

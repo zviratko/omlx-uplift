@@ -66,7 +66,7 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn("upstream likely picked it up", row["detail"])
 
     def test_stale_hash_with_record_is_ours_not_upstream(self):
-        # mruu 2026-10-20: two enabled patches share one file (vlm-load +
+        # user-machine 2026-10-20: two enabled patches share one file (vlm-load +
         # warm-before-ready on vlm.py); the later apply legitimately
         # invalidates the first patch's recorded bytes. The byte verify
         # cannot pass, the dry-run sees 'already' — and the kegs record

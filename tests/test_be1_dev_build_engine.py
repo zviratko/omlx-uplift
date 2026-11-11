@@ -94,7 +94,7 @@ def test_log_handler_covers_the_source_refresh(home, monkeypatch):
 
 
 def test_source_refresh_lines_always_name_their_patch(home, monkeypatch):
-    """mruu 2026-10-29: while rewording the auto-promote line I dropped its
+    """user-machine 2026-10-29: while rewording the auto-promote line I dropped its
     patch id, so the build log printed
 
         source update v2 auto-promoted — a stored version the source stopped changing
@@ -152,7 +152,7 @@ def test_source_refresh_lines_always_name_their_patch(home, monkeypatch):
     assert "omlx-tts-say: source re-gate failed" in out, out
     # ... and it says WHICH file. `validate` answered the failing path in the
     # same report all along; the console printed only "one or more files
-    # failed" and left the name in the log file (mruu, 2026-10-29) — the
+    # failed" and left the name in the log file (user-machine, 2026-10-29) — the
     # UP-61 rule applies to build output too, not just the dashboard card.
     assert "omlx/api/audio_routes.py: context mismatch" in out, out
     assert "one or more files failed" not in out, out

@@ -226,7 +226,7 @@ class DevKegRuntimeMountTests(unittest.TestCase):
 
 
 class BuildStampHonestyTests(unittest.TestCase):
-    """USER REPORT 2026-10-19 (mruu): `dev upgrade` SKIPPED
+    """USER REPORT 2026-10-19 (user-machine): `dev upgrade` SKIPPED
     voice14-qwen3-realtime at the operator's choice, yet the dashboard
     card still read 'APPLIED — applied to the omlx-dev build sources'.
     The branch is re-cut on every build, so a stamp left from the previous

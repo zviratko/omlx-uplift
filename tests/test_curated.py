@@ -40,7 +40,7 @@ MD_NOSRC = json.dumps({
     "source": {"kind": "carrier-pigeon"}})
 
 # index.json per tier is the listing now; the contents API survives only as
-# the legacy fallback (mruu ask 2026-10-29: that call is capped at 60/hour
+# the legacy fallback (user-machine ask 2026-10-29: that call is capped at 60/hour
 # unauthenticated and its refusal used to empty the catalog silently). A
 # non-manifest name in the index is skipped, same as before.
 FILES = {
@@ -189,7 +189,7 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(r["report"], {})
         self.assertEqual(self.store.load()["patches"], [])
         # The card must be able to tell a FAILED check from a quiet one
-        # (mruu report 2026-10-29): a tier that could not be listed used to
+        # (user-machine report 2026-10-29): a tier that could not be listed used to
         # reach the dashboard only as a note line, in the same muted text
         # as informational per-patch chatter.
         self.assertEqual(sorted(r["tier_errors"]), ["default", "optional"])
@@ -342,7 +342,7 @@ class CuratedSyncTests(unittest.TestCase):
         self.assertEqual(ids.count("live-apply"), 1)
 
     def test_catalog_never_demotes_from_the_build(self):
-        # USER VETO 2026-10-18 (mruu): I narrowed ctx-probe/voice14
+        # USER VETO 2026-10-18 (user-machine): I narrowed ctx-probe/voice14
         # both->omlx in the catalog and their next dev upgrade dropped them
         # from the build without a word. Rule now pinned by code: sync may
         # widen toward the build, a declared-narrower catalog NEVER shrinks
@@ -442,7 +442,7 @@ class CuratedSyncTests(unittest.TestCase):
 
 
 class BundledCatalogTests(unittest.TestCase):
-    """Discovery without the rate-limited contents API (mruu ask
+    """Discovery without the rate-limited contents API (user-machine ask
     2026-10-29). Order is: index.json on the raw CDN, then the copy bundled
     inside this installed uplift, then the legacy API. A tier served from the
     seed is DEGRADED, not failed: the operator must still be able to install
@@ -558,7 +558,7 @@ class ShippedCatalogIntegrity(unittest.TestCase):
     def test_build_hook_bundles_the_catalog(self):
         """The wheel copy is what makes the seed exist on an installed box.
         It is a build-time move, so nothing else in the suite would notice if
-        the hook were dropped (mruu report: the first attempt MOVED the
+        the hook were dropped (user-machine report: the first attempt MOVED the
         directory instead, which broke every install that had not updated)."""
         # the hook sits at the project root: next to the catalog directory in
         # a checkout, one level above the installed package copy

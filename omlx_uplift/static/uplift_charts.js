@@ -1874,7 +1874,7 @@ let sysFetching = false, sysAt = 0;
 // MEM-TRUE-2 (2026-10-19): each of the three memory figures carries its OWN
 // sample timestamp now. The old shape kept ONE timestamp (the used line's)
 // and stamped the two ceilings with it, so a ceiling the collector stopped
-// writing kept a fresh-looking value forever — measured on kocour: the
+// writing kept a fresh-looking value forever — measured on the devbox: the
 // header showed "iogpu wired limit 28" off a row from 6 days ago (kernel
 // sysctl is unset now, so the key has no current sample). /metrics/latest
 // answers the newest row of every key regardless of age, so freshness must

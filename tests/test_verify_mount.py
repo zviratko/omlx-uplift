@@ -1,4 +1,4 @@
-"""VERIFY-MOUNT-DEADLOCK (mruu 2026-10-18): the install mount-check probe
+"""VERIFY-MOUNT-DEADLOCK (user-machine 2026-10-18): the install mount-check probe
 must never wedge the parent.
 
 Old shape: subprocess.run(capture_output=True, timeout=...) — when the

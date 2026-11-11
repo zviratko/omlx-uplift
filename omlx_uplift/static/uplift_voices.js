@@ -120,7 +120,7 @@ async function playBlob(resp, btn) {
 
 /* speech POST returns raw audio BYTES (JSON only on error) — no domkit
    JSON helper fits; D.postJson would choke trying to parse the WAV. */
-// Engine-side watchdog (mruu incident 2026-10-11): an STT load that
+// Engine-side watchdog (user-machine incident 2026-10-11): an STT load that
 // dies inside the engine pool can strand the REQUEST forever — no
 // response, no error — leaving AUTO-TRANSCRIBE stuck on 'transcribing…'
 // while the whole board rots behind the pool lock. The client cannot

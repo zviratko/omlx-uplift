@@ -154,7 +154,7 @@ class KillSwitchRoundTrip(unittest.TestCase):
         This pin used to assert the same for 'status' ("it reads the live tree
         to answer 'applied on this keg?'"). That reasoning cost an operator the
         listing on the exact machine where the keg could not be resolved
-        (mruu, 2026-10-29: a keg directory removed from the Cellar left
+        (user-machine, 2026-10-29: a keg directory removed from the Cellar left
         /opt/homebrew/opt/omlx-dev dangling), and 'status' shares that lock with
         every store-only verb beside it. It now answers from the manifest and
         states plainly that no tree was read — see tests/test_cli_patch_treeless.py

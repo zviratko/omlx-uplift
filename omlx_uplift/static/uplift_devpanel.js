@@ -165,7 +165,7 @@ function renderDev() {
     statusEl.textContent = bits.join(' · ');
 
     if (d.stale) {
-        // BUILD-ZONE honesty (mruu report, 2026-10-18): a sha gap is not a
+        // BUILD-ZONE honesty (user-machine report, 2026-10-18): a sha gap is not a
         // verdict. The server classifies by CONTENT — warn only when the
         // enabled patches are genuinely NOT in the installed build; a
         // build that merely carries retired-patch residue gets a quiet
@@ -214,7 +214,7 @@ function renderDev() {
         if (!blog.hidden) blog.scrollTop = blog.scrollHeight;
     }
 
-    // SAY WHAT CHANGED (mruu ask 2026-10-29): drift_check resolves the
+    // SAY WHAT CHANGED (user-machine ask 2026-10-29): drift_check resolves the
     // evidence down to files and versions, and that sentence used to ride a
     // hover tooltip while this line made a generic accusation. A version
     // fallback takes the server's own reason instead of the canned lead:
