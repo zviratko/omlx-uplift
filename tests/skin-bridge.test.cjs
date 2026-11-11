@@ -167,7 +167,9 @@ test('bridge: an unreadable skin ink falls back instead of poisoning classic', (
     // fails classic's floor, so classic keeps its OWN inks on the white ground
     const r = B.bridge(cls(Object.assign({}, FULL,
         { bg: '#ffffff', card: '#ffffff', panel: '#ffffff', ink: '#f4f4f4' })), {});
-    assert.deepStrictEqual(r.dropped, ['text-primary', 'text-secondary', 'link-color']);
+    assert.deepStrictEqual(r.dropped, ['text-primary', 'text-secondary', 'link-color',
+        'text-tertiary', 'focus-ring-color', 'switch-on', 'timeline-accent']);
+    assert.ok(!('btn-primary' in r.vals), 'no readable text on the accent: no button trio');
     assert.ok(!('text-primary' in r.vals) && !('link-color' in r.vals));
     assert.ok('bg-primary' in r.vals, 'the white ground still ships');
     assert.ok('border-faint' in r.vals, 'a non-text token is not gated');
@@ -207,6 +209,52 @@ test('crosswalk sources match the server-side list byte for byte', () => {
         assert.ok(server.includes(ut), 'crosswalk uses ' + ut + ' but the API never publishes it');
 });
 
+/* ---- UP-68 recheck 2026-11-11: channels, button trio, disabled icon ---- */
+test('buildCss writes the neutral-utility channels next to each token', () => {
+    const css = B.buildCss({ 'text-tertiary': '#a5a096', 'bg-primary': '#101014' });
+    assert.ok(css.includes('--text-scale-500: 165 160 150;'), css);
+    assert.ok(css.includes('--text-scale-400: 165 160 150;'));
+    assert.ok(css.includes('--surface-scale-white: 16 16 20;'));
+    assert.ok(!css.includes('--text-scale-900'), 'no channel for a token we do not ship');
+    // chat.html does not load dashboard.css, which pins surface-scale-200 to
+    // the tertiary ground in dark mode; we carry that step ourselves
+    assert.ok(B.buildCss({ 'bg-tertiary': '#141419' }).includes('--surface-scale-200: 20 20 25;'));
+});
+
+test('bridge: the button trio follows the accent, text is the better of bg/ink', () => {
+    const r = B.bridge(cls(FULL), {});
+    assert.strictEqual(r.vals['btn-primary'], '#e8a020');
+    assert.strictEqual(r.vals['btn-primary-text'], '#101014', 'dark bg reads best on amber');
+    assert.ok(B.contrast(r.vals['btn-primary-text'], r.vals['btn-primary-hover']) >= 4.5);
+    const light = B.bridge(cls(Object.assign({}, FULL, { accent: '#1a3a8a' })), {});
+    assert.strictEqual(light.vals['btn-primary-text'], '#f2f0ea', 'light ink on a dark accent');
+});
+
+test('bridge: the trio is all or nothing', () => {
+    // the operator owns one part in classic's editor: we ship none of it
+    const r = B.bridge(cls(FULL), { stockText: ':root { --btn-primary-text: #000000; }' });
+    for (const k of B.CONTROL_TRIO) assert.ok(!(k in r.vals), k);
+    // a stray half (any rule dropping one part) takes the rest with it
+    const f = B.filterContrast({ 'btn-primary': '#e8a020', 'btn-primary-hover': '#e8a020',
+                                 'btn-primary-text': '#d0a030' });
+    for (const k of B.CONTROL_TRIO) assert.ok(!(k in f.vals), k);
+});
+
+test('bridge: a disabled primary button keeps a visible icon', () => {
+    const r = B.bridge(cls(FULL), {});
+    assert.ok(r.css.endsWith(':root[' + B.SCOPE_ATTR + '] ' + B.DISABLED_ICON_RULE), r.css);
+    assert.strictEqual(B.bridge(cls({}), {}).css, '', 'no rule without a skin palette');
+});
+
+test('bridge: text-tertiary follows dim and keeps classic\'s 3:1 floor', () => {
+    const r = B.bridge(cls(FULL), {});
+    assert.strictEqual(r.vals['text-tertiary'], FULL.dim);
+    const f = B.filterContrast({ 'bg-primary': '#000000', 'text-tertiary': '#606060' });
+    assert.ok('text-tertiary' in f.vals, '3.0:1 is enough for tertiary');
+    const g = B.filterContrast({ 'bg-primary': '#000000', 'text-tertiary': '#3a3a3a' });
+    assert.ok(!('text-tertiary' in g.vals));
+});
+
 test('our token list does not collide with classic style ids', () => {
     assert.notStrictEqual(B.STYLE_ID, B.CLASSIC_STYLE_ID);
 });
@@ -234,4 +282,24 @@ test('classic still owns exactly the tokens our crosswalk names',
         'classic changed its style id — re-check the bridge scope');
     assert.ok(/document\.head\.appendChild\(style\)/.test(src),
         'classic no longer paints via a <head> style node — the bridge mechanism is gone');
+    // the channel map we mirror (neutral utilities read triplets, not tokens)
+    const ch = src.match(/const CHANNELS = \{([\s\S]*?)\n\s*\};/);
+    assert.ok(ch, 'custom_theme.js CHANNELS not found — the channel contract moved');
+    const theirCh = {};
+    for (const m of ch[1].matchAll(/'([a-z-]+)':\s*\[([^\]]*)\]/g))
+        theirCh[m[1]] = m[2].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+    assert.deepStrictEqual(theirCh, B.CHANNELS, 'classic CHANNELS changed — update the mirror');
+});
+
+test('classic chat still draws the send icon the disabled rule targets',
+    { skip: CT_FILE ? false : 'no classic checkout (set OMLX_SRC)' }, () => {
+    const chat = path.join(CT_FILE, '..', '..', '..', 'templates', 'chat.html');
+    if (!fs.existsSync(chat)) return;          // older layout: nothing to pin
+    const src = fs.readFileSync(chat, 'utf8');
+    assert.ok(/disabled:bg-surface-muted[^>]*>\s*<i data-lucide="arrow-up" class="[^"]*text-accent-fg/.test(src),
+        'send button markup moved — re-check DISABLED_ICON_RULE (UP-68)');
+    const dash = path.join(CT_FILE, '..', '..', 'css', 'dashboard.css');
+    if (fs.existsSync(dash))
+        assert.ok(/--surface-scale-200:\s*var\(--palette-night-700\)/.test(fs.readFileSync(dash, 'utf8')),
+            'dashboard.css no longer pins surface-scale-200 to the tertiary step — re-check EXTRA_CHANNELS');
 });
