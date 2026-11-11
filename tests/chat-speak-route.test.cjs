@@ -11,9 +11,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(path.join(__dirname,
-    '../omlx_uplift/static/uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 function grab(start, end) {
     const a = SRC.indexOf(start);
     assert.ok(a >= 0, 'missing ' + start);
@@ -25,6 +25,8 @@ function grab(start, end) {
 const CODE = [
     'var ROUTE_KEY = "omlx-uplift-speak-route";',
     'var _key = "", _voicesCache = [], _currentVoice = "", _V = null;',
+    // SPLIT-3: the read-aloud part reads core state through CORE getters
+    'var CORE = { get _key() { return _key; } };',
     'var _store = {};',
     'var W = () => ({ localStorage: { getItem: k => (k in _store ? _store[k] : null) } });',
     'function chatVoiceId() { return _currentVoice; }',

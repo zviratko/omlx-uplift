@@ -28,9 +28,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(
-    path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 const BUNDLE = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift',
     'static', 'vendor', 'deep-chat', 'deep-chat-2.5.1.bundle.js'), 'utf8');
 

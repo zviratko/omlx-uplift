@@ -17,7 +17,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat } = require('./static-src.cjs');
 
 const VOICE_ID = 'Qwen3-TTS-1.7B:Ana';
 const VOICE_ID2 = 'Qwen3-TTS-1.7B:Bo';
@@ -196,7 +196,7 @@ function makeHarness(opts) {
     const ctx = vm.createContext(win);
     // the REAL VOICE-10 engine first (its UMD tail hangs window.Uplift.speechio)
     new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_speechio.js`, 'utf8')).runInContext(ctx);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8')).runInContext(ctx);
+    runChat(ctx);
     return { win, byId, posts, dels, toasts, voices, speechCalls, speechPend,
              ctxInstances, store, stream,
              async booted() {

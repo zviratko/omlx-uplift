@@ -22,7 +22,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, chatSource } = require('./static-src.cjs');
 
 // frozen 2026-10-25, see the header: may only SHRINK.
 // Three of the original six were the context ring's strokes; they were dead in
@@ -105,7 +105,7 @@ test('CSS-3: the context ring paints through CSS, not through its markup', () =>
     // Guards the fix as a contract: if someone moves the stroke back into the
     // scaffold or into setAttribute, the ring goes invisible again.
     const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
-    const js = fs.readFileSync(path.join(STATIC_DIR, 'uplift_chat.js'), 'utf8');
+    const js = chatSource();
     assert.ok(/\.chat-ctx \.ctx-arc\s*{\s*stroke:\s*var\(--ok\)/.test(css),
         'the arc stroke must be a CSS rule on a declared token');
     assert.ok(/\.chat-ctx\.ctx-hot \.ctx-arc\s*{\s*stroke:\s*var\(--bad\)/.test(css),

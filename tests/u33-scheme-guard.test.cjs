@@ -10,8 +10,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
+const { chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 
 function extractFn(name) {
     const at = SRC.indexOf('function ' + name + '(');

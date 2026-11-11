@@ -26,4 +26,24 @@ function allStaticJs() {
         .join('\n');
 }
 
-module.exports = { STATIC_DIR, staticFiles, allStaticJs };
+/* SPLIT-3: the native chat is uplift_chat.js (core, loaded LAST) plus part
+   files that register on UpliftChatParts before it. Tests that read or run
+   "the chat" use these two helpers, so they keep working as code moves
+   between the chat files. Order = browser load order (uplift.js). */
+const CHAT_FILES = ['uplift_chat_voice.js', 'uplift_chat.js'];
+
+function chatSource() {
+    return CHAT_FILES
+        .map(f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8'))
+        .join('\n');
+}
+
+function runChat(ctx) {
+    const vm = require('vm');
+    for (const f of CHAT_FILES) {
+        new vm.Script(fs.readFileSync(path.join(STATIC_DIR, f), 'utf8'),
+                      { filename: f }).runInContext(ctx);
+    }
+}
+
+module.exports = { STATIC_DIR, staticFiles, allStaticJs, CHAT_FILES, chatSource, runChat };

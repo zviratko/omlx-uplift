@@ -6,7 +6,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'), 'utf8');
+const { chatSource } = require('./static-src.cjs');
+const SRC = chatSource();
 
 test('pinned-first sort keeps newest-first inside each group', () => {
     assert.match(SRC, /shown = shown\.filter\(function \(s\) \{ return s\.pinned; \}\)/);

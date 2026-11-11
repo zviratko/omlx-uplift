@@ -34,7 +34,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat } = require('./static-src.cjs');
 
 // VOICE-13a(a0): realtime tests must run on a tiny-class fixture — the
 // client now (correctly!) declines the socket for large-v3-class models,
@@ -301,8 +301,7 @@ function makeHarness(opts) {
                          removeItem: (k) => { delete store[k]; } };
     win.__store = store;
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     const tick = (n) => new Promise((r) => setTimeout(r, n || 1));
     const h = {
         win, byId, store, toasts, forms, textInput, shadow, procs, stream,

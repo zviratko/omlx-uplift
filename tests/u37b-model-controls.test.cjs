@@ -83,9 +83,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(path.join(STATIC_DIR, 'uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 
 // ---- DOM stub ---------------------------------------------------------------
 // el.children is a LIVE-COLLECTION view, like a browser HTMLCollection:

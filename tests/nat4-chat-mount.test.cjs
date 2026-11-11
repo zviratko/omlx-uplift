@@ -15,7 +15,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat, chatSource } = require('./static-src.cjs');
 const LOCALES_DIR = `${STATIC_DIR}/../locales`;   // CHAT-3R locale parity pins
 
 const CAT = {
@@ -163,8 +163,7 @@ function makeHarness(opts = {}) {
     const ctx = vm.createContext(win);
     // Promise/FormData/File exist per-context or absent — code paths that
     // need FormData instanceof File are exercised via the text path here.
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     return { win, byId, posts, dels };
 }
 
@@ -1021,7 +1020,7 @@ test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () =>
     // conversation; classic shows the block per assistant message. Pins:
     // no light-DOM panel element, blocks built only inside the shadow
     // root, and inserted BEFORE the bubble element.
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(!/tp\.id = 'chat-native-think'/.test(src),
         'fixed thinking panel element is gone');
     assert.ok(/holder\.insertBefore\(thinkEl, b\)/.test(src),
@@ -1040,7 +1039,7 @@ test('U71: thinking anchors ABOVE each reply, not at the top of the chat', () =>
 test('U72: injected children stack ABOVE the bubble, hover never moves it', () => {
     // user bug: row-flex made thinking sit NEXT to the reply and the
     // hover actions row reflowed (moved) the message
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(/\.inner-message-container \{['\"]?,?\s*'?\s*flex-direction: column/.test(src),
         'inner message container forced to column');
     assert.ok(/\.chat-native-msg-actions \{ visibility: hidden; display: flex/.test(src),
@@ -1054,7 +1053,7 @@ test('U72: injected children stack ABOVE the bubble, hover never moves it', () =
 });
 
 test('U73: message edit is INLINE (no window.prompt); thinking collapses quiet', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(!/window\.prompt/.test(src),
         'the prompt() edit dialog is gone for good');
     assert.ok(/class(Name)? = 'chat-native-edit'|className = "chat-native-edit"/.test(src)
@@ -1068,7 +1067,7 @@ test('U73: message edit is INLINE (no window.prompt); thinking collapses quiet',
 });
 
 test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     // assistant edits never truncate/replay — they condition the next ctx
     assert.ok(/function commitEditedInPlace/.test(src), 'in-place commit exists');
     assert.ok(/commitEditedInPlace\(idx, taC\.value,/.test(src),
@@ -1091,7 +1090,7 @@ test('U74: reply + reasoning edits commit IN PLACE; edited rows ride the wire', 
 });
 
 test('CHAT-3R: three-region layout — histories left, model/profile top, controls right', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(/layout\.append\(hist, mainCol, side\)/.test(src),
         'hist LEFT | chat column | control rail RIGHT');
     // VOICE-16: the audio-cache pair joins the rail BELOW Delete chat —
@@ -1207,7 +1206,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
 });
 
 test('U79-era doctrine: destructive action inside its region (moved to the history rail)', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     // the delete button lives in the HISTORY rail now, right where the
     // conversation being deleted is selected — same intent, new geometry
     assert.ok(/hist\.append\([\s\S]*?del\)/.test(src),
@@ -1217,7 +1216,7 @@ test('U79-era doctrine: destructive action inside its region (moved to the histo
 });
 
 test('U76-U78: web label, export/import buttons, sampling provenance chip', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(/uplift\.chat\.web_search/.test(src),
         'web toggle carries a descriptive resting label');
     assert.ok(/chat\.download_chats/.test(src) && /chat\.import_chats/.test(src),
@@ -1251,7 +1250,7 @@ test('U80: one box height for all text-family controls (doctrine)', () => {
 });
 
 test('U82: single --radius shape knob; row bands reverted (user dislike)', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     const css = fs.readFileSync(`${STATIC_DIR}/uplift.css`, 'utf8');
     // U82-follow-up (user: 'that background does not look good at all,
     // revert that (just the background)'): NO role-row band painting may
@@ -1280,7 +1279,7 @@ test('U82: single --radius shape knob; row bands reverted (user dislike)', () =>
 });
 
 test('NEW-CHAT-1: a new chat inherits the model on screen, not row one', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(/model: preferredModel\(\)/.test(src), 'newConv takes the resolved model');
     assert.ok(!/model: \(_models\[0\] \|\| \{\}\)\.id/.test(src),
         'the first row of the list is not the answer');
@@ -1337,7 +1336,7 @@ test('MATH: normMath rewrites only the alt delimiters', () => {
 });
 
 test('MATH: both render paths normalize, the store stays raw', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8');
+    const src = chatSource();
     assert.ok(/signals\.onResponse\(\{ text: normMath\(c\.text\) \}\)/.test(src),
         'stream leg normalizes before the bubble sees it');
     assert.ok(/text \+= c\.text;/.test(src),

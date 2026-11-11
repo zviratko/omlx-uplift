@@ -620,6 +620,9 @@ const SURFACE_EMBED_IDS = new Set(
 function nativeSurfaceOn(tab, sub) {
     return surfaceMode(tab, sub) === 'native';
 }
+/* SPLIT-3: native chat part files, loaded before the core uplift_chat.js.
+   Same list as CHAT_FILES in tests/static-src.cjs (a node test pins both). */
+const CHAT_PARTS = ['./uplift_chat_voice.js'];
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
     if (!card) return;
@@ -645,8 +648,11 @@ function showEmbedPage(tab, sub) {
                 else Promise.all([
                     window.Uplift.speechio ? Promise.resolve() : D.loadScript('./uplift_speechio.js'),
                     window.Uplift.voices ? Promise.resolve() : D.loadScript('./uplift_voices.js'),
-                    typeof UpliftNativeChat !== 'undefined' ? Promise.resolve() : D.loadScript('./uplift_chat.js'),
-                ]).then(runChat);
+                    // SPLIT-3: the chat parts register on UpliftChatParts
+                    // first; the core (uplift_chat.js) calls them at load.
+                    ...CHAT_PARTS.map(f => D.loadScript(f)),
+                ]).then(() => (typeof UpliftNativeChat !== 'undefined'
+                    ? null : D.loadScript('./uplift_chat.js'))).then(runChat);
             }
         }
         return;

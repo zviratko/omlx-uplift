@@ -21,9 +21,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(path.join(STATIC_DIR, 'uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 const IO = require(path.join(STATIC_DIR, 'uplift_speechio.js'));
 const LOCALE_DIR = path.join(__dirname, '..', 'omlx_uplift', 'locales');
 
@@ -204,7 +204,7 @@ test('structure: the speaker button is replaced by the transport row', () => {
                  'the pair is not styled as a chunk row');
     assert.ok(/sayAttach\(holder, storeIdx, role, b\)/.test(SRC),
               'rows refresh on every attach pass');
-    assert.ok(/row\.mid = _turnMid/.test(SRC),
+    assert.ok(/row\.mid = CHAT_VOICE\._turnMid/.test(SRC),
               'the streamed turn binds its plan to the assistant row');
 });
 

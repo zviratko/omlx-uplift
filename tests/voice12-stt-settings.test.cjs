@@ -24,7 +24,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat } = require('./static-src.cjs');
 
 const STT_ID = 'whisper-large-v3-turbo-oQ8';
 
@@ -257,8 +257,7 @@ function makeHarness(opts) {
                          removeItem: (k) => { delete store[k]; } };
     win.__store = store;
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     const tick = (n) => new Promise((r) => setTimeout(r, n || 1));
     const h = {
         win, byId, store, posts, toasts, sent, forms, textInput,

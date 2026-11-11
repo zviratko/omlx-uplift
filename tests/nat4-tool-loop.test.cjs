@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat } = require('./static-src.cjs');
 
 function baseWin() {
     const win = {
@@ -32,8 +32,7 @@ function baseWin() {
     };
     win.window = win; win.self = win;
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     return win;
 }
 

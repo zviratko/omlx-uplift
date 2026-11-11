@@ -36,7 +36,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { URL } = require('node:url');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat } = require('./static-src.cjs');
 
 const tick = (n) => new Promise((r) => setTimeout(r, n || 1));
 async function flush(rounds) {
@@ -238,8 +238,7 @@ function makeHarness(opts) {
     };
     win.window = win; win.self = win;
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     return {
         win, byId, shadow, posts, probes, document, mkEl, convs,
         async booted() {

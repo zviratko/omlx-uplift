@@ -4,9 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(
-    path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'), 'utf8');
+const SRC = chatSource();
 
 // extract a top-level function by brace-walking (u33 pattern)
 function extract(name) {

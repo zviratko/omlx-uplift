@@ -9,7 +9,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'), 'utf8');
+const { chatSource } = require('./static-src.cjs');
+const SRC = chatSource();
 
 test('onMessage never calls ctxRender directly — only the _ctxRender holder', () => {
     const i = SRC.indexOf('dc.onMessage = function');

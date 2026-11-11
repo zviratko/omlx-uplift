@@ -88,11 +88,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runChat, chatSource } = require('./static-src.cjs');
 
-const SRC = fs.readFileSync(
-    path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_chat.js'),
-    'utf8');
+const SRC = chatSource();
 
 const tick = (n) => new Promise((r) => setTimeout(r, n || 1));
 async function flush(rounds) {
@@ -246,8 +244,7 @@ function makeHarness(opts) {
     win.window = win; win.self = win; win.alert = () => {};
     win.navigator = {};
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_chat.js`, 'utf8'))
-        .runInContext(ctx);
+    runChat(ctx);
     const h = {
         win, byId, shadow, posts, document, convs,
         async booted() {
