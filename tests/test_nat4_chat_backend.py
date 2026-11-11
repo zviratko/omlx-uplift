@@ -398,3 +398,11 @@ def test_u37_effort_stops_and_per_model_settings(client):
     assert client.post("/uplift/api/chat/history", json=bad).status_code == 200
     g2 = client.get("/uplift/api/chat/history/c9").json()
     assert g2["thinking"] == "auto" and g2["modelSettingsByModel"] == {}
+
+
+@pytest.mark.parametrize("body", [b"x", b'"str"', b"[1]", b"null"])
+def test_save_malformed_body_is_400(client, body):
+    """BUG-9 sibling: the history save route read body.get() unguarded."""
+    r = client.post("/uplift/api/chat/history", content=body,
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400 and r.json()["detail"] == "invalid JSON body"

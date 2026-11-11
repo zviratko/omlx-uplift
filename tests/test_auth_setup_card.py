@@ -86,3 +86,24 @@ def test_post_wrong_key_still_401_and_counts(client, monkeypatch):
     r = client.post("/uplift/login", json={"api_key": "nope"})
     assert r.status_code == 401
     assert pages._login_fails, "wrong keys must keep feeding the throttle"
+
+
+@pytest.mark.parametrize("body", [b"x", b"{not json", b'"a string"', b"[1, 2]",
+                                  b"null", b""])
+def test_post_malformed_body_is_400_and_not_throttled(client, monkeypatch, body):
+    """BUG-9: a body that is not a JSON object answered 500 with a traceback.
+    It is a client error (400), and it must not count as a failed login."""
+    _set_key(monkeypatch, "sekrit")
+    r = client.post("/uplift/login", content=body,
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "invalid JSON body"
+    assert not pages._login_fails
+
+
+def test_post_correct_key_still_logs_in(client, monkeypatch):
+    pytest.importorskip("omlx.admin.auth")
+    _set_key(monkeypatch, "sekrit")
+    r = client.post("/uplift/login", json={"api_key": "sekrit", "remember": True})
+    assert r.status_code == 200 and r.json() == {"success": True}
+    assert "set-cookie" in r.headers

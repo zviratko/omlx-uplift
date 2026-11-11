@@ -373,8 +373,16 @@ async def uplift_login(request: Request):
     NOTE: served at /uplift/login (NOT /uplift/api/login) — a literal
     page route under /uplift/api/ outranks the API router's dynamic
     routes in FastAPI>=0.141 candidate matching and swallows them."""
-    body = await request.json()
-    api_key = str((body or {}).get("api_key", ""))
+    # BUG-9: a body that is not a JSON object is a client error (400), not a
+    # server error, and it is checked before the throttle so it never counts
+    # as a failed login.
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    api_key = str(body.get("api_key", ""))
     ip = request.client.host if request.client else "?"
     wait_s = _login_blocked(ip)
     if wait_s:
@@ -402,7 +410,7 @@ async def uplift_login(request: Request):
         REMEMBER_ME_MAX_AGE,
         create_session_token,
     )
-    remember = bool((body or {}).get("remember", False))
+    remember = bool(body.get("remember", False))
     token = create_session_token(remember=remember)
     response = {"success": True}
     from fastapi.responses import JSONResponse
