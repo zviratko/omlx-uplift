@@ -1476,8 +1476,9 @@ header.top nav.tabs > .dd:last-child > .dd-btn { border-right: 0; }
 .dd-btn:hover { color: var(--ink); background: var(--edge); }
 .dd-btn.active { color: var(--bg); background: var(--ink); }
 /* UP-64: model update count on Models and Downloader */
-.nav-badge { margin-left: 6px; min-width: 16px; padding: 0 4px; display: inline-block;
-    font: 600 10px/1.6 var(--mono); text-align: center;
+#dd-models-btn[data-badge]::after, #dd-models-menu a[data-badge]::after {
+    content: attr(data-badge); margin-left: 6px; min-width: 16px; padding: 0 4px;
+    display: inline-block; font: 600 10px/1.6 var(--mono); text-align: center;
     background: var(--accent); color: var(--ink-on-accent); }
 /* caret sits clear of the label (user ask: dropdown indicator needs more
    air from the menu text); touch-action kills the 300 ms tap delay */

@@ -454,7 +454,6 @@ function applyTab() {
         caret.dataset.icon = 'caret';   // skin icon hook (rebuilt spans need it too)
         btn.append(span, ' ', caret);
     }
-    paintUpdateBadges();   // UP-64: the rebuild above wipes the Models badge
     for (const card of pageCards) {
         // NAT-6: a native shell can only paint when its surface is flagged
         // on server-side AND the viewer is not in classic-embed mode for
@@ -825,26 +824,20 @@ document.addEventListener('click', e => {
 // The server keeps the check (routers/updates.py; a read starts a new check
 // when the last one is older than 6 h), so the board only re-reads the
 // small state every 30 min, and sooner while a check is running.
-// var, not const: applyTab() can paint before this line runs at boot
-var MUP = { view: null, timer: 0 };
-function updateBadge(host, n, tip) {
+const MUP = { view: null, timer: 0 };
+// The count rides a data attribute drawn by CSS (::after): the locale pass
+// rewrites the link text and applyTab() rebuilds the button, and neither
+// touches attributes.
+function updateBadge(host, n) {
     if (!host) return;
-    let b = host.querySelector('.nav-badge');
-    if (!n) { if (b) b.remove(); return; }
-    if (!b) {
-        b = document.createElement('span');
-        b.className = 'nav-badge';
-        host.append(b);
-    }
-    b.textContent = String(n);
-    b.title = tip;
+    if (n) host.dataset.badge = String(n);
+    else delete host.dataset.badge;
 }
 function paintUpdateBadges() {
-    const n = (MUP && MUP.view && MUP.view.pending) || 0;
-    const tip = C.tf('models.manager.updates_found', 'Updates available: {count}', { count: n });
-    updateBadge($('dd-models-btn'), n, tip);
+    const n = (MUP.view && MUP.view.pending) || 0;
+    updateBadge($('dd-models-btn'), n);
     const menu = $('dd-models-menu');
-    updateBadge(menu && menu.querySelector('a[data-sub="downloader"]'), n, tip);
+    updateBadge(menu && menu.querySelector('a[data-sub="downloader"]'), n);
 }
 function setModelUpdates(view) {
     MUP.view = view || null;
