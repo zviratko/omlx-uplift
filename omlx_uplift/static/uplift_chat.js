@@ -3075,7 +3075,7 @@ function toolbar() {
     });
     routeSel.value = speakRoute();
     routeSel.title = tf2('uplift.chat.speak_route_hint',
-        'Ask for the audio from this board, or from the server itself '
+        'Ask for the audio from this dashboard, or from the server itself '
         + '(POST /v1/audio/speech)');
     routeSel.dataset.i18nTitle = 'uplift.chat.speak_route_hint';
     routeSel.dataset.enTitle = routeSel.title;
@@ -5505,7 +5505,7 @@ var HELP_ROWS = [
     ['chat.shortcut_newline', 'Newline in message', 'chat.shortcut_shift_enter', 'Shift + Enter'],
     ['chat.shortcut_stop', 'Stop generating', 'chat.shortcut_key_esc', 'Esc'],
     ['chat.rename_tooltip', 'Rename chat', 'uplift.chat.help_gesture_dblclick', 'Double-click'],
-    ['uplift.chat.help_variants', 'Regenerate options', 'chat.regenerate_tooltip', 'Regenerate'],
+    ['uplift.chat.help_variants', 'Regenerate keeps every reply. Switch with the tabs.', 'chat.regenerate_tooltip', 'Regenerate'],
     ['chat.attachments', 'Attachments', 'uplift.chat.help_gesture_drop', 'Drop'],
     ['chat.attachments', 'Attachments', 'uplift.chat.help_gesture_paste', 'Paste image'],
     ['chat.shortcut_help', 'Show this help', null, '?'],

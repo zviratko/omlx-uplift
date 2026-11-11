@@ -2305,7 +2305,7 @@ var PF = {
         var st = gid('bench-tp-status');
         if (st) {
             st.textContent = (st.textContent ? st.textContent + ' \u2014 ' : '')
-                + t('uplift.bench.run_finished', 'finished');
+                + t('uplift.bench.run_finished', 'Finished');
         }
     },
 
@@ -2801,7 +2801,7 @@ var TP = {
         var st = gid('bench-tp-status');
         if (st && !st.classList.contains('bench-status-error')) {
             setBar('bench-tp-status', 100);   // U-PROG: run complete
-            st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
+            st.textContent += ' — ' + t('uplift.bench.run_finished', 'Finished');
         }
     },
 };
@@ -3166,7 +3166,7 @@ var CTX = {
         var st = gid('bench-ctx-status');
         if (st && !st.classList.contains('bench-status-error') && st.textContent) {
             setBar('bench-ctx-status', 100);
-            st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
+            st.textContent += ' — ' + t('uplift.bench.run_finished', 'Finished');
         }
     },
 };
@@ -3455,7 +3455,7 @@ var ANE = {
         var st = gid('bench-ane-status');
         if (st && !st.classList.contains('bench-status-error') && st.textContent &&
             this.state.snapshot && this.state.snapshot.status === 'completed') {
-            st.textContent += ' — ' + t('uplift.bench.run_finished', 'finished');
+            st.textContent += ' — ' + t('uplift.bench.run_finished', 'Finished');
         }
     },
 };

@@ -560,7 +560,7 @@ function voiceForm(models, sttSelf) {
     if (!models.length) {
         const o = document.createElement('option');
         o.value = ''; o.textContent = tf('uplift.voices.no_tts',
-            'no TTS model installed');
+            'No TTS model installed');
         modelS.append(o); modelS.disabled = true;
     }
     // a stored voice's model may not be in the catalog anymore (deleted
@@ -601,7 +601,7 @@ function voiceForm(models, sttSelf) {
     if (!stts.length) {
         const o = document.createElement('option');
         o.value = ''; o.textContent = tf('uplift.voices.no_stt',
-            'no STT model installed');
+            'No STT model installed');
         sttS.append(o); sttS.disabled = true;
     }
     const trB = document.createElement('button');

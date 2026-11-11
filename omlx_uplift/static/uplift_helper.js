@@ -49,7 +49,7 @@ async function openPruneDialog() {
     h.textContent = `Prune model settings (${orphans.length + profs.length})`;
     const sub = document.createElement('div');
     sub.className = 'se-hint';
-    sub.textContent = C.tf('uplift.ui.stored_configuration_for_models_that_no_longer_e', 'Stored configuration for models that no longer exist on disk. ')
+    sub.textContent = C.tf('uplift.ui.stored_configuration_for_models_that_no_longer_e', 'Stored settings for models that no longer exist on disk.') + ' '
         + C.tf('uplift.ui.profiles_shown_as_base_name', 'Profiles appear as "model:profile". ')
         + (HG.GW_LIVE
             ? 'Removed entries are deleted from this server\'s model_settings.json.'

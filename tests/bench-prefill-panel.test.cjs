@@ -547,7 +547,7 @@ test('SSE events paint the aggregate first, then one row per request', async () 
     assert.equal(byId['bench-tp-run'].disabled, false);
     assert.equal(byId['bench-tp-pf-cancel'].hidden, true);
     assert.ok(es[es.length - 1].closed, 'stream closed at the terminal event');
-    assert.ok(byId['bench-tp-status'].textContent.includes('finished'));
+    assert.ok(byId['bench-tp-status'].textContent.includes('Finished'));
 });
 
 test('an error event is a red status line, not a silent table', async () => {

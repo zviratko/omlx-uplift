@@ -183,7 +183,9 @@ test('? opens the sheet, and it is the house modal (not a bespoke layer)', async
     assert.ok(texts.includes('Send message') && texts.includes('Newline in message')
               && texts.includes('Stop generating') && texts.includes('Show this help'),
               "classic's own four rows carry their catalog labels");
-    ['Rename chat', 'Regenerate options', 'Attachments', 'Double-click',
+    // the variants row falls back to the en.json sentence itself (U87)
+    ['Rename chat', 'Regenerate keeps every reply. Switch with the tabs.',
+     'Attachments', 'Double-click',
      'Drop', 'Paste image']
         .forEach((r) => assert.ok(texts.includes(r), 'affordance listed: ' + r));
     assert.ok(walk(box, []).every((n) => !/^(chat|uplift)\.[a-z_.]+$/.test(n.textContent || '')),

@@ -2682,7 +2682,9 @@ function renderGlobalSettings() {
         b.id = 'gs-save'; b.className = 'se-btn savebtn'; b.textContent = 'SAVE';
         b.onclick = gsSaveOrRestart;
         const clr = document.createElement('button');
-        clr.id = 'gs-discard'; clr.className = 'se-btn'; clr.textContent = 'DISCARD';
+        clr.id = 'gs-discard'; clr.className = 'se-btn';
+        clr.textContent = C.tf('uplift.env.discard', 'DISCARD');
+        clr.dataset.i18n = 'uplift.env.discard'; clr.dataset.en = 'DISCARD';
         clr.onclick = () => {
             Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
             renderGlobalSettings(); gsUpdateSaveBtn(); renderDirtyList();

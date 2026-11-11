@@ -1335,7 +1335,7 @@ function renderEditorFields(container) {
                 const sb = seGate(sub(g), 'dflash_enabled');
                 const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
                 sb.append(seBind('select', 'dflash_draft_model',
-                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
+                    { label: C.tf('uplift.ui.draft_model', 'Drafter model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true }));
                 sb.append(seBind('bool', 'dflash_draft_quant_enabled', { label: 'Quantization' }));
                 const quantBox = seGate(seGatedDiv('se-sub'), 'dflash_draft_quant_enabled');
                 quantBox.append(
@@ -1895,7 +1895,7 @@ function renderEditorFields(container) {
                     hint: C.tf('modal.model_settings.specprefill_auto_hint',
                         'Use SpecPrefill on every request above the threshold. When off, the drafter stays loaded but idle — requests can opt in individually and model aliases can turn it on.') });
                 const spDraft = seBind('select', 'specprefill_draft_model',
-                    { label: C.tf('uplift.ui.draft_model', 'Draft Model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true });
+                    { label: C.tf('uplift.ui.draft_model', 'Drafter model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true });
                 const spKeep = seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
                     { value: '0.1', label: '10% — Aggressive (~5-7x, some quality loss)' },
                     { value: '0.2', label: '20% — Balanced (~3x, recommended)' },
