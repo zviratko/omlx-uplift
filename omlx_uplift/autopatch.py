@@ -15,8 +15,11 @@ vanilla `omlx` service the seed is a no-op, so production's environment stays
 exactly as launchd left it. stdlib only, never raises.
 """
 
+import logging
 import os
 import sys
+
+_log = logging.getLogger("omlx_uplift.autopatch")
 
 _TARGET = "omlx.server"
 
@@ -99,7 +102,8 @@ def _reconcile_patches() -> None:
             logging.getLogger("omlx_uplift").exception(
                 "patch reconcile failed (booting anyway)")
         except Exception:
-            pass
+            sys.stderr.write("omlx_uplift: patch reconcile failed "
+                             "and could not be logged\n")
 
 
 def _tree_drift_check() -> None:
@@ -114,7 +118,7 @@ def _tree_drift_check() -> None:
 
         treedoctor.boot_check()
     except Exception:  # the doctor must never be the reason a boot fails
-        pass
+        _log.debug("tree doctor boot check failed", exc_info=True)
 
 
 def install() -> None:
@@ -125,7 +129,7 @@ def install() -> None:
 
         bootlog.install()
     except Exception:
-        pass
+        _log.debug("boot log buffer not installed", exc_info=True)
     _reconcile_patches()
     _tree_drift_check()
     _seed_env_tunables()

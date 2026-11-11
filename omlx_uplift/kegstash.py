@@ -43,10 +43,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+
+_log = logging.getLogger("omlx_uplift.kegstash")
 
 FORMULA = "omlx-dev"
 # DEV-13: retention default 3 -> 5 builds, overridable per user via the
@@ -241,7 +244,7 @@ def kegs_root(root: str | None = None) -> str:
         cfg = devsrc.load_config() or {}
         base = os.path.expanduser(cfg.get("base_path") or base)
     except Exception:
-        pass
+        _log.debug("dev config unreadable, default base path used", exc_info=True)
     return os.path.join(base, "uplift", "kegs")
 
 

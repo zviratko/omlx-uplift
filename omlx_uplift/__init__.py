@@ -27,7 +27,7 @@ def register(app) -> None:
 
         bootlog.flush()
     except Exception:
-        pass
+        logging.getLogger("omlx_uplift").debug("boot log flush failed", exc_info=True)
     from .router import api_router, page_router
 
     if getattr(app, "_omlx_uplift_mounted", False):
@@ -131,7 +131,7 @@ def _wrap_lifespan(app) -> None:
             try:
                 fast.stop()
             except Exception:
-                pass
+                logging.getLogger("omlx_uplift").debug("fast sampler stop failed", exc_info=True)
             await collector.stop()
 
     app.router.lifespan_context = lifespan_with_uplift

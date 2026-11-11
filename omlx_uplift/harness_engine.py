@@ -277,7 +277,7 @@ def _kill_live() -> None:
         try:
             bench_env.stop(p, grace_s=1.0)
         except Exception:
-            pass
+            logger.debug("harness child stop failed", exc_info=True)
 
 
 _atexit_done = False
@@ -458,7 +458,7 @@ def subtask_counts() -> Optional[dict[str, int]]:
             _sizes_mem = data["sizes"]
             return _sizes_mem
     except Exception:
-        pass
+        logger.debug("harness size cache unreadable, re-probing", exc_info=True)
     if bench_env.status()["state"] != "ready":
         return None          # no lazy venv build for a label; honest miss
     import subprocess
@@ -497,7 +497,7 @@ def subtask_counts() -> Optional[dict[str, int]]:
                 f.write_text(json.dumps({"fingerprint": fp,
                                          "sizes": _sizes_mem}))
             except Exception:
-                pass
+                logger.debug("harness size cache not written", exc_info=True)
             return _sizes_mem
     return None
 
@@ -814,7 +814,7 @@ async def run_suite(run: Any, task: str, sample_size: int, pool: Any,
             for line in proc.stdout:
                 loop.call_soon_threadsafe(lines.put_nowait, line)
         except Exception:
-            pass
+            logger.debug("harness child stdout reader stopped", exc_info=True)
         finally:
             loop.call_soon_threadsafe(lines.put_nowait, None)
 

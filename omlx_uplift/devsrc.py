@@ -1654,7 +1654,7 @@ def _emit(res: BuildResult, stream: str, text: str) -> None:
         try:
             res.on_line(res, stream, text)
         except Exception:                        # noqa: BLE001 — progress only
-            pass
+            _log.debug("build progress callback failed", exc_info=True)
 
 
 _ANSI_RE = re.compile(
@@ -1770,7 +1770,7 @@ def _remount_cmd(runner=subprocess.run) -> list:
                 newest = max(cands, key=lambda p: p.stat().st_mtime)
                 return [str(newest), "-m", "omlx_uplift.cli", "install"]
     except Exception:
-        pass
+        _log.debug("brew cellar probe failed", exc_info=True)
     return ["omlx-uplift", "install"]
 
 
@@ -2000,7 +2000,7 @@ def _base_pyproject(cfg: dict, path: str) -> tuple[str | None, str]:
                 pr.stdout, bytes) else str(pr.stdout)
             return text, f"{sha[:12]}:pyproject.toml"
     except Exception:
-        pass
+        _log.debug("pyproject read from git failed", exc_info=True)
     return None, f"{ref}:pyproject.toml"
 
 
@@ -2106,7 +2106,7 @@ def _ensure_versioned_formula() -> str | None:
         subprocess.run(["git", "-C", tap_root, "pull", "--ff-only"],
                        capture_output=True, timeout=90)
     except Exception:
-        pass
+        _log.debug("tap pull failed", exc_info=True)
     if versioned():
         return None
     return (f"the tap's omlx-dev formula at {formula} predates versioned "
@@ -2295,7 +2295,7 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                                  "server start (never part of the "
                                  "omlx-dev build)")
                 except Exception:
-                    pass
+                    _log.debug("runtime overlay status probe failed", exc_info=True)
                 if not _live:
                     _live = (" — mounts onto the running install at server "
                              "start, NOT part of the omlx-dev build")
@@ -2507,7 +2507,7 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                 if gone:
                     _emit(res, "out", f"keg stash pruned: {', '.join(gone)}")
             except Exception:
-                pass
+                _log.debug("keg stash prune failed", exc_info=True)
     except Exception as exc:
         _emit(res, "err", f"keg stash skipped: {exc}")
     # install owns the pin (decision 3): brew refuses to reinstall a pinned
@@ -2630,7 +2630,7 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
         if gone:
             _emit(res, "out", "cellar retention: removed " + ", ".join(gone))
     except Exception:
-        pass
+        _log.debug("cellar retention failed", exc_info=True)
     # UPLIFT CARRY (user 2026-10-27): one command must leave the BOARD
     # consistent. If the engine python minor just moved out from under
     # the deployed uplift keg (the .pth shares site-packages, minors must

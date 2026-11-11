@@ -224,7 +224,7 @@ def _python_for_venv() -> str:
         import omlx  # noqa: F401
         candidates.append(sys.executable)
     except Exception:
-        pass
+        logger.debug("server python is not a bench candidate (no omlx)", exc_info=True)
     for name in ("python3.12", "python3.11", "python3"):
         p = shutil.which(name)
         if p and p not in candidates:
@@ -451,7 +451,7 @@ def hf_cache_dir() -> Path:
             if v:
                 return Path(os.path.expanduser(str(v)))
     except Exception:
-        pass
+        logger.debug("bench_hf_cache config unreadable, default used", exc_info=True)
     return default
 
 
@@ -577,7 +577,7 @@ def offline_mode() -> bool:
         if cfg.exists():
             return bool(json.loads(cfg.read_text()).get("bench_offline"))
     except Exception:
-        pass
+        logger.debug("bench_offline config unreadable, online assumed", exc_info=True)
     return False
 
 

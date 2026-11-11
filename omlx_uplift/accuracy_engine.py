@@ -304,7 +304,7 @@ try:
     from . import harness_engine as _he
     _he.install_dispatcher()
 except Exception:  # CI without omlx: no module to wrap; pure-import OK
-    pass
+    logger.debug("accuracy dispatcher not installed (no omlx?)", exc_info=True)
 
 _upload_orig: Optional[Any] = None
 
@@ -346,7 +346,7 @@ def queue_status() -> dict:
             q["sizes"] = dict(r.benchmarks)
             q["engine"] = getattr(r, "_uplift_engine", "classic")
     except Exception:  # private-attr drift: board falls back to names
-        pass
+        logger.debug("accuracy queue spec decoration skipped", exc_info=True)
     if st.get("running") and st.get("current_bench_id"):
         try:
             run = AB.get_run(st["current_bench_id"])
@@ -365,7 +365,7 @@ def queue_status() -> dict:
             # exception above/below leaves it absent, as before.
             st["event_count"] = len(run.events)
         except Exception:
-            pass
+            logger.debug("accuracy event_count skipped", exc_info=True)
     # drain management: once the queue idles, restore classic behavior
     if not st.get("running"):
         _disarm_upload_skip()

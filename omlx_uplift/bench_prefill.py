@@ -903,13 +903,13 @@ def _memory_guard(core: Any) -> dict:
         if limit > 0:
             out["guard_limit_bytes"] = limit
     except Exception:
-        pass
+        logger.debug("memory guard limit unreadable", exc_info=True)
     try:
         used = int(sched._current_usage_bytes(refresh_mlx_active=False))
         if used > 0:
             out["guard_usage_bytes"] = used
     except Exception:
-        pass
+        logger.debug("memory guard usage unreadable", exc_info=True)
     if "guard_limit_bytes" in out and "guard_usage_bytes" in out:
         out["guard_headroom_bytes"] = max(
             0, out["guard_limit_bytes"] - out["guard_usage_bytes"])
@@ -1015,8 +1015,10 @@ async def _probe(run: PrefillRun, pool: Any) -> None:
             watcher.cancel()
             try:
                 await watcher
-            except BaseException:
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.debug("prefill watcher ended with an error", exc_info=True)
         peak_gpu = 0
         if have_mx:
             try:

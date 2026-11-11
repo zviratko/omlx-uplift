@@ -62,7 +62,7 @@ def load(surface: str) -> list[dict]:
             logger.warning(f"bench history {surface}: corrupt file moved "
                            f"aside ({e})")
         except Exception:
-            pass
+            logger.debug("corrupt bench history could not be moved aside", exc_info=True)
         return []
 
 

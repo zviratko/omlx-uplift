@@ -127,7 +127,7 @@ def _kill_live() -> None:
             try:
                 p.kill()
             except Exception:
-                pass
+                logger.debug("embed child kill failed", exc_info=True)
 
 
 _atexit_registered = False
@@ -293,7 +293,7 @@ def _api_key() -> str:
             if k:
                 return k
     except Exception:
-        pass
+        logger.debug("server api key unreadable, fallback used", exc_info=True)
     import json as _json
     base = Path(os.environ.get("OMLX_BASE_PATH")
                 or (Path.home() / ".omlx"))
@@ -318,7 +318,7 @@ def _base_root() -> str:
             if port:
                 return f"http://127.0.0.1:{int(port)}"
     except Exception:
-        pass
+        logger.debug("server port unreadable, fallback used", exc_info=True)
     return f"http://127.0.0.1:{os.environ.get('OMLX_PORT', '8001')}"
 
 
@@ -387,7 +387,7 @@ async def _run_one(run: EmbedRun, task: str, i: int, n: int, pool: Any) -> None:
                 for raw in proc.stdout:
                     loop.call_soon_threadsafe(lines.put_nowait, raw)
             except Exception:
-                pass
+                logger.debug("embed child stdout reader stopped", exc_info=True)
             finally:
                 loop.call_soon_threadsafe(lines.put_nowait, None)
 

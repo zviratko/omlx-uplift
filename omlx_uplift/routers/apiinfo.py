@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import threading
 import time
@@ -29,6 +30,8 @@ from .base import (api_router, page_router, require_admin, _RedirectToLogin,
                    gzip_or_json)
 from ..request_log import RING_LIMIT, get_request_tracker
 from ..collector import get_collector
+
+_log = logging.getLogger("omlx_uplift.apiinfo")
 
 
 # --------------------------------------------------------------------------
@@ -324,7 +327,7 @@ async def _hardware_facts() -> tuple:
             await asyncio.wait_for(asyncio.to_thread(_probe_hardware, missing),
                                    timeout=_HW_PROBE_TIMEOUT_S)
         except Exception:
-            pass
+            _log.debug("hardware probe incomplete", exc_info=True)
     with _HW_CACHE_LOCK:
         return _HW_CACHE.get("chip"), _HW_CACHE.get("ram_bytes")
 
@@ -348,7 +351,7 @@ def _model_dir_sync() -> Optional[str]:
             if dirs:
                 return str(dirs[0])
         except Exception:
-            pass
+            _log.debug("model dir unreadable from settings", exc_info=True)
     if base:
         return str(Path(base) / "models")
     try:

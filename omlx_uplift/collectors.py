@@ -742,5 +742,5 @@ class MacmonCollector:
                 try:
                     proc.kill()
                 except Exception:  # noqa: BLE001
-                    pass
+                    log.debug("sampler process kill failed", exc_info=True)
         self._proc = None

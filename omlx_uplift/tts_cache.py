@@ -38,12 +38,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+_log = logging.getLogger("omlx_uplift.tts_cache")
 
 MAX_ENTRY_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
@@ -79,8 +82,11 @@ def _load() -> dict:
         if (isinstance(d, dict) and isinstance(d.get("files"), dict)
                 and isinstance(d.get("owners"), dict)):
             return d
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception:
+        # the next save overwrites the unreadable file
+        _log.warning("speech cache index store unreadable, starting empty", exc_info=True)
     return _empty()
 
 

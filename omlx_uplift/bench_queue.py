@@ -638,7 +638,7 @@ def _ensure_pump() -> None:
             # server restart replaces it) can never drain our queue again
             _pump.cancel()
         except Exception:
-            pass
+            logger.debug("stale bench pump not cancelled", exc_info=True)
     _pump = loop.create_task(_pump_loop())
 
 

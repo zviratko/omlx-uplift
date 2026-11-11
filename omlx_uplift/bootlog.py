@@ -87,11 +87,11 @@ def flush() -> None:
         # user's configured level (root) decides what omlx_uplift logs.
         logging.getLogger("omlx_uplift").setLevel(logging.NOTSET)
     except Exception:
-        pass
+        logging.getLogger("omlx_uplift").debug("boot log handler not removed", exc_info=True)
     for rec in buf.records:
         try:
             logging.getLogger(rec.name).log(
                 rec.levelno, rec.getMessage(), exc_info=rec.exc_info)
         except Exception:
-            pass
+            logging.getLogger("omlx_uplift").debug("buffered boot record not re-emitted", exc_info=True)
     buf.records.clear()

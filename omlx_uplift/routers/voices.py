@@ -211,8 +211,11 @@ def _load() -> dict:
         d = json.loads(_index_path().read_text())
         if isinstance(d, dict) and isinstance(d.get("voices"), list):
             return d
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception:
+        # the next save overwrites the unreadable file
+        _log.warning("voices store unreadable, starting empty", exc_info=True)
     return {"version": 1, "voices": []}
 
 
@@ -1435,7 +1438,7 @@ def _store_cache(resp, key: str, owner, voice: str):
             resp.headers["X-Uplift-TTS-Cache"] = "too-big"
     except Exception:
         # a cache that cannot be written must never eat the audio
-        pass
+        _log.debug("speech cache write failed", exc_info=True)
     return resp
 
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -38,6 +39,8 @@ from fastapi import Depends, HTTPException, Request
 
 from .. import tts_cache
 from .base import api_router, require_admin
+
+_log = logging.getLogger("omlx_uplift.chat")
 
 MAX_MESSAGES = 200
 MAX_CONVOS = 200
@@ -62,8 +65,11 @@ def _load() -> dict:
         d = json.loads(p.read_text())
         if isinstance(d, dict) and isinstance(d.get("conversations"), dict):
             return d
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception:
+        # the next save overwrites the unreadable file
+        _log.warning("chat history store unreadable, starting empty", exc_info=True)
     return {"version": 1, "conversations": {}}
 
 
@@ -319,7 +325,7 @@ async def chat_key(is_admin: bool = Depends(require_admin)):
         if gs is not None:
             key = str(getattr(gs.auth, "api_key", "") or "")
     except Exception:
-        pass
+        _log.debug("server api key unreadable, settings file used", exc_info=True)
     if not key:
         cfg = Path.home() / ".omlx" / "settings.json"
         try:

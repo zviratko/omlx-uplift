@@ -288,7 +288,7 @@ def boot_check(store=None) -> dict | None:
                 "omlx` (details: `omlx-uplift doctor`).",
                 n, rep.get("n_checked", 0), worst, more)
         except Exception:
-            pass
+            logging.getLogger("omlx_uplift").debug("tree drift warning not logged", exc_info=True)
         return rep
     except Exception:  # the doctor must never be the reason a boot fails
         return None

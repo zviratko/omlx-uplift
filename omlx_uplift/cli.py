@@ -9,6 +9,7 @@ omlx-dev build-scope patches and the brew-upgrade workflow.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import site
 import subprocess
@@ -19,6 +20,8 @@ from pathlib import Path
 # too and devsrc must not import cli). These aliases keep the public-ish
 # names the CLI and its tests already use.
 from . import brewutil as _brewutil
+
+_log = logging.getLogger("omlx_uplift.cli")
 
 PTH_NAME = _brewutil.PTH_NAME
 _resolve_site_packages = _brewutil.resolve_site_packages
@@ -122,7 +125,7 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                                 "reversal": rev})
                     continue
             except Exception:
-                pass
+                _log.debug("fast verify failed, full check follows", exc_info=True)
         pf = ver.get("patch_file")
         data = None
         if pf:

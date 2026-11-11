@@ -497,7 +497,7 @@ def _dev_build_info_sync() -> dict:
 
             keg = kegstash.active_keg() or None
         except Exception:
-            pass
+            _LOG.debug("active keg unknown", exc_info=True)
         return {"installed": True,
                 "base_sha": base or None,
                 "keg": keg,
