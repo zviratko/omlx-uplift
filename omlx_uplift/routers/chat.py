@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -42,6 +43,12 @@ MAX_MESSAGES = 200
 MAX_CONVOS = 200
 MAX_STORE_BYTES = 8 * 1024 * 1024
 TITLE_CHARS = 48
+
+# BUG-8: one lock for every load-change-save of the store. Writers run in
+# worker threads (asyncio.to_thread); without it two saves raced on the shared
+# .tmp name (FileNotFoundError -> 500) and the later writer dropped the earlier
+# change.
+_STORE_LOCK = threading.Lock()
 
 
 def store_path() -> Path:
@@ -373,17 +380,26 @@ async def chat_history_get(conv_id: str, is_admin: bool = Depends(require_admin)
 @api_router.post("/chat/history")
 async def chat_history_save(request: Request,
                             is_admin: bool = Depends(require_admin)):
-    body = await request.json()
-    cid = str((body or {}).get("id") or "").strip()
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    cid = str(body.get("id") or "").strip()
     if not cid or len(cid) > 64:
         raise HTTPException(status_code=400, detail="conversation id required")
-    msgs = (body or {}).get("messages")
+    msgs = body.get("messages")
     if msgs is None:
         raise HTTPException(status_code=400, detail="messages required")
     if not isinstance(msgs, list):
         raise HTTPException(status_code=400, detail="messages must be a list")
 
     def _sync():
+        with _STORE_LOCK:
+            return _save_locked()
+
+    def _save_locked():
         store = _load()
         existing = store["conversations"].get(cid) or {}
         conv = {
@@ -456,6 +472,10 @@ async def chat_history_save(request: Request,
 async def chat_history_delete(conv_id: str,
                               is_admin: bool = Depends(require_admin)):
     def _sync():
+        with _STORE_LOCK:
+            return _delete_locked()
+
+    def _delete_locked():
         store = _load()
         if conv_id not in store["conversations"]:
             raise HTTPException(status_code=404, detail="conversation not found")

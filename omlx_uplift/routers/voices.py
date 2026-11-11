@@ -98,6 +98,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import functools
 import io
 import json
 import logging
@@ -109,6 +110,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+import weakref
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
@@ -217,9 +219,40 @@ def _load() -> dict:
 def _save(store: dict) -> None:
     p = _index_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(store, ensure_ascii=False, indent=1))
-    tmp.replace(p)
+    # BUG-8: a private temp name per write. The shared 'voices.json.tmp' let a
+    # seed thread and a route rename the same file (FileNotFoundError -> 500).
+    fd, tmp = tempfile.mkstemp(prefix=".voices.", suffix=".tmp", dir=p.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(store, ensure_ascii=False, indent=1))
+        os.replace(tmp, p)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+# BUG-8: writer routes load, await (say probes, WAV conversion) and then save.
+# Without a lock a second writer could load the same old store in between and
+# its save dropped the first change. One asyncio.Lock per event loop (tests run
+# several loops; a lock is bound to the loop that first waits on it).
+_store_alocks: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _store_alock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lk = _store_alocks.get(loop)
+    if lk is None:
+        lk = _store_alocks[loop] = asyncio.Lock()
+    return lk
+
+
+def _store_writer(fn):
+    """Run a writer route with the store lock held from load to save."""
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        async with _store_alock():
+            return await fn(*args, **kwargs)
+    return wrapper
 
 
 def _slug(name: str, taken: set) -> str:
@@ -723,7 +756,8 @@ async def voices_list(_auth=Depends(require_admin)):
                 _save(s)
                 return s
         try:
-            seeded = await asyncio.to_thread(_seed_once)
+            async with _store_alock():          # BUG-8: no writer in between
+                seeded = await asyncio.to_thread(_seed_once)
             if seeded is not None:
                 store = seeded
         except Exception:
@@ -901,6 +935,7 @@ async def voices_say_list(_auth=Depends(require_admin)):
 
 
 @api_router.post("/voices/say/limits")
+@_store_writer
 async def voices_say_limits(request: Request, _auth=Depends(require_admin)):
     """SAY-6: the segment limit for long spoken replies. Body {chunk_chars} -
     how many characters go into one `say` call before the reply is cut at a
@@ -926,6 +961,7 @@ async def voices_say_limits(request: Request, _auth=Depends(require_admin)):
 
 
 @api_router.post("/voices/say/preferred")
+@_store_writer
 async def voices_say_preferred(request: Request, _auth=Depends(require_admin)):
     """SAY-2: mark which system voice answers for a language. Body
     {locale, identifier}: the pair 'cs-CZ' + 'com.apple.voice…Zuzana'
@@ -961,6 +997,7 @@ async def voices_say_preferred(request: Request, _auth=Depends(require_admin)):
 
 
 @api_router.post("/voices/say/chat")
+@_store_writer
 async def voices_say_chat(request: Request, _auth=Depends(require_admin)):
     """SAY-CHAT (user 2026-10-21): the per-voice 'make available for Uplift
     web chat' switch. Body {identifier, on}. on=true stores the voice as
@@ -1077,6 +1114,7 @@ async def voices_tts_defaults_get(_auth=Depends(require_admin)):
 
 
 @api_router.post("/voices/tts/defaults")
+@_store_writer
 async def voices_tts_defaults_set(request: Request,
                                   _auth=Depends(require_admin)):
     """TTS-1: set or clear one model's default speaker/instructions/
@@ -1152,6 +1190,7 @@ async def voices_tts_speak(request: Request, _auth=Depends(require_admin)):
 
 
 @api_router.post("/voices")
+@_store_writer
 async def voices_create(request: Request, _auth=Depends(require_admin)):
     raw = await request.json()
     if not isinstance(raw, dict):
@@ -1238,6 +1277,7 @@ async def voices_create(request: Request, _auth=Depends(require_admin)):
 
 
 @api_router.put("/voices/{vid}")
+@_store_writer
 async def voices_update(vid: str, request: Request,
                         _auth=Depends(require_admin)):
     raw = await request.json()
@@ -1292,6 +1332,7 @@ async def voices_update(vid: str, request: Request,
 
 
 @api_router.delete("/voices/{vid}")
+@_store_writer
 async def voices_delete(vid: str, _auth=Depends(require_admin)):
     store = _load()
     v = _find(store, vid)
