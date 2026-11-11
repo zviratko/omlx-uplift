@@ -13,6 +13,8 @@ users never see.
 
 ## Unreleased
 
+- **Server Settings follow upstream's new scheduler control.** The Decode Fairness switch is now the Concurrent Request Priority choice (Prefill First / Balanced / Decode First), and Long Prompt Handling keeps its upstream-renamed labels.
+
 ## [3.3] - 2026-11-10
 
 - **macOS speech on the plain API is now the upstream design.** The patched-in `say` engine on `POST /v1/audio/speech` is gone: that door answers `model: "macos-say"` instead, from the minimal version we submitted upstream (PR #5076), with the voice named in the `voice` field and language detection in Settings > Integrations. Anything outside the board that posts `model: "say"` to `/v1/audio/speech` must switch to `macos-say`, and that door caps one request at 4096 characters.

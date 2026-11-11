@@ -101,8 +101,12 @@ const GS_LABELS = {
         batch: 'Embedding Batch Size',
         batch_hint: 'Texts encoded per embedding forward pass.',
         chunked: 'Chunked Prefill', chunked_desc: C.tf('uplift.ui.split_long_prompts_to_interleave_with_decode', 'Split long prompts to interleave with decode.'),
-        fairness: 'Decode Fairness', fairness_desc: C.tf('uplift.ui.round_robin_decode_slots_across_requests', 'Round-robin decode slots across requests.'),
-        prio: 'Prefill Priority', prio_speed: 'Speed', prio_context: 'Max Context',
+        // SYNC-1 run 22 (upstream 09ad2e9 #5164): classic replaced the
+        // decode_fairness toggle with this 3-way select; EN values verbatim.
+        cprio: 'Concurrent Request Priority',
+        cprio_desc: 'What runs first when a new prompt arrives while other responses are generating. Prefill First can pause them during a long prompt.',
+        cprio_prefill: 'Prefill First', cprio_balanced: 'Balanced', cprio_decode: 'Decode First',
+        prio: 'Long Prompt Handling', prio_speed: 'Full Speed', prio_context: 'Max Context',
         guard: 'Prefill Memory Guard',
         guard_desc: C.tf('uplift.ui.refuse_prefill_when_free_memory_is_below_the_gua', 'Refuse prefill when free memory is below the guard.'),
         tier: 'Memory Guard Tier',
@@ -2156,11 +2160,16 @@ const GS_SPEC = [
         flat: 'embedding_batch_size', min: 1}},
     {sec: 'res', lab: 'res.chunked', hint: 'res.chunked_desc', ctl: {
         k: 'tog', sec: 'scheduler', field: 'chunked_prefill', flat: 'chunked_prefill'}},
+    // SYNC-1 run 22 (upstream 09ad2e9 #5164): classic's 3-way select, in
+    // classic's row order and option order; live-applied (no restart badge).
+    {sec: 'res', lab: 'res.cprio', hint: 'res.cprio_desc', ctl: {
+        k: 'sel', sec: 'scheduler', field: 'concurrent_priority', flat: 'concurrent_priority',
+        opts: () => [['prefill', GS_LABELS.res.cprio_prefill],
+                     ['balanced', GS_LABELS.res.cprio_balanced],
+                     ['decode', GS_LABELS.res.cprio_decode]]}},
     {sec: 'res', lab: 'res.prio', ctl: {
         k: 'sel', sec: 'scheduler', field: 'prefill_priority', flat: 'prefill_priority',
         opts: () => [['speed', GS_LABELS.res.prio_speed], ['context', GS_LABELS.res.prio_context]]}},
-    {sec: 'res', lab: 'res.fairness', hint: 'res.fairness_desc', ctl: {
-        k: 'tog', sec: 'scheduler', field: 'decode_fairness', flat: 'decode_fairness'}},
     {sec: 'res', lab: 'res.guard', hint: 'res.guard_desc', ctl: {
         k: 'tog', sec: 'memory', field: 'prefill_memory_guard', flat: 'memory_prefill_memory_guard'}},
     {sec: 'res', lab: 'res.tier', ctl: {

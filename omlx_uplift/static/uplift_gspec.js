@@ -35,7 +35,9 @@ const GS_MAP = {
     embedding_batch_size: ['scheduler','embedding_batch_size'],
     chunked_prefill: ['scheduler','chunked_prefill'],
     prefill_priority: ['scheduler','prefill_priority'],
-    decode_fairness: ['scheduler','decode_fairness'],
+    // SYNC-1 run 22 (upstream 09ad2e9 #5164): concurrent_priority replaces
+    // the decode_fairness on/off form (classic dropped it from its payload).
+    concurrent_priority: ['scheduler','concurrent_priority'],
     cache_enabled: ['cache','enabled'],
     ssd_cache_dir: ['cache','ssd_cache_dir'],
     hot_cache_only: ['cache','hot_cache_only'],

@@ -110,7 +110,12 @@ test('GS_MAP + integration keys cover the full GlobalSettingsRequest schema', { 
     // the claude_code_desktop_enabled edge / the dedicated
     // /admin/api/claude-desktop/* endpoints (default False = never
     // restart the app unattended).
-    const LEGACY = new Set(['model_dir', 'gdn_ssd_split_enabled', 'restart_desktop']);
+    // decode_fairness (SYNC-1 run 22, upstream 09ad2e9 #5164) is the OLD
+    // on/off form of concurrent_priority: the server derives it from
+    // concurrent_priority and classic dropped it from its save payload —
+    // uplift mirrors classic and sends the modern key only.
+    const LEGACY = new Set(['model_dir', 'gdn_ssd_split_enabled', 'restart_desktop',
+                            'decode_fairness']);
     assert.deepStrictEqual(missing.filter(k => !LEGACY.has(k)), [],
         `schema keys missing from Uplift save payload: ${missing.join(', ')}`);
 });
