@@ -3065,8 +3065,8 @@ function toolbar() {
     // row rides over as model 'say:<identifier>', a stored voice as
     // {model, voice}, so the same choice answers at both doors.
     var routeSel = el('select'); routeSel.id = 'chat-native-speak-route';
-    [['uplift', 'uplift.chat.speak_route_uplift', 'Uplift engine'],
-     ['vanilla', 'uplift.chat.speak_route_vanilla', 'Vanilla API']
+    [['uplift', 'uplift.chat.speak_route_uplift', 'Uplift API'],
+     ['vanilla', 'uplift.chat.speak_route_vanilla', 'oMLX API']
     ].forEach(function (o) {
         var e2 = el('option', null, tf2(o[1], o[2]));
         e2.value = o[0];

@@ -400,7 +400,7 @@ function mount() {
     host.replaceChildren();
     var strip = el('div', 'native-subtabs');
     [['throughput', t('navbar.dropdown.performance', 'Throughput')],
-     ['accuracy', t('navbar.dropdown.accuracy', 'Intelligence')],
+     ['accuracy', t('uplift.bench.accuracy', 'Accuracy')],
      ['context', t('navbar.dropdown.context', 'Context')],
      ['ane', t('uplift.bench.ane_tune', 'ANE Tune')],
      ['embed', t('uplift.bench.embeddings', 'Embeddings')],
@@ -475,7 +475,7 @@ function mtebPanel(kind) {
 
 function stubCard(sub) {
     var card = el('div', 'native-stub card');
-    var titles = { accuracy: ['navbar.dropdown.accuracy', 'Intelligence'],
+    var titles = { accuracy: ['uplift.bench.accuracy', 'Accuracy'],
                    context: ['navbar.dropdown.context', 'Context'],
                    ane: ['uplift.bench.ane_tune', 'ANE Tune'] };
     var tt = titles[sub] || titles.ane;
@@ -503,7 +503,7 @@ var BENCHQ_KIND_LABEL = {
     rerank:     ['uplift.bench.rerankers', 'Rerankers'],
     throughput: ['navbar.dropdown.performance', 'Throughput'],
     context:    ['navbar.dropdown.context', 'Context'],
-    accuracy:   ['navbar.dropdown.accuracy', 'Intelligence'],
+    accuracy:   ['uplift.bench.accuracy', 'Accuracy'],
     ane:        ['uplift.bench.ane_tune', 'ANE Tune']
 };
 // kind -> the sub key showSub() uses, for the running-entry hand-back
@@ -523,12 +523,12 @@ var BENCHQ = {
         box.id = 'bench-queue';
         box.hidden = true;                 // empty queue: no second column
         var head = el('div', 'bench-queue-head',
-            t('uplift.bench.queue_title', 'Bench Queue'));
+            t('uplift.bench.queue_title', 'Benchmark queue'));
         // U59 doctrine: labels painted before the locale fetch land carry
         // their key + the English shown, so applyI18n() repairs them — the
         // header is built once per mount and never re-rendered by the poll.
         head.dataset.i18n = 'uplift.bench.queue_title';
-        head.dataset.en = t('uplift.bench.queue_title', 'Bench Queue');
+        head.dataset.en = t('uplift.bench.queue_title', 'Benchmark queue');
         box.appendChild(head);
         var list = el('div', 'bench-queue-list acc-queue');
         list.id = 'bench-queue-list';
@@ -4006,7 +4006,7 @@ var ACC = {
     form: function () {
         var self = this;
         var f = el('div', 'bench-form card');
-        f.appendChild(el('h2', null, t('acc_bench.heading', 'Intelligence Benchmark')));
+        f.appendChild(el('h2', null, t('uplift.bench.accuracy_heading', 'Accuracy benchmark')));
         f.appendChild(el('p', 'native-stub-note', t('acc_bench.description',
             'Multiple-choice and generation accuracy across 16 community benchmarks.')));
 

@@ -58,9 +58,11 @@ def test_tts1_keys_present_and_consistent(loc):
 
 
 def test_tts1_renamed_menu_in_english():
+    # U87 P8: the page manages model and macOS voices plus speech input,
+    # so the menu and the page title both say Voices
     en = _load("en")
-    assert en["uplift.tab.voices"] == "TTS & Voices"
-    assert en["uplift.page.voices_full"] == "TTS & Voices"
+    assert en["uplift.tab.voices"] == "Voices"
+    assert en["uplift.page.voices_full"] == en["uplift.tab.voices"]
 
 
 _CALL_RE = re.compile(r"\b(?:C\.|c\.)?tf\(|\bvcTabBtn\(")
@@ -151,5 +153,7 @@ def test_tts1_js_fallbacks_match_en(js):
 
 def test_index_html_fallbacks_match_en():
     html = (_STATIC / "index.html").read_text()
-    assert 'data-i18n="uplift.tab.voices">TTS &amp; Voices<' in html
-    assert 'data-i18n="uplift.page.voices_full">TTS &amp; Voices<' in html
+    en = _load("en")
+    for key in RENAMED:
+        cold = en[key].replace("&", "&amp;")
+        assert f'data-i18n="{key}">{cold}<' in html, key

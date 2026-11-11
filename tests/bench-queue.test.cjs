@@ -85,7 +85,7 @@ function makeHarness() {
 
 const CAT = {   // fake merged catalog: classic + uplift keys, one marker lang
     'navbar.dropdown.performance': 'SUBTP',
-    'navbar.dropdown.accuracy': 'SUBACC',
+    'uplift.bench.accuracy': 'SUBACC',
     'navbar.dropdown.context': 'SUBCTX',
     'uplift.bench.ane_tune': 'SUBANE',
     'uplift.bench.embeddings': 'SUBEMB',
@@ -241,7 +241,7 @@ test('BENCHQ render: one row per entry, kind badge + model + packs + status', as
     // kind badge = the subtab's own label (no new vocabulary)
     assert.ok(sub(acc, 'bench-queue-kind').textContent === 'SUBACC',
         'accuracy badge = the subtab label');
-    assert.equal(sub(acc, 'bench-queue-kind').dataset.i18n, 'navbar.dropdown.accuracy',
+    assert.equal(sub(acc, 'bench-queue-kind').dataset.i18n, 'uplift.bench.accuracy',
         'badge carries its key (U59: a late catalog repairs it)');
     assert.equal(sub(BQ.box, 'bench-queue-head').dataset.i18n,
         'uplift.bench.queue_title', 'header carries its key');

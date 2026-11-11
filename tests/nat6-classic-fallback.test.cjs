@@ -57,7 +57,7 @@ test('NAT-6 markup: bench/chat embed cards carry the Native switch badge; cluste
             '<a data-mode="native"[^>]*class="embed-mode-switch" data-for="' + id +
             '"[^>]*>[^<]*<\\/a>'));
         assert.ok(b, id + ' embed card has the switch badge');
-        assert.ok(/hidden>Native<\/a>$/.test(b[0]),
+        assert.ok(/hidden>Uplift<\/a>$/.test(b[0]),
             id + ' badge starts hidden (JS reveals it only when native exists)');
     }
     assert.ok(!/data-for="cluster-page"/.test(html),

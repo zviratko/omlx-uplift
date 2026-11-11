@@ -34,6 +34,10 @@ TECH_WORDS = {
     # U69: product/brand names shown untranslated on purpose (the user
     # dictated the spelling 'oMLX Classic'; LM-Eval is the tool's name)
     "Classic", "LM-Eval",
+    # U87: Uplift is the product name (route label 'Uplift API', surface
+    # label 'Uplift'); KV is the cache acronym; Benchmarks is the accepted
+    # loanword in es/fr/pt-BR navigation, like Patches
+    "Uplift", "KV", "Benchmarks",
     # SYNC-1 (upstream f27ba3d): 'Claude Desktop' is the app's product name —
     # upstream carries it verbatim in all 10 locales (status.claude_code.desktop)
     "Desktop",

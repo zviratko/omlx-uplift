@@ -259,7 +259,10 @@ test('every locale got a real translation, not the English string', () => {
         const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
         keys.forEach(k => {
             assert.ok(d[k], f + ' is missing ' + k);
-            if (f !== 'en.json' && k !== 'uplift.chat.speak_route_vanilla')
+            // the two route names are product + API acronym (U87 P10):
+            // several locales keep 'Uplift API' / 'oMLX API' verbatim
+            if (f !== 'en.json' && k !== 'uplift.chat.speak_route_vanilla'
+                && k !== 'uplift.chat.speak_route_uplift')
                 assert.notStrictEqual(d[k], en[k], f + ' copies en for ' + k);
         });
     });

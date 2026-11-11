@@ -440,7 +440,7 @@ function applyTab() {
     // dropdown button labels get rebuilt (the toggle above may wipe them)
     for (const dd of [['dd-status-btn', 'uplift.tab.status', 'Status'],
                       ['dd-models-btn', 'uplift.tab.models', 'Models'],
-                      ['dd-bench-btn', 'navbar.tab.bench', 'Bench'],
+                      ['dd-bench-btn', 'uplift.tab.bench', 'Benchmarks'],
                       ['dd-settings-btn', 'uplift.tab.settings', 'Server Settings']]) {
         const btn = $(dd[0]);
         if (!btn) continue;
@@ -2100,7 +2100,7 @@ $('btn-layout-reset').onclick = () => {
     // board), and there are now two boards. A reset that silently cleared the
     // view the user is NOT looking at would eat work, so it says what goes.
     const ask = C.tf('uplift.layout.reset_both_confirm',
-        'Reset layout: both Status and Status extended boards go back to their shipped arrangement, together with the chart window and poll interval. Continue?');
+        'Reset layout: both the Status and Detailed status dashboards return to their shipped arrangement, together with the chart window and the poll interval. Continue?');
     if (window.confirm && !window.confirm(ask)) return;
     Object.assign(layout, C.LAYOUT_DEFAULTS);
     delete layout.boards; delete layout.boardsV1;
