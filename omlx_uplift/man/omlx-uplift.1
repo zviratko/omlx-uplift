@@ -126,6 +126,28 @@ The same update over every re-fetchable source, enabled and disabled
 patches alike; upload sources are skipped with a note and one failing
 gate never stops the rest.
 .It Xo Ic patch
+.Ic rebase Ar id
+.Op Fl -continue
+.Xc
+Carry your own build patch (an upload, scope dev or both) onto the base the
+next
+.Ic dev install
+uses.
+A detached worktree of the base is made under
+.Pa ~/.omlx/uplift/rebase/ ,
+the desired version is merged in with
+.Ql git apply --3way ,
+and a clean result goes through the normal strict gate and is stored and
+promoted as the next version.
+When files conflict the command stops and names them; edit them in that
+worktree and run it again with
+.Fl -continue .
+Catalog patches and PR or URL sources are refused with the command that
+updates them instead.
+A failed build patch prints the matching command in the
+.Ic dev install
+prompt.
+.It Xo Ic patch
 .Ic enable | disable Ar id
 .Op Fl -approve Ar once|always
 .Xc

@@ -2608,3 +2608,32 @@ def set_config(store, auto_update_check: bool | None = None,
         cfg["default_target"] = default_target
     store.save(manifest)
     return {"config": cfg}
+
+
+def fix_hint(store, patch_id: str) -> str:
+    """One line that tells the operator what makes a failed build patch
+    land again (user 2026-11-12: a PATCH FAILED prompt must name the
+    command, not leave him to find five manual steps). Read-only; the
+    wording follows who owns the bytes:
+      catalog patch -> nothing to do, the next dev upgrade fetches it;
+      PR / URL      -> 'patch update' fetches the source again;
+      own upload    -> 'patch rebase' carries it onto the new base."""
+    try:
+        p = store.find(store.load(), patch_id)
+    except Exception:               # a hint must never break the prompt
+        p = None
+    if p is None:
+        return ""
+    src = p.get("source") or {}
+    kind = src.get("kind")
+    if p.get("curated") and not p.get("curated_adopted"):
+        return ("catalog patch: no version for this base is published yet - "
+                "the next 'omlx-uplift dev upgrade' fetches it when it ships")
+    if kind == "github_pr":
+        return (f"source is PR {src.get('repo')}#{src.get('pr')}: when the PR "
+                f"is rebased, run 'omlx-uplift patch update {patch_id}'")
+    if kind == "url":
+        return (f"run 'omlx-uplift patch update {patch_id}' to fetch the URL "
+                "again (works when the file there was rebased)")
+    return (f"run 'omlx-uplift patch rebase {patch_id}' to carry it onto this "
+            "base (stores a new version; conflicts stop for your edit)")

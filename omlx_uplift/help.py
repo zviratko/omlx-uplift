@@ -23,7 +23,7 @@ COMMANDS = [
                 " 'brew upgrade omlx')"),
     ("uninstall", "remove the mount (.pth) again"),
     ("patch", "status|apply|check|disable-all|enable-all|enable|disable|"
-              "update|update-all|promote|rollback|remove|order — patch "
+              "update|update-all|rebase|promote|rollback|remove|order — patch "
               "recovery without the dashboard ('patches' = legacy alias)"),
     ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
     ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
@@ -60,6 +60,8 @@ COMMAND_USAGE = {
               "                 patch update ID [--file F | --pr R/N | --url U]"
               " [--approve once|always]\n"
               "                 patch update-all\n"
+              "                 patch rebase ID [--continue]  (own build "
+              "patch onto the new base)\n"
               "                 patch enable|disable ID [--approve"
               " once|always]\n"
               "                 patch approve ID [--approve once|always]\n"

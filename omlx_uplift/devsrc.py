@@ -570,6 +570,13 @@ def _apply_with_ladder(path, store, pid, wanted_v, wanted_bytes, base_sha,
                      ", ".join(f"v{t}" for t in tried))
         raise _PatchSkip({"id": pid, "reason": str(first_exc),
                           "tried": tried})
+    if not on_patch_failure:
+        # dashboard / scripted build: no prompt printed the way out, so the
+        # abort reason carries it (PATCH-REBASE, user 2026-11-12)
+        from . import patchsource
+        hint = patchsource.fix_hint(store, pid)
+        if hint:
+            raise DevsrcError(f"{first_exc} - fix: {hint}") from first_exc
     raise first_exc
 
 
@@ -2786,3 +2793,188 @@ def apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> None:
     """Public alias of the materialize-internal single-patch apply (BE-1(4):
     cli must not call _apply_one)."""
     return _apply_one(path, pid, v, diff_bytes)
+
+
+# ---------------------------------------------------------------------------
+# PATCH-REBASE (user 2026-11-12): a user's own build patch that no longer
+# applies onto a new base used to need five hand-typed git/CLI steps. The
+# build prompt now names one command; this is it.
+# ---------------------------------------------------------------------------
+
+def rebase_dir(store, pid: str) -> str:
+    """Where a rebase in progress lives (a detached worktree of dev-src at
+    the build base). Kept OUTSIDE dev-src so a re-cut of uplift-dev never
+    touches it, and per patch so two rebases cannot collide."""
+    return os.path.join(store.base_dir, "rebase", pid)
+
+
+def _rebase_drop(path: str, wt: str) -> None:
+    _git(["worktree", "remove", "--force", wt], cwd=path, check=False)
+    shutil.rmtree(wt, ignore_errors=True)
+    _git(["worktree", "prune"], cwd=path, check=False)
+    try:
+        os.unlink(wt + ".base")
+    except OSError:
+        pass
+
+
+def _diff_paths(diff_bytes: bytes) -> list[str]:
+    from . import diffapply
+    parsed = diffapply.parse_diff(diff_bytes or b"")
+    if not parsed.get("ok"):
+        return []
+    return sorted({f.get("path") for f in parsed.get("files", [])
+                   if f.get("path")})
+
+
+def rebase_patch(store, pid: str, tree_root: str = "",
+                 cont: bool = False, fetch: bool = True) -> dict:
+    """`omlx-uplift patch rebase <id> [--continue]`: carry a user's own
+    build patch (upload kind, scope dev/both) onto the base the next
+    `dev install` will use, and store the result as the next version.
+
+    1. fetch the sync ref, make a detached worktree of the build base;
+    2. `git apply --3way` the DESIRED version (git uses the diff's blob ids
+       to merge for real, so a context-only shift lands with no conflict);
+    3. conflicts -> stop, keep the worktree, name the files; the operator
+       edits them and runs `--continue`;
+    4. clean -> regenerate the diff from the tree, compile-check every touched
+       python file, reset the worktree to the base and hand the bytes to
+       patchsource.update_patch with the worktree as build root: the SAME
+       strict zero-fuzz gate as every other add, then promote.
+    The gate is never loosened: the 3-way merge only produces candidate
+    bytes, and those bytes must pass the normal strict gate."""
+    from . import patchsource
+
+    cfg = load_config()
+    if not cfg:
+        return {"ok": False, "reason": "omlx-dev is not set up on this "
+                "machine - run 'omlx-uplift dev install' first"}
+    manifest = store.load()
+    p = store.find(manifest, pid)
+    if p is None:
+        return {"ok": False, "reason": f"unknown patch id: {pid}"}
+    src = p.get("source") or {}
+    if p.get("curated") and not p.get("curated_adopted"):
+        return {"ok": False, "reason": (
+            f"{pid} comes from the curated catalog: its new version arrives "
+            "with the next 'omlx-uplift dev upgrade' when it is published. "
+            f"To keep your own rebased copy instead, run 'omlx-uplift patch "
+            f"adopt {pid}' first")}
+    if src.get("kind") in ("github_pr", "url"):
+        return {"ok": False, "reason": (
+            f"{pid} follows an online source ({src.get('kind')}): update that "
+            f"source, then run 'omlx-uplift patch update {pid}'")}
+    if not _patches.scope_touches_dev(_patches.patch_scope(p)):
+        return {"ok": False, "reason": (
+            f"{pid} is a runtime patch (scope omlx); rebase works on build "
+            "patches (scope dev or both)")}
+
+    path = src_path(cfg)
+    wt = rebase_dir(store, pid)
+    old_v = p.get("desired_version")
+    ver = store.get_version(p, old_v)
+    old = patchsource._read_patch_file(store, ver) if ver else None
+    if not old:
+        return {"ok": False, "reason": f"{pid}: stored v{old_v} bytes are "
+                "missing from the store"}
+
+    if cont:
+        try:
+            with open(wt + ".base") as fh:
+                base = fh.read().strip()
+        except OSError:
+            base = ""
+        if not base or not os.path.isdir(wt):
+            return {"ok": False, "reason": (
+                f"no rebase of {pid} is in progress - run 'omlx-uplift patch "
+                f"rebase {pid}' first")}
+    else:
+        if fetch:
+            fetch_sync_ref(cfg)
+        base = base_sha_of(cfg)
+        if not base:
+            return {"ok": False, "reason": f"sync ref {cfg.get('sync_ref')} "
+                    "is not fetched"}
+        _rebase_drop(path, wt)
+        os.makedirs(os.path.dirname(wt), exist_ok=True)
+        _git(["worktree", "add", "--detach", "-q", wt, base], cwd=path)
+        with open(wt + ".base", "w") as fh:
+            fh.write(base + "\n")
+        with tempfile.NamedTemporaryFile(suffix=".diff", delete=False) as tf:
+            tf.write(old)
+            tmpdiff = tf.name
+        try:
+            proc = _git(["apply", "--3way", "--whitespace=nowarn", tmpdiff],
+                        cwd=wt, check=False)
+        finally:
+            os.unlink(tmpdiff)
+        unmerged = _git(["diff", "--name-only", "--diff-filter=U"],
+                        cwd=wt, check=False).stdout.split()
+        if unmerged:
+            return {"ok": False, "stage": "conflict", "worktree": wt,
+                    "base": base, "conflicts": unmerged, "reason": (
+                        f"{pid} v{old_v}: {len(unmerged)} file(s) need a "
+                        f"human decision: {', '.join(unmerged)}. Edit them in "
+                        f"{wt} (remove the <<<<<<< / >>>>>>> markers), then "
+                        f"run 'omlx-uplift patch rebase {pid} --continue'")}
+        if proc.returncode != 0:
+            msg = (proc.stderr or proc.stdout or "").strip().splitlines()
+            _rebase_drop(path, wt)
+            return {"ok": False, "stage": "apply", "reason": (
+                f"{pid} v{old_v}: git could not merge it onto "
+                f"{base[:12]}: {msg[-1] if msg else proc.returncode}")}
+
+    # finish: stage everything, refuse leftover markers, regenerate
+    _git(["add", "-A"], cwd=wt)
+    if _git(["diff", "--name-only", "--diff-filter=U"], cwd=wt,
+            check=False).stdout.split():
+        return {"ok": False, "stage": "conflict", "worktree": wt,
+                "base": base, "reason": "unresolved files remain"}
+    raw = subprocess.run(["git", "diff", "--cached", "--binary", base],
+                         cwd=wt, capture_output=True)
+    new = raw.stdout
+    if raw.returncode != 0 or not new.strip():
+        return {"ok": False, "worktree": wt, "reason": (
+            "the rebased tree has no changes against the base - is the "
+            "patch already upstream? check with 'omlx-uplift patch status'")}
+    marked = [ln for ln in new.splitlines()
+              if ln.startswith((b"+<<<<<<< ", b"+>>>>>>> "))
+              or ln == b"+======="]
+    if marked:
+        return {"ok": False, "stage": "conflict", "worktree": wt,
+                "base": base, "reason": (
+                    f"conflict markers are still in the files under {wt} - "
+                    f"remove them, then run 'omlx-uplift patch rebase {pid} "
+                    "--continue'")}
+    new_paths = _diff_paths(new)
+    compile_errors = []
+    for rel in new_paths:
+        full = os.path.join(wt, rel)
+        if rel.endswith(".py") and os.path.isfile(full):
+            try:
+                with open(full, "rb") as fh:
+                    compile(fh.read(), rel, "exec", dont_inherit=True)
+            except (SyntaxError, ValueError) as exc:
+                compile_errors.append(f"{rel}: {exc}")
+    if compile_errors:
+        return {"ok": False, "stage": "compile", "worktree": wt,
+                "base": base, "reason": "; ".join(compile_errors[:5])}
+
+    # gate against the PRISTINE base: reset the worktree, then the normal
+    # strict add/update lane decides (store vN+1, tested_base, promote)
+    _git(["reset", "-q", "--hard", base], cwd=wt)
+    _git(["clean", "-fdq"], cwd=wt)
+    res = patchsource.update_patch(store, pid, tree_root,
+                                   source={"kind": "upload", "data": new},
+                                   build_root=wt)
+    res = dict(res)
+    res["rebased_from"] = old_v
+    res["base"] = base
+    old_paths = _diff_paths(old)
+    if set(old_paths) != set(new_paths):
+        res["file_set_changed"] = {
+            "added": sorted(set(new_paths) - set(old_paths)),
+            "dropped": sorted(set(old_paths) - set(new_paths))}
+    _rebase_drop(path, wt)
+    return res

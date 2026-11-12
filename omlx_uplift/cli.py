@@ -894,6 +894,10 @@ def cmd_patches(argv=None) -> int:
                    UPDATE-ADOPT: after storing, the newest version becomes
                    desired and the patch enables (safeguard holds still
                    need --approve) — an update you asked for takes effect.
+      rebase       carry an own build patch (upload, scope dev/both) onto
+                   the next build base: 3-way merge in a detached worktree,
+                   then the normal strict gate stores + promotes vN+1.
+                   Conflicts stop with the file list; --continue finishes.
       update-all   'update' over every re-fetchable source (github_pr +
                    url, enabled AND disabled; uploads skipped with a note;
                    one failing gate never stops the rest)
@@ -934,13 +938,16 @@ def cmd_patches(argv=None) -> int:
                                        "update", "enable", "disable",
                                        "remove", "approve", "promote",
                                        "rollback", "update-all", "curated",
-                                       "adopt", "order"])
+                                       "adopt", "order", "rebase"])
     ap.add_argument("id", nargs="?",
                     help="patch id (add/update/enable/disable/remove/"
                          "approve/order)")
     ap.add_argument("value", nargs="?",
                     help="order: apply priority 0-9999, LOWER applies first "
                          "when two enabled patches change the same lines")
+    ap.add_argument("--continue", action="store_true", dest="cont",
+                    help="rebase: finish after you resolved the conflicts "
+                         "in the rebase worktree")
     ap.add_argument("--to-v", type=int, dest="to_v", default=None,
                     help="rollback: stored version to make desired "
                          "(default: the one before the current desired)")
@@ -1072,6 +1079,27 @@ def cmd_patches(argv=None) -> int:
                   "dev (dev-src only)", file=sys.stderr)
             return 3
         print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+
+    if args.action == "rebase":
+        # PATCH-REBASE: carry an own build patch onto the next build base
+        if not args.id:
+            ap.error("rebase needs a patch id")
+        from . import devsrc
+        try:
+            out = devsrc.rebase_patch(store, args.id, tree_root,
+                                      cont=args.cont)
+        except devsrc.DevsrcError as exc:
+            out = {"ok": False, "reason": str(exc)}
+        print(_json.dumps(out, indent=2))
+        if out.get("ok"):
+            print(f"{args.id}: rebased v{out.get('rebased_from')} onto "
+                  f"{str(out.get('base'))[:12]} -> stored as "
+                  f"v{out.get('desired_version') or out.get('newest_version')}"
+                  "; run 'omlx-uplift dev upgrade' to build it",
+                  file=sys.stderr)
+        elif out.get("reason"):
+            print(f"{args.id}: {out['reason']}", file=sys.stderr)
         return 0 if out.get("ok") else 1
 
     if args.action == "approve":
@@ -1874,6 +1902,13 @@ def _patch_failure_prompt(pid: str, reason: str, tried: list) -> str:
     print(f"  tried: {', '.join('v' + str(t) for t in tried)}")
     for line in (reason or "").splitlines()[:6]:
         print(f"    {line}")
+    try:
+        from . import patchsource, patches as _patches
+        hint = patchsource.fix_hint(_patches.PatchStore(), pid)
+    except Exception:           # the prompt must always reach the question
+        hint = ""
+    if hint:
+        print("  fix: " + hint)
     print("  [1] continue this build WITHOUT " + pid
           + "  (older/newer patch versions missing)")
     print("  [2] stop and keep the current dev build"

@@ -43,6 +43,8 @@ omlx-uplift patch rollback ID [--to-v N]  # undo a promote: previous stored
                                        # version becomes desired again
 omlx-uplift patch approve ID --approve once|always  # safeguard approval only
 omlx-uplift patch update-all           # re-check + adopt every online source
+omlx-uplift patch rebase ID [--continue]  # own build patch onto the new base:
+                                       # 3-way merge, strict gate, new version
 omlx-uplift patch enable-all           # twin of disable-all: sentinel gone,
                                        # flags restored to what it recorded
 ```
