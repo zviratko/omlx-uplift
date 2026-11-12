@@ -626,7 +626,7 @@ const CHAT_PARTS = ['./uplift_chat_attach.js', './uplift_chat_voice.js', './upli
                     './uplift_chat_stt.js'];
 /* SPLIT-3: native bench part files (one per bench panel), loaded before the
    core uplift_bench.js. Same list as BENCH_FILES in tests/static-src.cjs. */
-const BENCH_PARTS = ['./uplift_bench_ane.js', './uplift_bench_acc.js',
+const BENCH_PARTS = ['./uplift_bench_ctx.js', './uplift_bench_ane.js', './uplift_bench_acc.js',
                      './uplift_bench_mteb.js', './uplift_bench_dec.js'];
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
