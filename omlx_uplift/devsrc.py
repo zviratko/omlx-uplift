@@ -2899,6 +2899,15 @@ def rebase_patch(store, pid: str, tree_root: str = "",
         _rebase_drop(path, wt)
         os.makedirs(os.path.dirname(wt), exist_ok=True)
         _git(["worktree", "add", "--detach", "-q", wt, base], cwd=path)
+        # a version that still applies strictly needs no new version:
+        # storing one anyway is churn the next build would not need
+        from . import diffapply
+        if diffapply.check_diff(old, wt).get("ok"):
+            _rebase_drop(path, wt)
+            return {"ok": True, "unchanged": True, "rebased_from": old_v,
+                    "base": base, "note": (
+                        f"v{old_v} still applies onto {base[:12]} - nothing "
+                        "to rebase")}
         with open(wt + ".base", "w") as fh:
             fh.write(base + "\n")
         with tempfile.NamedTemporaryFile(suffix=".diff", delete=False) as tf:

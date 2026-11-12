@@ -182,6 +182,17 @@ class RebaseTests(RebaseFixture):
         self.assertEqual(p["desired_version"], 2)
         self.assertFalse(os.path.exists(wt))
 
+    def test_version_that_still_applies_is_left_alone(self):
+        store = self._store("own", self._patch_diff(BASE + "z = 1\n"))
+        self._advance("# header\n" + BASE)       # far from the hunk
+        r = devsrc.rebase_patch(store, "own", "")
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(r["unchanged"])
+        self.assertIn("still applies", r["note"])
+        p = store.find(store.load(), "own")
+        self.assertEqual([v["v"] for v in p["versions"]], [1])
+        self.assertFalse(os.path.exists(devsrc.rebase_dir(store, "own")))
+
     def test_continue_without_rebase_in_progress(self):
         store = self._store("own", self._patch_diff(BASE + "z = 1\n"))
         r = devsrc.rebase_patch(store, "own", "", cont=True)
@@ -189,8 +200,10 @@ class RebaseTests(RebaseFixture):
         self.assertIn("no rebase of own is in progress", r["reason"])
 
     def test_compile_error_is_refused(self):
-        store = self._store("own", self._patch_diff(BASE + "def broken(:\n"))
-        self._advance("# header\n" + BASE)
+        diff = self._patch_diff(BASE.replace("    return 1\n",
+                                             "    return (1\n"))
+        store = self._store("own", diff)
+        self._advance(BASE.replace("def f():", "def f() -> int:"))
         r = devsrc.rebase_patch(store, "own", "")
         self.assertFalse(r["ok"])
         self.assertEqual(r["stage"], "compile")

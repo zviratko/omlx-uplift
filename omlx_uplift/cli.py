@@ -1092,7 +1092,9 @@ def cmd_patches(argv=None) -> int:
         except devsrc.DevsrcError as exc:
             out = {"ok": False, "reason": str(exc)}
         print(_json.dumps(out, indent=2))
-        if out.get("ok"):
+        if out.get("ok") and out.get("note") and out.get("unchanged"):
+            print(f"{args.id}: {out['note']}", file=sys.stderr)
+        elif out.get("ok"):
             print(f"{args.id}: rebased v{out.get('rebased_from')} onto "
                   f"{str(out.get('base'))[:12]} -> stored as "
                   f"v{out.get('desired_version') or out.get('newest_version')}"
