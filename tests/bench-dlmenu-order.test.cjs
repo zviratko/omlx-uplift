@@ -16,9 +16,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('path');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource } = require('./static-src.cjs');
 
-const JS = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
+const JS = benchSource();
 const CSS = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
 
 test('U-DL: both menu factories detach the open menu before the action', () => {

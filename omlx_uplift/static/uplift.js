@@ -624,6 +624,9 @@ function nativeSurfaceOn(tab, sub) {
    Same list as CHAT_FILES in tests/static-src.cjs (a node test pins both). */
 const CHAT_PARTS = ['./uplift_chat_attach.js', './uplift_chat_voice.js', './uplift_chat_actions.js',
                     './uplift_chat_stt.js'];
+/* SPLIT-3: native bench part files (one per bench panel), loaded before the
+   core uplift_bench.js. Same list as BENCH_FILES in tests/static-src.cjs. */
+const BENCH_PARTS = ['./uplift_bench_dec.js'];
 function showEmbedPage(tab, sub) {
     const card = pageCards.find(c => c.dataset.id === EMBED_PAGE_IDS[tab]?.[sub]);
     if (!card) return;
@@ -642,7 +645,11 @@ function showEmbedPage(tab, sub) {
             if (tab === 'bench') {
                 const runBench = () => { UpliftNativeBench.mount(); UpliftNativeBench.showSub(sub); };
                 if (typeof UpliftNativeBench !== 'undefined') runBench();
-                else D.loadScript('./uplift_bench.js').then(runBench);
+                // SPLIT-3: the bench parts register on UpliftBenchParts
+                // first; the core (uplift_bench.js) calls them at load.
+                else Promise.all(BENCH_PARTS.map(f => D.loadScript(f)))
+                    .then(() => (typeof UpliftNativeBench !== 'undefined'
+                        ? null : D.loadScript('./uplift_bench.js'))).then(runBench);
             } else {
                 const runChat = () => UpliftNativeChat.mount();
                 if (typeof UpliftNativeChat !== 'undefined' && window.Uplift.speechio && window.Uplift.voices) runChat();

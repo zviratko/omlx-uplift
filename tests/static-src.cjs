@@ -47,4 +47,24 @@ function runChat(ctx) {
     }
 }
 
-module.exports = { STATIC_DIR, staticFiles, allStaticJs, CHAT_FILES, chatSource, runChat };
+/* SPLIT-3: the native bench is uplift_bench.js (core, loaded LAST) plus one
+   part file per bench panel, registered on UpliftBenchParts before it. Same
+   contract as the chat helpers above. */
+const BENCH_FILES = ['uplift_bench_dec.js', 'uplift_bench.js'];
+
+function benchSource() {
+    return BENCH_FILES
+        .map(f => fs.readFileSync(path.join(STATIC_DIR, f), 'utf8'))
+        .join('\n');
+}
+
+function runBench(ctx) {
+    const vm = require('vm');
+    for (const f of BENCH_FILES) {
+        new vm.Script(fs.readFileSync(path.join(STATIC_DIR, f), 'utf8'),
+                      { filename: f }).runInContext(ctx);
+    }
+}
+
+module.exports = { STATIC_DIR, staticFiles, allStaticJs, CHAT_FILES, chatSource, runChat,
+                   BENCH_FILES, benchSource, runBench };

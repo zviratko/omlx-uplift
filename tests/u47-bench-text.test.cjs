@@ -9,7 +9,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource, runBench } = require('./static-src.cjs');
 
 const B = require(`${STATIC_DIR}/uplift_bench.js`);
 const { buildThroughputText, fmtNum, fmtMemory, singleTestLabel,
@@ -256,8 +256,7 @@ function loadVm(cat) {
     win.window = win; win.self = win; win.navigator.clipboard = null;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8'))
-        .runInContext(ctx);
+    runBench(ctx);
     return { win, byId, B: win.UpliftNativeBench };
 }
 
@@ -458,8 +457,7 @@ const NEW_KEYS = {
     'uplift.bench.board_stalled': 'No progress events for {n}s',
 };
 test('FROZEN: every new key ships with its exact English fallback', () => {
-    const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'),
-        'utf8')
+    const src = benchSource()
         // "a" + \n   "b"  ->  "ab"   (the hints are wrapped over lines)
         .replace(/'\s*\+\s*'/g, '');
     for (const [key, en] of Object.entries(NEW_KEYS)) {

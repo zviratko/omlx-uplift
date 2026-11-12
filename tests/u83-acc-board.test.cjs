@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource, runBench } = require('./static-src.cjs');
 
 function harness() {
     const byId = {};
@@ -65,7 +65,7 @@ function load() {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8')).runInContext(ctx);
+    runBench(ctx);
     return { win, byId, B: win.UpliftNativeBench };
 }
 
@@ -161,7 +161,7 @@ test('U83 between-suites gap: no phantom 0 — first queued box is live', () => 
 });
 
 test('U83 status text keeps the engine message; board adds the counters', () => {
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8');
+    const src = benchSource();
     assert.ok(/st\.textContent = \(ev\.message \|\| ev\.phase \|\| ''\) \+\s*\n?\s*this\.statusCounterText\(ev\)/
         .test(src), 'onEvent composes message + counters');
     // the old duplicated per-suite pair must be gone
@@ -219,8 +219,7 @@ function loadPoll(opts) {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem() {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8'))
-        .runInContext(ctx);
+    runBench(ctx);
     const tick = async (n) => {
         for (let i = 0; i < (n || 1); i++) {
             for (const fn of [...timers.live.values()]) await fn();
@@ -642,7 +641,7 @@ test('ACC-STALL: the 4s poll repaints in place, rebuilds only on a shape change'
     // (Asserted on the source: calling ACC.render here would fire three
     // network promises this harness does not answer.)
     assert.ok(/this\._qSig = null;/.test(
-        fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8')),
+        benchSource()),
         'ACC.render clears the shape signature for the new wrap');
     ACC._qSig = null;
     const prev0 = byId['bench-acc-queue'].children[0];

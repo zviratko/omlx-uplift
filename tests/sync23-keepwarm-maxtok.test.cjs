@@ -10,6 +10,7 @@
    run-22 cprio pins), so row shape, payload lines and the locale batch are
    pinned from the source here. */
 'use strict';
+const { benchSource } = require('./static-src.cjs');
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -65,7 +66,7 @@ test('s23 locales: idle-window keys x10, interval hint updated x10', () => {
 });
 
 test('s23 bench: local max-tokens row, top-level payload, classic validation', () => {
-    const src = STATIC('uplift_bench.js');
+    const src = benchSource();
     assert.match(src, /lmax\.id = 'bench-acc-max'; lmax\.type = 'number';/);
     assert.match(src, /lmaxRow\.hidden = accExtLb\.input\.checked;/,
         'the local floor hides while the external endpoint is on (classic x-show)');
@@ -76,7 +77,7 @@ test('s23 bench: local max-tokens row, top-level payload, classic validation', (
 });
 
 test('s23 bench: result badge + JSON export carry the saved limit', () => {
-    const src = STATIC('uplift_bench.js');
+    const src = benchSource();
     assert.match(src, /if \(!r\.external && r\.max_tokens\) badges \+= ' \[' \+ t\('acc_bench\.results\.token_limit', 'Token limit'\)/);
     assert.match(src, /thinking_used: r\.thinking_used \|\| false,\s*\n\s*max_tokens: r\.max_tokens,/);
 });

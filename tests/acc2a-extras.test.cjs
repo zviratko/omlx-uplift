@@ -38,7 +38,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, BENCH_FILES, benchSource, runBench } = require('./static-src.cjs');
 
 const LOCALES = path.join(__dirname, '..', 'omlx_uplift', 'locales');
 
@@ -240,8 +240,7 @@ function load(opts) {
         removeItem: k => { delete store[k]; },
     };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8'))
-        .runInContext(ctx);
+    runBench(ctx);
     return { win, byId, doc, store, posts, fire, B: win.UpliftNativeBench };
 }
 
@@ -782,9 +781,14 @@ test('ACC-2b: the size-option multiplier follows the twin into the fold',
 /* ---- 9. structural pins ----------------------------------------------- */
 test('ACC-2a: the extras module is a section of the existing IIFE, not a new one',
     () => {
-        const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
-        const iifes = src.match(/^\(function \(root, factory\)/gm) || [];
-        assert.equal(iifes.length, 1, 'uplift_bench.js stays ONE IIFE');
+        // SPLIT-3: the bench is a core plus part files, each ONE IIFE;
+        // extras lives in one of them, never in an IIFE of its own
+        for (const f of BENCH_FILES) {
+            const iifes = fs.readFileSync(path.join(STATIC_DIR, f), 'utf8')
+                .match(/^\(function \(root, factory\)/gm) || [];
+            assert.equal(iifes.length, 1, f + ' stays ONE IIFE');
+        }
+        const src = benchSource();
         assert.match(src, /^var EXTRAS = \{$/m, 'extras is a module-scope object');
         assert.match(src, /KEY: 'uplift\.bench\.extras\.v1'/, 'the LS key is exact');
         assert.match(src, /CAP: 6,/, 'the family cap is 6');
@@ -821,7 +825,7 @@ test('ACC-2b: the engine hint points at the section instead of at the grid',
 
 test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder set',
     () => {
-        const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
+        const src = benchSource();
         const used = [...src.matchAll(/t\('(uplift\.bench\.extras_[a-z_]+)'/g)]
             .map(m => m[1]).filter(k => !k.endsWith('_'));
         // 'uplift.bench.extras_family_' + family is assembled at runtime

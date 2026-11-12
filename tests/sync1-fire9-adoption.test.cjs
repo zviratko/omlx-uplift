@@ -6,6 +6,7 @@
    are SOURCE-SHAPE pins: the gating expressions and payload/param sites are
    the drift-sensitive parts a future classic move would silently break. */
 'use strict';
+const { benchSource } = require('./static-src.cjs');
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -60,7 +61,7 @@ test('UP-55 shape: fit query params, status handling, one-click apply, stale gua
 
 /* ---- UP-56 (upstream d59d797 #4855): bench GPU-cap note ---- */
 test('UP-56 shape: both bench panels carry the note, tp honors the external gate', () => {
-    const src = STATIC('uplift_bench.js');
+    const src = benchSource();
     assert.match(src, /bench\.config\.gpu_power_limit_note/);
     assert.match(src, /\.replace\('\{watts\}', String\(w\)\)/);
     assert.match(src, /m\.settings && m\.settings\.gpu_power_limit_w/);

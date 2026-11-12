@@ -25,7 +25,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, runBench } = require('./static-src.cjs');
 
 function makeHarness() {
     const byId = {};
@@ -156,7 +156,7 @@ function load(opts) {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8')).runInContext(ctx);
+    runBench(ctx);
     const B = win.UpliftNativeBench;
     return { win, byId, net, fixture, B, BQ: B.BENCHQ };
 }

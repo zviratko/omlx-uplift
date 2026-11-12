@@ -27,7 +27,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('path');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource, runBench } = require('./static-src.cjs');
 
 function makeHarness() {
     const byId = {};
@@ -158,8 +158,7 @@ function load(opts) {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8'))
-        .runInContext(ctx);
+    runBench(ctx);
     const DEC = win.UpliftNativeBench._panels.dec;
     DEC.state = { running: false, runId: null, packs: {}, selected: {},
                   limit: 0, results: [] };
@@ -344,7 +343,7 @@ test('DEC-API: generic rows get the (decisions) marker, legacy rows do not', () 
 });
 
 test('DEC-API: the marker reaches the Copy / Markdown / CSV Model column', () => {
-    const src = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
+    const src = benchSource();
     const decBlock = src.slice(src.indexOf('DEC = {'),
         src.indexOf('function stopStream'));
     assert.ok(decBlock.length > 1000, 'DEC block located in the source');

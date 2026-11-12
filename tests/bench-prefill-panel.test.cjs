@@ -22,7 +22,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource, runBench } = require('./static-src.cjs');
 
 const EN = {
     'bench.config.model_placeholder': 'Select model\u2026',
@@ -219,8 +219,7 @@ function mountLoad(opts) {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    new vm.Script(fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8'))
-        .runInContext(ctx);
+    runBench(ctx);
     const B = win.UpliftNativeBench;
     B.mount();
     return { win, byId, B, PF: B.prefill, posts, es, toasts };
@@ -668,7 +667,7 @@ test('the poll fallback merges requests[] into the activity state', () => {
     // poll() runs on an interval the stub never fires (house harness limit),
     // so this path — and ONLY this path — is pinned by shape: the merge the
     // SSE mode gets from events must exist verbatim for the REST mode too.
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8');
+    const src = benchSource();
     assert.match(src,
         /if \(r\.requests\) \{[\s\S]{0,200}reqState\[q\.index\] = q;/,
         'poll rebuilds the live list from the payload');

@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource, runBench } = require('./static-src.cjs');
 
 // DOM stub with class tracking (the mount harness drops className from
 // the tree walk, and U49 fingerprints ARE classes)
@@ -74,8 +74,7 @@ function load() {
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
     const ctx = vm.createContext(win);
-    const src = fs.readFileSync(`${STATIC_DIR}/uplift_bench.js`, 'utf8');
-    new vm.Script(src).runInContext(ctx);
+    runBench(ctx);
     return { win, byId };
 }
 
@@ -280,8 +279,7 @@ test('U-CPY: toMarkdown produces a GitHub-flavoured table, pipes escaped', () =>
 
 test('U-CPY: decision dl spec carries the Time (s) column', () => {
     const { win } = load();
-    const src = fs.readFileSync(require('path').join(STATIC_DIR,
-        'uplift_bench.js'), 'utf8');
+    const src = benchSource();
     assert.ok(/head: 'Time \(s\)'/.test(src),
         'decision download/copy cols include Time (s)');
     assert.ok(/uplift\.bench\.dec_time/.test(src),
@@ -316,8 +314,7 @@ test('TP: results head + classic two tables (the merged table was never pinned)'
     assert.ok(text.includes('Single Request Results'), text.slice(0, 200));
     assert.ok(text.includes('Continuous Batching'));
     // the retired merged-table spec must not come back
-    const src = fs.readFileSync(require('path').join(STATIC_DIR,
-        'uplift_bench.js'), 'utf8');
+    const src = benchSource();
     assert.ok(!/function TP_COLS_DEF/.test(src),
         'the single merged TP table definition is gone');
     assert.ok(/'bench\.results\.single\.peak_mem'/.test(src),

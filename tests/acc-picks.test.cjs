@@ -9,7 +9,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
-const { STATIC_DIR } = require('./static-src.cjs');
+const { STATIC_DIR, benchSource } = require('./static-src.cjs');
 const B = require(path.join(STATIC_DIR, 'uplift_bench.js'));
 
 const P = B._accPicks;
@@ -88,7 +88,7 @@ test('validate is inert before the catalog lands (no groups: no prune)', () => {
    grid, so the call sites are shape-pinned (the store round-trip above is
    the behavioral proof of the helpers themselves). */
 const fs = require('node:fs');
-const bench = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench.js'), 'utf8');
+const bench = benchSource();
 
 test('the panel restores on mount, saves on every mutation, prunes pre-paint', () => {
     assert.match(bench, /var picks = accLoadPicks\(\);/,
