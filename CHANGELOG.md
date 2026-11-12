@@ -13,7 +13,11 @@ users never see.
 
 ## Unreleased
 
-- **Server Settings follow upstream's new scheduler control.** The Decode Fairness switch is now the Concurrent Request Priority choice (Prefill First / Balanced / Decode First), and Long Prompt Handling keeps its upstream-renamed labels.
+## [3.4] - 2026-11-12
+
+- **Model updates.** A new Model updates page lists the downloaded models that have a newer version on the Hub, with the count in the Models and Downloader menu. Update one, update all, or ignore a model.
+- **A failed patch names the fix.** When a patch cannot build, the message now tells you what to run instead of just failing: check for a newer version, or rebase your own patch.
+- **The CLI prints plain text, not JSON.** Patch and dev commands say what happened, one line per patch; add `--json` for the raw result.
 
 ## [3.3] - 2026-11-10
 
