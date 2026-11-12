@@ -796,7 +796,8 @@ test('ACC-2a: the extras module is a section of the existing IIFE, not a new one
             'the section owns ONE merged item list (twins + extra suites)');
         // the classic grid path must not gain a single extras reference,
         // and must not paint a variant card either
-        const g = src.slice(src.indexOf('renderGrid: function () {'));
+        // ACC's own renderGrid (MTEB has one too, in another bench file)
+        const g = src.slice(src.indexOf('\n    renderGrid: function () {', src.indexOf('var ACC = {')));
         const body = g.slice(0, g.indexOf('\n    },'));
         assert.ok(body.includes('renderGrid'), 'renderGrid found');
         assert.ok(!/EXTRAS/.test(body), 'renderGrid stays extras-free');

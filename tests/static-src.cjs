@@ -50,7 +50,7 @@ function runChat(ctx) {
 /* SPLIT-3: the native bench is uplift_bench.js (core, loaded LAST) plus one
    part file per bench panel, registered on UpliftBenchParts before it. Same
    contract as the chat helpers above. */
-const BENCH_FILES = ['uplift_bench_dec.js', 'uplift_bench.js'];
+const BENCH_FILES = ['uplift_bench_mteb.js', 'uplift_bench_dec.js', 'uplift_bench.js'];
 
 function benchSource() {
     return BENCH_FILES
