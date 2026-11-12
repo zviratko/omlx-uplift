@@ -25,6 +25,7 @@ Stdlib only (urllib) — usable from the router AND the .pth startup path.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -156,8 +157,13 @@ from . import patches as _patches
 
 
 def dev_build_root() -> str | None:
-    """Root of the clean dev-src checkout used to gate build-scope patches,
-    or None when omlx-dev is not set up. dev.json's src_path is the single
+    """Root of the dev-src checkout, or None when omlx-dev is not set up.
+    NOT a clean tree: dev-src sits on the uplift-dev branch, which carries
+    every build patch as a commit. Gate build-scope candidates through
+    pristine_build_root() instead (GATE-ROOT, user report 2026-11-12: a
+    rebased PR gated 26 files 'already' against its own old commit and
+    failed on the one file that changed). Kept for callers that need the
+    clone itself. dev.json's src_path is the single
     source of truth (the same one `dev status` reads) — a hardcoded
     <base>/dev-src guess broke whenever OMLX_BASE_PATH differed between
     the server process and the shell that ran bootstrap. Both candidate
@@ -183,6 +189,74 @@ def dev_build_root() -> str | None:
         if os.path.isdir(os.path.join(cand, ".git")):
             return cand
     return None
+
+
+def _dev_cfg_for(root: str | None) -> dict | None:
+    """dev.json whose clone is `root` (same base-dir search as
+    dev_build_root, so a server and a shell with different OMLX_BASE_PATH
+    still find the same config)."""
+    from . import devsrc
+
+    if not root:
+        return None
+    bases = []
+    env_base = os.environ.get("OMLX_BASE_PATH")
+    if env_base:
+        bases.append(os.path.join(env_base, "uplift"))
+    bases.append(os.path.expanduser(os.path.join("~", ".omlx", "uplift")))
+    bases.append(os.path.join(os.path.expanduser(
+        devsrc.RUNTIME_DEFAULTS["base_path"]), "uplift"))
+    for base in dict.fromkeys(bases):
+        cfg = devsrc.load_config(base)
+        if cfg and os.path.realpath(devsrc.src_path(cfg)) == \
+                os.path.realpath(root):
+            return cfg
+    return None
+
+
+@contextlib.contextmanager
+def pristine_build_root(fetch: bool = True):
+    """Yield a CLEAN tree to gate dev/both candidates against: a detached
+    worktree of the build base (pin-aware), the same tree the dev build's
+    own source refresh uses. Removed on exit.
+
+    fetch: refresh the sync ref first (best-effort), so the gate answers
+    for the base the NEXT build will cut from.
+    Falls back to the dev-src carrier (with a WARNING naming why) when no
+    worktree can be made, and yields None when omlx-dev is not set up -
+    callers then refuse dev scope exactly as before."""
+    import shutil
+    import tempfile
+
+    from . import devsrc
+
+    carrier = dev_build_root()
+    cfg = _dev_cfg_for(carrier)
+    if not cfg:
+        yield carrier
+        return
+    if fetch:
+        try:
+            devsrc.fetch_sync_ref(cfg)
+        except Exception as exc:            # noqa: BLE001 - offline is fine
+            _log.info("gate root: sync ref fetch skipped (%s)", exc)
+    tmp = tempfile.mkdtemp(prefix="uplift-gate-")
+    made = False
+    try:
+        try:
+            devsrc.detached_base_worktree(cfg, tmp)
+            made = True
+        except Exception as exc:            # noqa: BLE001
+            _log.warning("gate root: clean base worktree unavailable (%s) - "
+                         "gating against %s, which carries the build's own "
+                         "patch commits", exc, carrier)
+        yield tmp if made else carrier
+    finally:
+        if made:
+            # check=False never raises (a timeout comes back as rc 124)
+            devsrc._git(["worktree", "remove", "--force", tmp],
+                        cwd=devsrc.src_path(cfg), check=False)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _read_patch_file(store, version: dict) -> bytes | None:
@@ -1260,11 +1334,14 @@ def set_targets(store, patch_id: str, runtime: bool, dev: bool,
                         "reason": "omlx-dev is not set up on this machine — "
                                   "bootstrap it first (Manage shows how) "
                                   "before selecting the build surface"}
-            gates.append(("the omlx-dev sources",
-                          lambda: fetch_and_gate(
-                              {"kind": "upload", "data": data}, root,
-                              reverse=bool(p.get("reversal")),
-                              tree_kind="src")))
+            def _dev_gate():
+                # GATE-ROOT: the carrier holds the other build patches'
+                # commits; gate against the clean build base
+                with pristine_build_root(fetch=False) as clean:
+                    return fetch_and_gate(
+                        {"kind": "upload", "data": data}, clean or root,
+                        reverse=bool(p.get("reversal")), tree_kind="src")
+            gates.append(("the omlx-dev sources", _dev_gate))
         if newly_keg:
             if not tree_root or not os.path.isdir(tree_root):
                 return {"ok": False,
@@ -1810,7 +1887,19 @@ def test_dry_run(store, patch_id: str, tree_root: str,
     data = _read_patch_file(store, desired)
     if data is None:
         return {"ok": False, "reason": "stored patch file missing"}
-    root, overrides, skip, kind = _gate_root_selection(store, manifest, p, tree_root)
+    if _patches.scope_touches_dev(_patches.patch_scope(p)):
+        # GATE-ROOT: 'would it apply on the next build' is asked of the
+        # clean build base, not the carrier that already holds it
+        with pristine_build_root(fetch=False) as clean:
+            return _dry_run_on(store, manifest, p, tree_root, data,
+                               dev_root=clean)
+    return _dry_run_on(store, manifest, p, tree_root, data)
+
+
+def _dry_run_on(store, manifest, p, tree_root, data,
+                dev_root=_DEV_ROOT_DEFAULT) -> dict:
+    root, overrides, skip, kind = _gate_root_selection(
+        store, manifest, p, tree_root, dev_root=dev_root)
     if not root:
         return {"ok": False,
                 "reason": "dev-src checkout not found — dev patch "
@@ -1930,7 +2019,18 @@ def check_all(store, tree_root: str, dev_root=_DEV_ROOT_DEFAULT) -> dict:
 
     dev_root: override for the source-checkout gate root (the dev build
     passes the pristine base worktree, so a candidate gates against the
-    tree materialize will cut from; default: dev_build_root())."""
+    tree materialize will cut from). Default: a pristine base worktree
+    made here (GATE-ROOT 2026-11-12) - the old default, the dev-src
+    carrier, holds every build patch as a commit, so a dev/both candidate
+    read its own old hunks back as 'already' and failed on any file the
+    new version changed."""
+    if dev_root is _DEV_ROOT_DEFAULT and any(
+            (q.get("source") or {}).get("kind") in ("github_pr", "url")
+            and _patches.scope_touches_dev(_patches.patch_scope(q))
+            for q in store.load().get("patches", [])):
+        with pristine_build_root() as clean:
+            if clean and clean != dev_build_root():
+                return check_all(store, tree_root, dev_root=clean)
     manifest = store.load()
     reports = {}
     changed_any = False
@@ -2630,10 +2730,11 @@ def fix_hint(store, patch_id: str) -> str:
         return ("catalog patch: no version for this base is published yet - "
                 "the next 'omlx-uplift dev upgrade' fetches it when it ships")
     if kind == "github_pr":
-        return (f"source is PR {src.get('repo')}#{src.get('pr')}: when the PR "
-                f"is rebased, run 'omlx-uplift patch update {patch_id}'")
+        return (f"source is PR {src.get('repo')}#{src.get('pr')}: rebase the "
+                f"PR, then 'omlx-uplift patch update {patch_id}' fetches and "
+                "adopts it")
     if kind == "url":
-        return (f"run 'omlx-uplift patch update {patch_id}' to fetch the URL "
-                "again (works when the file there was rebased)")
+        return (f"publish a rebased diff at the source URL, then "
+                f"'omlx-uplift patch update {patch_id}' fetches and adopts it")
     return (f"run 'omlx-uplift patch rebase {patch_id}' to carry it onto this "
             "base (stores a new version; conflicts stop for your edit)")

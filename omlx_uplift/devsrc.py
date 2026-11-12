@@ -2780,11 +2780,15 @@ def recheck_build_patches(build_patches: list[dict]) -> dict:
 
 
 def detached_base_worktree(cfg: dict, target: str) -> str:
-    """Public wrapper: detached git worktree of the pristine sync base at
-    `target`. Was private _sync_parts/_git usage from cli's copy."""
+    """Public wrapper: detached git worktree of the pristine build base at
+    `target` - the commit materialize() re-cuts uplift-dev from, so a base
+    PIN counts too (it used to take the sync-ref tip unconditionally, which
+    gated candidates against a tree the pinned build never uses)."""
     path = src_path(cfg)
-    remote, ref = _sync_parts(cfg)
-    base = f"refs/remotes/{remote}/{ref}"
+    base = base_sha_of(cfg)
+    if not base:
+        remote, ref = _sync_parts(cfg)
+        base = f"refs/remotes/{remote}/{ref}"
     _git(["worktree", "add", "--detach", "-q", target, base], cwd=path)
     return target
 

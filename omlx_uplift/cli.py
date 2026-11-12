@@ -876,6 +876,34 @@ def _kill_switch(store, action: str) -> dict:
             "kill_switch_active": store.patches_disabled()}
 
 
+def _patch_add_update(args, store, source, tree_root, build_root,
+                      patchsource, _json) -> int:
+    """`patch add` / `patch update` once the gate root is chosen (split out
+    so the caller can hold the pristine worktree open around it)."""
+    if args.action == "update":
+        # UPDATE-ADOPT: an update the human asked for must take effect —
+        # re-fetch, gate, store AND promote (no source given = re-check
+        # the stored online source). Plain add_patch semantics remain
+        # for 'add'; check_all's enabled-only auto-promote lane is
+        # untouched.
+        out = patchsource.update_patch(store, args.id, tree_root,
+                                       source=source, scope=args.scope,
+                                       build_root=build_root,
+                                       approve=args.approve)
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+    out = patchsource.add_patch(store, args.id, source, tree_root,
+                                scope=args.scope, build_root=build_root)
+    if not out.get("ok") and out.get("stage") == "classification":
+        print(_json.dumps(out, indent=2))
+        print("hint: re-run with --scope both (recommended: full diff "
+              "to uplift-dev + pruned overlay on the keg) or --scope "
+              "dev (dev-src only)", file=sys.stderr)
+        return 3
+    print(_json.dumps(out, indent=2))
+    return 0 if out.get("ok") else 1
+
+
 def cmd_patches(argv=None) -> int:
     """Out-of-band patch recovery (PAT-3). Subcommands:
       status       one line per patch, colour on a TTY: verdict word, id,
@@ -976,8 +1004,9 @@ def cmd_patches(argv=None) -> int:
                          "sections suggests 'both'). 'runtime'/'build' are "
                          "legacy aliases of omlx/dev.")
     ap.add_argument("--build-root", help="source checkout used to gate "
-                                         "scope=dev/both (default: ~/.omlx/"
-                                         "uplift/dev-src when present)")
+                                         "scope=dev/both (default: a clean "
+                                         "temporary worktree of the next "
+                                         "build's base, made from dev-src)")
     ap.add_argument("--json", action="store_true",
                     help="status: machine-readable JSON dump (the pre-2026 "
                          "default); without it status prints one colour-"
@@ -1057,29 +1086,14 @@ def cmd_patches(argv=None) -> int:
         elif args.file:
             with open(args.file, "rb") as fh:
                 source = {"kind": "upload", "data": fh.read()}
-        build_root = args.build_root or patchsource.dev_build_root()
-        if args.action == "update":
-            # UPDATE-ADOPT: an update the human asked for must take effect —
-            # re-fetch, gate, store AND promote (no source given = re-check
-            # the stored online source). Plain add_patch semantics remain
-            # for 'add'; check_all's enabled-only auto-promote lane is
-            # untouched.
-            out = patchsource.update_patch(store, args.id, tree_root,
-                                           source=source, scope=args.scope,
-                                           build_root=build_root,
-                                           approve=args.approve)
-            print(_json.dumps(out, indent=2))
-            return 0 if out.get("ok") else 1
-        out = patchsource.add_patch(store, args.id, source, tree_root,
-                                    scope=args.scope, build_root=build_root)
-        if not out.get("ok") and out.get("stage") == "classification":
-            print(_json.dumps(out, indent=2))
-            print("hint: re-run with --scope both (recommended: full diff "
-                  "to uplift-dev + pruned overlay on the keg) or --scope "
-                  "dev (dev-src only)", file=sys.stderr)
-            return 3
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        if args.build_root:
+            return _patch_add_update(args, store, source, tree_root,
+                                     args.build_root, patchsource, _json)
+        # GATE-ROOT: dev/both candidates gate against the clean build
+        # base, never the uplift-dev carrier (it holds the old version)
+        with patchsource.pristine_build_root() as build_root:
+            return _patch_add_update(args, store, source, tree_root,
+                                     build_root, patchsource, _json)
 
     if args.action == "rebase":
         # PATCH-REBASE: carry an own build patch onto the next build base
@@ -1115,8 +1129,8 @@ def cmd_patches(argv=None) -> int:
     if args.action == "curated":
         from . import curated
         if args.sync:
-            out = curated.sync(store, tree_root,
-                               build_root=patchsource.dev_build_root())
+            with patchsource.pristine_build_root() as build_root:
+                out = curated.sync(store, tree_root, build_root=build_root)
         else:
             out = curated.list_remote()
             manifest = store.load()
@@ -1207,9 +1221,13 @@ def cmd_patches(argv=None) -> int:
             elif args.action == "check":
                 out = patchsource.check_all(store, tr)
             else:
-                out = patchsource.update_all(
-                    store, tr,
-                    build_root=args.build_root or patchsource.dev_build_root())
+                if args.build_root:
+                    out = patchsource.update_all(store, tr,
+                                                 build_root=args.build_root)
+                else:
+                    with patchsource.pristine_build_root() as build_root:
+                        out = patchsource.update_all(store, tr,
+                                                     build_root=build_root)
             out.setdefault("target", t)
             out.setdefault("tree", tr)
             outs.append(out)

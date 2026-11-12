@@ -97,11 +97,15 @@ async def patches_add(req: PatchAddRequest, is_admin: bool = Depends(require_adm
         if req.data is None:
             raise HTTPException(status_code=400, detail="upload needs 'data'")
         source["data"] = req.data.encode("utf-8")
-    res = await asyncio.to_thread(
-        patchsource.add_patch, patch_store(), req.id, source,
-        _patch_tree_root(), order=req.order,
-        reversal=req.reversal, scope=req.scope,
-        build_root=patchsource.dev_build_root())
+    def _add():
+        # GATE-ROOT: dev/both gate against the clean build base, not the
+        # uplift-dev carrier that holds every build patch as a commit
+        with patchsource.pristine_build_root() as build_root:
+            return patchsource.add_patch(
+                patch_store(), req.id, source, _patch_tree_root(),
+                order=req.order, reversal=req.reversal, scope=req.scope,
+                build_root=build_root)
+    res = await asyncio.to_thread(_add)
     if not res.get("ok") and res.get("stage") in ("fetch", "source"):
         raise HTTPException(status_code=422, detail=res.get("reason"))
     return res
@@ -142,9 +146,11 @@ async def patches_curated(is_admin: bool = Depends(require_admin)):
 async def patches_curated_sync(is_admin: bool = Depends(require_admin)):
     from .. import curated, patchsource
 
-    return await asyncio.to_thread(
-        curated.sync, patch_store(), _patch_tree_root(),
-        build_root=patchsource.dev_build_root())
+    def _sync():
+        with patchsource.pristine_build_root() as build_root:
+            return curated.sync(patch_store(), _patch_tree_root(),
+                                build_root=build_root)
+    return await asyncio.to_thread(_sync)
 
 
 class PatchIdRequest(BaseModel):
