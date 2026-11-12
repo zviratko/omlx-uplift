@@ -50,6 +50,9 @@ TECH_WORDS = {
     # bench column headers: metric acronyms/units carry no prose (the classic
     # bench tables show 'TTFT'/'pp'/'tg' untranslated)
     "TTFT", "Prefill", "Decode", "Total", "Start", "ms", "s",
+    # SYNC-1 run 23: French spells the time unit the same as English
+    # ('15 minutes'); copied verbatim from classic's fr catalog
+    "minutes",
 }
 
 
@@ -63,7 +66,9 @@ def _brand_unit(v):
     words = re.findall(r"°C|[A-Za-z][A-Za-z0-9.-]*(?:/[A-Za-z0-9]+)?|\d+", v)
     if not words:
         return True
-    return all(w in TECH_WORDS for w in words)
+    # numbers carry no prose either (the header comment always said so; the
+    # check only enforced it for all-number values until '15 minutes')
+    return all(w in TECH_WORDS or w.isdigit() for w in words)
 
 
 def _vars(v):

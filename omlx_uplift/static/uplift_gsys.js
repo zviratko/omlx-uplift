@@ -199,7 +199,14 @@ const GS_LABELS = {
         wide_proj: 'Qwen4 Wide-Proj GDN Decode',
         wide_proj_hint: 'Wider projection in fused Qwen4 GDN decode (experimental).',
         keep_warm: 'GPU Keep-Warm Interval (s)',
-        keep_warm_hint: 'Seconds between trivial GPU kernels while a model is loaded but idle, keeping the GPU out of its idle power state (the first command buffer after an idle stall can take seconds on large models). Ticks stop after 5 minutes without requests; 0 disables.',
+        keep_warm_hint: 'Seconds between trivial GPU kernels while a model is loaded but idle, keeping the GPU out of its idle power state (the first command buffer after an idle stall can take seconds on large models). Ticks stop when the Keep GPU Awake After Requests time runs out; 0 disables.',
+        // SYNC-1 run 23 (upstream b85f8db #5085 + 75e5f58): classic
+        // _settings.html Advanced row, EN values verbatim from its catalog.
+        keep_warm_window: 'Keep GPU Awake After Requests',
+        keep_warm_window_hint: 'After the last request, oMLX keeps the GPU from going idle for this long, so the next request starts without a wake-up delay. Longer times use a little more power while idle. Applies instantly, no restart.',
+        keep_warm_window_custom: 'Custom ({seconds} s)',
+        keep_warm_window_opts: [['0','Off'],['300','5 minutes (default)'],['900','15 minutes'],
+                                ['1800','30 minutes'],['3600','1 hour'],['7200','2 hours']],
         audio: 'Maximum Audio Upload Size (MB)',
         audio_hint: 'Reject audio attachments above this size.',
         ane: 'ANE Compile Cache',
@@ -1846,6 +1853,17 @@ function gsRef(L, path) {
     return v == null ? '' : v;
 }
 
+// Options for the keep-warm idle window select: the classic presets plus,
+// when the stored value is none of them, one 'Custom (N s)' entry carrying it.
+function gsKeepWarmWindowOpts(L) {
+    const opts = (L.adv.keep_warm_window_opts || []).slice();
+    const cur = gsGet('server', 'gpu_keep_warm_idle_window');
+    if (cur != null && !opts.some(([v]) => Number(v) === Number(cur))) {
+        opts.push([String(cur), String(L.adv.keep_warm_window_custom).replace('{seconds}', cur)]);
+    }
+    return opts;
+}
+
 function gsSpecRow(it, L, ctx) {
     const c = it.ctl;
     const sec = c.sec || it.sec;
@@ -2334,6 +2352,16 @@ const GS_SPEC = [
     {sec: 'adv', lab: 'adv.keep_warm', hint: 'adv.keep_warm_hint', ctl: {
         k: 'num', sec: 'server', field: 'gpu_keep_warm_interval',
         flat: 'gpu_keep_warm_interval', min: 0, step: 0.1}},
+    // SYNC-1 run 23 (upstream b85f8db #5085 + 75e5f58): how long after the
+    // last request the keep-warm ticks continue. Live-applied (classic
+    // runtime_applied, no restart badge). Classic preset order; a
+    // settings.json value outside the presets gets its own 'Custom (N s)'
+    // option, like classic's x-if <option>. Hidden on a keg whose GET lacks
+    // the field, so an old server never receives it.
+    {sec: 'adv', lab: 'adv.keep_warm_window', hint: 'adv.keep_warm_window_hint', ctl: {
+        k: 'sel', sec: 'server', field: 'gpu_keep_warm_idle_window',
+        flat: 'gpu_keep_warm_idle_window', opts: gsKeepWarmWindowOpts},
+        show: () => gsGet('server', 'gpu_keep_warm_idle_window') != null},
     {sec: 'adv', lab: 'adv.audio', hint: 'adv.audio_hint', ctl: {
         k: 'num', sec: 'server', field: 'max_audio_upload_size', flat: 'max_audio_upload_size', min: 1}},
     {sec: 'adv', lab: 'adv.ane', hint: 'adv.ane_hint', ctl: {

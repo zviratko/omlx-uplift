@@ -1013,8 +1013,9 @@ function buildAccuracyText(rows, groups) {
             + pad(t('acc_bench.results.text_export.correct', 'Correct'), 10)
             + pad(t('acc_bench.results.text_export.total', 'Total'), 8)
             + pad('Time(s)', 10)
-            + pad(t('acc_bench.results.text_export.think', 'Think'), 8));
-        lines.push('-'.repeat(62));
+            + pad(t('acc_bench.results.text_export.think', 'Think'), 8)
+            + pad('MaxTok', 9));
+        lines.push('-'.repeat(71));
         rows.filter(function (r) { return r.model_id === m; }).forEach(function (r) {
             lines.push(
                 rpad(String(r.benchmark).toUpperCase(), 16)
@@ -1022,7 +1023,8 @@ function buildAccuracyText(rows, groups) {
                 + pad(r.correct, 10) + pad(r.total, 8) + pad(r.time_s, 10)
                 + pad(r.thinking_used
                     ? t('acc_bench.results.text_export.yes', 'Yes')
-                    : t('acc_bench.results.text_export.no', 'No'), 8));
+                    : t('acc_bench.results.text_export.no', 'No'), 8)
+                + pad(r.external ? '-' : (r.max_tokens || '-'), 9));
             if (r.external) {
                 lines.push(t('acc_bench.results.text_export.external_detail',
                     '  Valid responses: {valid}/{total} ({rate}%) · Valid-answer accuracy: {accuracy}% · Empty: {empty} · Truncated: {truncated} · Timeout: {timeout} · HTTP: {http} · Connection: {connection} · Invalid: {invalid} · Parse: {parse}')
@@ -1224,6 +1226,7 @@ function accExportJson(r) {
         model_id: r.model_id, benchmark: r.benchmark, accuracy: r.accuracy,
         correct: r.correct, total: r.total, time_s: r.time_s,
         thinking_used: r.thinking_used || false,
+        max_tokens: r.max_tokens,
         category_scores: r.category_scores || null,
         questions: qr,
     };
@@ -4076,8 +4079,22 @@ var ACC = {
         // UP-57: reference-bound reveal (the old gid()+rAF block attached
         // nothing when the rAF beat the async view mount — external
         // accuracy-mode inputs could never appear)
+        // SYNC-1 run 23 (upstream fa7b454 #5189): local runs get the
+        // per-question max_tokens floor external runs already had. Classic
+        // shows the input only while the external endpoint is off and keeps
+        // the value for the session only (runs get much longer).
+        var lmax = el('input'); lmax.id = 'bench-acc-max'; lmax.type = 'number';
+        lmax.min = '1'; lmax.step = '1'; lmax.placeholder = '65536';
+        var lmaxRow = el('div', 'bench-row');
+        lmaxRow.id = 'bench-acc-max-row';
+        lmaxRow.append(labeled(t('acc_bench.config.max_tokens', 'Max Tokens Override'), lmax),
+            el('p', 'native-stub-note', t('acc_bench.config.max_tokens_hint',
+                'Optional floor for each question\'s max_tokens; benchmark defaults are never lowered. '
+                + 'Raise it when answers hit the token limit, for example with thinking on. A larger limit '
+                + 'can make runs much longer. The limit used is saved with the result.')));
         accExtLb.input.addEventListener('change', function () {
             extRow.hidden = !accExtLb.input.checked;
+            lmaxRow.hidden = accExtLb.input.checked;
         });
         var adv = advancedSection([
             labeled(t('acc_bench.config.batch_size', 'Batch size'), bsSel),
@@ -4085,6 +4102,7 @@ var ACC = {
             el('p', 'native-stub-note', t('acc_bench.config.batch_size_hint', 'Larger batches are faster but use more memory.')),
             check('bench-acc-think', t('acc_bench.config.thinking', 'Enable thinking mode'), false),
             el('p', 'native-stub-note', t('acc_bench.config.thinking_hint', 'Applies to models whose template supports thinking toggles.')),
+            lmaxRow,
             accExtLb,
             extRow,
             check('bench-acc-upload', t('uplift.bench.upload_results', 'Upload results to community leaderboard'), false),
@@ -4426,6 +4444,20 @@ var ACC = {
             body.model_id = external.model || body.model_id;
             body.external = external;
             body.enable_thinking = false;  // classic forces off for external
+        } else {
+            // fa7b454: local floor rides the TOP-LEVEL request field; classic
+            // validates it the same way (integer 1..1,000,000, else refuse).
+            // Built-in (classic engine) runs only: the LM-Eval twins above
+            // were cloned before this line and never carry it.
+            var lraw = String((gid('bench-acc-max') || {}).value || '').trim();
+            if (lraw) {
+                var lv = Number(lraw);
+                if (!Number.isInteger(lv) || lv < 1 || lv > 1000000) {
+                    throw new Error(t('js.error.external_max_tokens_invalid',
+                        'Max Tokens Override must be a positive integer (max 1,000,000).'));
+                }
+                body.max_tokens_override = lv;
+            }
         }
         return body;
     },
@@ -4961,6 +4993,9 @@ var ACC = {
             else if (r.engine === 'classic') badges += ' [' + t('uplift.bench.badge_classic', 'Built-in') + ']';
             if (r.external) badges += ' [' + t('acc_bench.results.external_badge', 'external') + ']';
             if (r.thinking_used) badges += ' [' + t('acc_bench.results.thinking_badge', 'thinking') + ']';
+            // fa7b454: the limit a local run used is saved with the result
+            if (!r.external && r.max_tokens) badges += ' [' + t('acc_bench.results.token_limit', 'Token limit')
+                + ' ' + Number(r.max_tokens).toLocaleString() + ']';
             var up = r.upload ? (r.upload.status === 'skipped' ? '—' : '↑') : '';
             // classic renders count+time through its own template string
             var line = t('acc_bench.results.correct_line', '{correct} of {total} in {time}s')

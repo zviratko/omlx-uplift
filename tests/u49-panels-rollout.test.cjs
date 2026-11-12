@@ -197,7 +197,7 @@ test('U49: buildAccuracyText mirrors classic matrix + detail block', () => {
     const { buildAccuracyText } = win.UpliftNativeBench._u49;
     const rows = [
         { model_id: 'Alpha', benchmark: 'mmlu', accuracy: 0.65, correct: 65,
-          total: 100, time_s: 42, thinking_used: false },
+          total: 100, time_s: 42, thinking_used: false, max_tokens: 32768 },
         { model_id: 'Beta', benchmark: 'mmlu', accuracy: 0.7, correct: 70,
           total: 100, time_s: 40, thinking_used: true },
         { model_id: 'Alpha', benchmark: 'boolq', accuracy: 0.8, correct: 80,
@@ -218,13 +218,15 @@ test('U49: buildAccuracyText mirrors classic matrix + detail block', () => {
     assert.equal(lines[7], '--- Detail ---');
     assert.equal(lines[8], '');
     assert.equal(lines[9], 'Model: Alpha');
-    assert.equal(lines[10], 'Benchmark         Accuracy   Correct   Total   Time(s)   Think');
-    assert.equal(lines[11], '-'.repeat(62));
-    assert.equal(lines[12], 'MMLU                 65.0%        65     100        42      No');
-    assert.equal(lines[13], 'BOOLQ                80.0%        80     100        10      No');
+    // SYNC-1 run 23 (upstream fa7b454): classic added the MaxTok column (pad 9,
+    // rule 71); '-' when the result carries no saved limit or ran external
+    assert.equal(lines[10], 'Benchmark         Accuracy   Correct   Total   Time(s)   Think   MaxTok');
+    assert.equal(lines[11], '-'.repeat(71));
+    assert.equal(lines[12], 'MMLU                 65.0%        65     100        42      No    32768');
+    assert.equal(lines[13], 'BOOLQ                80.0%        80     100        10      No        -');
     assert.ok(!text.includes('Valid responses'), 'no external detail for internal rows');
     const beta = text.split('Model: Beta')[1].split('\n');
-    assert.equal(beta[3], 'MMLU                 70.0%        70     100        40     Yes');
+    assert.equal(beta[3], 'MMLU                 70.0%        70     100        40     Yes        -');
 });
 
 test('U49: model id with $ patterns cannot corrupt the detail header', () => {

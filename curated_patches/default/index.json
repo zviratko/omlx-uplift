@@ -4,7 +4,6 @@
  "entries": [
   "ctx-probe-above-native.json",
   "omlx-tts-macos-say.json",
-  "supervised-console-log.json",
   "vlm-load-tokenizer-offloop.json",
   "warm-before-ready.json"
  ]

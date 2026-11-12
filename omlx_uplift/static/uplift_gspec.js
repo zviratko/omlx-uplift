@@ -22,6 +22,8 @@ const GS_MAP = {
     // modelspec.js / uplift_mmeditor.js). Sending it here is dead weight on a
     // tip server and must never come back.
     gpu_keep_warm_interval: ['server','gpu_keep_warm_interval'],
+    // SYNC-1 run 23 (upstream b85f8db #5085): live-applied idle window.
+    gpu_keep_warm_idle_window: ['server','gpu_keep_warm_idle_window'],
     distributed_inference_enabled: ['server','distributed_inference_enabled'],
     max_audio_upload_size: ['server','max_audio_upload_size'],
     model_dirs: ['model','model_dirs'], model_fallback: ['model','model_fallback'],
