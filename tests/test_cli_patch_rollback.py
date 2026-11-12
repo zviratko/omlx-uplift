@@ -57,7 +57,7 @@ class TestPatchRollbackVerb(unittest.TestCase):
     def _run(self, argv):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            rc = cli.cmd_patches(argv)
+            rc = cli.cmd_patches(list(argv) + ["--json"])
         return rc, json.loads(out.getvalue())
 
     def _patch(self):

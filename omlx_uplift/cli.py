@@ -37,6 +37,26 @@ _formula_keg_exists = _brewutil.formula_keg_exists
 
 
 # ------------------------------------------------------------- patch preview
+class _Parser(argparse.ArgumentParser):
+    """argparse with a short error (CLI-REVIEW): a typo used to print the
+    whole multi-line usage of every flag of every action before the one
+    line that mattered. Now: what was wrong, and where the usage lives.
+    Exit code 2 stays (argparse's contract)."""
+
+    def error(self, message):
+        import re as _re
+
+        cmd = self.prog.split()[-1] if self.prog else ""
+        m = _re.match(r"argument (\w+): invalid choice: '([^']*)' "
+                      r"\(choose from (.*)\)$", message)
+        if m and m.group(1) == "action":
+            message = (f"unknown action '{m.group(2)}' - choose from: "
+                       + m.group(3).replace("'", ""))
+        print(f"{self.prog}: {message}", file=sys.stderr)
+        print(f"see: omlx-uplift help {cmd}", file=sys.stderr)
+        raise SystemExit(2)
+
+
 def _color_enabled(stream) -> bool:
     return (getattr(stream, "isatty", lambda: False)()
             and not os.environ.get("NO_COLOR"))
@@ -53,12 +73,12 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
               detail, reversal}] in manifest order:
       success   hunks apply cleanly (will land on next server start)
       applied   uplift already applied it to this keg and hashes match
-      warning   hunks already present on disk, strictly reversible —
+      warning   hunks already present on disk, strictly reversible  - 
                 upstream most likely picked the fix up
       failure   strict apply fails (drift or corrupt diff); next boot will
                 mark needs_review and boot unpatched for this patch
       reversed  a REVERSAL patch: its un-apply verifies (cleanly, verified
-                on this keg, or already reverted) — next boot reverts the
+                on this keg, or already reverted) - next boot reverts the
                 merged change
     Reversal patches never take the success/applied/warning labels; their
     non-failure verdict is always 'reversed'. Never raises: classification
@@ -118,9 +138,9 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 if patchsync._files_match(tree_root, applied.get("files", [])):
                     out.append({"id": pid,
                                 "verdict": "reversed" if rev else "applied",
-                                "detail": ("already reverted on this install — "
+                                "detail": ("already reverted on this install - "
                                            "verified" if rev else
-                                           "already applied to this install — "
+                                           "already applied to this install - "
                                            "verified"),
                                 "reversal": rev})
                     continue
@@ -154,9 +174,9 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
             why = "; ".join(f"{f['path']}: {f['reason']}" for f in fails[:2])
             out.append({"id": pid, "verdict": "failure",
                         "detail": (f"will NOT reverse (needs_review next "
-                                   f"boot) — {why}" if rev else
+                                   f"boot) - {why}" if rev else
                                    f"will NOT apply (needs_review next "
-                                   f"boot) — {why}"),
+                                   f"boot) - {why}"),
                         "reversal": rev})
         elif alrdy:
             if not rev and applied.get("status") == "applied":
@@ -170,13 +190,13 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                 # picked it up' here accused upstream of our own work
                 # (user report 2026-10-20, user-machine install preview).
                 out.append({"id": pid, "verdict": "applied",
-                            "detail": ("already applied to this install — "
+                            "detail": ("already applied to this install - "
                                        "content verified in place"),
                             "reversal": rev})
                 continue
             out.append({"id": pid,
                         "verdict": "reversed" if rev else "warning",
-                        "detail": ("tree is already at the reverted state — "
+                        "detail": ("tree is already at the reverted state - "
                                    "nothing left to undo" if rev else
                                    # UP-50: 'already applied and reverts
                                    # cleanly' read as 'upstream contains
@@ -186,7 +206,7 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
                                    # real proof (pristine-mirror reverse
                                    # apply). Behaviour unchanged.
                                    "content already present in THIS tree "
-                                   "and reverts cleanly — NOT proof "
+                                   "and reverts cleanly - NOT proof "
                                    "upstream carries it; prove with "
                                    "`git apply -R --check <id>.diff` on "
                                    "the pristine omlx mirror before "
@@ -203,21 +223,21 @@ def patch_preview(store, tree_root: str, keg: str | None) -> list[dict]:
 
 
 def print_patch_preview(store, stream=None) -> None:
-    """Visible banner after `install`. Advisory only — never fails install."""
+    """Visible banner after `install`. Advisory only - never fails install."""
     import sys
     stream = stream or sys.stdout
     try:
         from . import patches as _patches
         root = _patches._omlx_root()
         if not root:
-            print("OMLX-UPLIFT PATCHES: omlx package tree not found — "
+            print("OMLX-UPLIFT PATCHES: omlx package tree not found - "
                   "preview skipped", file=stream)
             return
         tree_root = os.path.dirname(root)
         store = store or _patches.PatchStore()
         if store.patches_disabled():
             print(_paint(stream, "OMLX-UPLIFT PATCHES: DISABLED (kill-switch "
-                         "sentinel present) — boot will be unpatched", "33"),
+                         "sentinel present) - boot will be unpatched", "33"),
                   file=stream)
             return
         keg = _patches.keg_id(root)
@@ -233,7 +253,7 @@ def print_patch_preview(store, stream=None) -> None:
         for r in rows:
             word, code = style[r["verdict"]]
             print(f"  {_paint(stream, f'{word:8}', code)} {r['id']}"
-                  f" — {r['detail']}", file=stream)
+                  f" - {r['detail']}", file=stream)
         # honest roll-up: forward vs reversal vs failed, counted from rows.
         # 'warning' (hunks already upstream) lands as a no-op APPLIED at
         # boot, so it counts as forward — it did not fail.
@@ -253,7 +273,7 @@ def _print_patch_status(out: dict, stream=None) -> None:
     """Human view of `patch status`: ONE line per patch, colour on a TTY.
 
     Words mirror the dashboard chips (APPLIED / RE-APPLY / HELD / OFF /
-    ERROR / REVIEW) — the same fact reads the same everywhere. The old
+    ERROR / REVIEW) - the same fact reads the same everywhere. The old
     JSON dump stays available verbatim via `patch status --json`.
     """
     import shutil
@@ -263,12 +283,15 @@ def _print_patch_status(out: dict, stream=None) -> None:
     target = str(out.get("target") or "omlx")
     label, tcode = _TARGET_LABELS.get(target, (target, "1;36"))
     tail = _keg_tail(out.get("tree") or "")
+    # the Cellar path names the build; the content-hash id that used to
+    # follow it meant nothing to a reader (CLI-REVIEW) - shown only when
+    # there is no path, --json always keeps it
+    ident = tail or str(out.get("keg_id") or "")
     print(_paint(stream, "OMLX-UPLIFT PATCHES · " + label, tcode)
-          + ("   " + tail if tail else "")
-          + "   " + str(out.get("keg_id") or "?"), file=stream)
+          + ("   " + ident if ident else ""), file=stream)
     if out.get("kill_switch_active"):
         print(_paint(stream,
-                     "KILL SWITCH ACTIVE — boot runs UNPATCHED "
+                     "KILL SWITCH ACTIVE - boot runs UNPATCHED "
                      "(clear with: omlx-uplift patch enable-all)", "1;33"),
               file=stream)
     if out.get("warning"):
@@ -306,6 +329,9 @@ def _print_patch_status(out: dict, stream=None) -> None:
             return "GONE", "90"
         if st == "pending":
             return "PENDING", "33"
+        if st == "update_available":
+            nv = p.get("latest_v")
+            return ("UPDATE v%s" % nv if nv else "UPDATE"), "33"
         # the omlx-dev branch was re-cut WITHOUT this patch
         if st == "not_in_build":
             return "NOT IN BUILD", "31"
@@ -326,6 +352,8 @@ def _print_patch_status(out: dict, stream=None) -> None:
                 tail = u.replace("\\", "/").rstrip("/").split("/")[-1]
                 desc = "(from %s%s)" % (kind, ": " + tail if tail else "")
         scope = str(p.get("scope") or "")
+        if p.get("desired_version"):
+            scope += " v%s" % p["desired_version"]
         pid = str(p.get("id", ""))
         # The budget is this row's OWN visible prefix length: the scope tag
         # varies ([dev]=5, [omlx]=7) and ids may exceed the padded column —
@@ -354,7 +382,7 @@ def _print_patch_status(out: dict, stream=None) -> None:
                   "90"), file=stream)
         note = ""
         if word == "RE-APPLY":
-            note = (f"{label} was updated — the patch is NOT in the "
+            note = (f"{label} was updated - the patch is NOT in the "
                     "running code; restart the server to re-apply")
         elif word not in ("APPLIED", "OFF") and p.get("state_detail"):
             note = str(p["state_detail"])
@@ -388,7 +416,7 @@ def _example_skins_dir() -> Path:
 def install_example_skins(stream=None, force: str = "ask") -> None:
     """Deprecated no-op (2026-09-25 skins rework)."""
     out = stream or sys.stdout
-    print("bundled skins: no longer installed as .yml — unpacked by the "
+    print("bundled skins: no longer installed as .yml - unpacked by the "
           "server at startup (see omlx-uplift skin / ~/.omlx/uplift/skins)",
           file=out)
 
@@ -403,8 +431,8 @@ def _verify_mount(python: str, *, timeout: int = 120) -> tuple[bool, str]:
     subprocess.run(capture_output=True, timeout=...). 'import omlx.server'
     can leave helper children/grandchildren that INHERIT the capture
     pipes; when the probe then timed out, run()'s kill + second
-    communicate() blocked on those pipes forever — an unctrl-C-able hang
-    that made a SUCCESSFUL install look fatal. Fix: no pipes at all — the
+    communicate() blocked on those pipes forever - an unctrl-C-able hang
+    that made a SUCCESSFUL install look fatal. Fix: no pipes at all - the
     verdict rides a result file the probe child writes itself, stdout/
     stderr go to DEVNULL, and the timeout kills the child's whole process
     group (start_new_session + killpg), which can no longer wedge the
@@ -448,7 +476,7 @@ def _verify_mount(python: str, *, timeout: int = 120) -> tuple[bool, str]:
         with contextlib.suppress(Exception):
             p.wait(timeout=5)
         return False, (f"probe timed out after {timeout}s (the server import "
-                       "never finished — the mount itself may be fine; "
+                       "never finished - the mount itself may be fine; "
                        "open /uplift/ in the browser to check)")
     finally:
         try:
@@ -460,7 +488,7 @@ def _verify_mount(python: str, *, timeout: int = 120) -> tuple[bool, str]:
     if verdict == "1":
         return True, ""
     if verdict == "0":
-        return False, ("omlx.server imported WITHOUT the Uplift mount flag — "
+        return False, ("omlx.server imported WITHOUT the Uplift mount flag - "
                        "/uplift/ will 404")
     if verdict.startswith("E"):
         return False, verdict[1:]
@@ -474,7 +502,7 @@ def cmd_bench_env(argv=None) -> int:
                                   on disk: venv_bytes/cache_bytes)
       bench-env create [--reinstall]  build the pinned venv (~30 s first;
                                   a STALE env is wiped and rebuilt by a
-                                  plain create — ACC-2e, no flag needed)
+                                  plain create - ACC-2e, no flag needed)
 
     The venv lives under the shared uplift store, NEVER inside a keg:
     harness pulls ~70 packages and the card forbids torch anywhere near
@@ -487,7 +515,7 @@ def cmd_bench_env(argv=None) -> int:
     if which == "mteb":
         argv = argv[1:]
 
-    ap = argparse.ArgumentParser(prog=f"omlx-uplift {which}-env")
+    ap = _Parser(prog=f"omlx-uplift {which}-env")
     ap.add_argument("action", nargs="?", default="status",
                     choices=["status", "create"])
     ap.add_argument("--reinstall", action="store_true",
@@ -520,7 +548,7 @@ def cmd_bench_env(argv=None) -> int:
     def _mb(v) -> str:
         # status() sizes are apparent bytes walked in-process (not du
         # blocks); None = walk exceeded its budget
-        return f"{v / 1e6:.0f} MB" if isinstance(v, (int, float)) else "—"
+        return f"{v / 1e6:.0f} MB" if isinstance(v, (int, float)) else " - "
 
     disk = f"\n  on disk: venv {_mb(st.get('venv_bytes'))}, " \
            f"dataset cache {_mb(st.get('cache_bytes'))}"
@@ -541,11 +569,11 @@ def cmd_bench_env(argv=None) -> int:
 def cmd_doctor(argv=None) -> int:
     """KEGID-2: READ-ONLY census of the installed omlx tree against its
     wheel RECORD. Exit 0 clean/expected-only, 1 unexpected drift,
-    2 census impossible. Repair stays manual (`brew reinstall omlx`) —
+    2 census impossible. Repair stays manual (`brew reinstall omlx`)  - 
     auto-restoring from backups is exactly what corrupted the tree once."""
     import json as _json
 
-    ap = argparse.ArgumentParser(prog="omlx-uplift doctor")
+    ap = _Parser(prog="omlx-uplift doctor")
     ap.add_argument("--json", action="store_true", help="machine-readable")
     args = ap.parse_args(argv)
 
@@ -562,7 +590,7 @@ def cmd_doctor(argv=None) -> int:
 
 
 def cmd_install(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="omlx-uplift install")
+    ap = _Parser(prog="omlx-uplift install")
     ap.add_argument("--python", help="target interpreter "
                     "(default: Homebrew oMLX keg if present, else this one)")
     ap.add_argument("--yes", action="store_true",
@@ -585,7 +613,7 @@ def cmd_install(argv=None) -> int:
     # ModuleNotFoundError. Name the fix instead — this is the exact spot a
     # README-skipping newcomer lands.
     if not target:
-        print("ERROR: no omlx keg found to mount into — uplift rides an "
+        print("ERROR: no omlx keg found to mount into - uplift rides an "
               "existing server, it is not one.\n"
               "  classic lane:  brew install omlx, then re-run this "
               "command\n"
@@ -601,7 +629,7 @@ def cmd_install(argv=None) -> int:
     eng = _brewutil.python_minor(str(target))
     ours = (sys.version_info[0], sys.version_info[1])
     if eng and eng != ours:
-        print(f"ERROR: python minor mismatch — this uplift CLI runs on "
+        print(f"ERROR: python minor mismatch - this uplift CLI runs on "
               f"python {ours[0]}.{ours[1]}, the target keg's python is "
               f"{eng[0]}.{eng[1]}. The .pth mount shares site-packages, "
               f"so the minors must match.\n"
@@ -617,7 +645,7 @@ def cmd_install(argv=None) -> int:
     pth.write_text(body)
     print(f"installed autopatch: {pth}")
     if "\nimport " in "\n" + body and body.count("\n") > 1:
-        print("  (bootstraps sys.path to this package — keg holds no copy)")
+        print("  (bootstraps sys.path to this package - keg holds no copy)")
     # DEV-9: an omlx-dev keg is a SEPARATE keg — a `brew reinstall/upgrade
     # omlx-dev` wipes its site-packages and the plain install would leave
     # dev unmounted until `dev install` runs. Hook it here too,
@@ -632,7 +660,7 @@ def cmd_install(argv=None) -> int:
     if ok:
         print("mount check: OK (omlx.server imports with Uplift mounted)")
     else:
-        print("WARNING: mount check FAILED — /uplift/ will 404 until this "
+        print("WARNING: mount check FAILED - /uplift/ will 404 until this "
               f"is fixed:\n  {detail}", file=sys.stderr)
         return 1
     print_patch_preview(None)
@@ -642,7 +670,7 @@ def cmd_install(argv=None) -> int:
 
 def _install_default_target(args) -> None:
     """Persist the CLI default target (install --default-target, or one
-    first-run question on a TTY — the choice is implied once, never asked
+    first-run question on a TTY - the choice is implied once, never asked
     again, and stays editable through the flag). Install is re-run after
     every uplift upgrade, so the prompt must fire only when nothing was
     ever chosen, and NOTHING here may ever fail the install."""
@@ -664,7 +692,7 @@ def _install_default_target(args) -> None:
             label = _TARGET_LABELS[args.default_target][0]
             if (args.default_target == "dev"
                     and not brewutil.keg_site_packages("omlx-dev")):
-                print("  note: no omlx-dev keg yet — the choice applies "
+                print("  note: no omlx-dev keg yet - the choice applies "
                       "after 'omlx-uplift dev bootstrap'")
             print(f"default CLI target: {label} (change: omlx-uplift "
                   "install --default-target omlx|dev)")
@@ -674,10 +702,10 @@ def _install_default_target(args) -> None:
         dev_here = bool(brewutil.keg_site_packages("omlx-dev"))
         print("\nWhich install should omlx-uplift commands work on by "
               "default?")
-        print("  [1] omlx       omlx server keg — vanilla or omlx-dev "
+        print("  [1] omlx       omlx server keg - vanilla or omlx-dev "
               "(runtime overlays only)")
         print("  [2] omlx-dev   dev keg (build + runtime)"
-              + ("" if dev_here else " — not installed yet, applies after "
+              + ("" if dev_here else " - not installed yet, applies after "
                                      "'omlx-uplift dev bootstrap'"))
         try:
             ans = input("Choice [1]: ").strip()
@@ -686,7 +714,7 @@ def _install_default_target(args) -> None:
             return
         choice = {"": "omlx", "1": "omlx", "2": "dev"}.get(ans)
         if choice is None:
-            print("  (not a choice — keeping default: omlx)")
+            print("  (not a choice - keeping default: omlx)")
             return
         r = patchsource.set_config(store, default_target=choice)
         if r.get("ok") is not False:
@@ -698,7 +726,7 @@ def _install_default_target(args) -> None:
 
 
 def cmd_uninstall(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="omlx-uplift uninstall")
+    ap = _Parser(prog="omlx-uplift uninstall")
     ap.add_argument("--python", help="target interpreter "
                     "(default: Homebrew oMLX keg if present, else this one)")
     args = ap.parse_args(argv)
@@ -722,7 +750,7 @@ def _qa_seed_settings(real_path: Path, qa_path: Path, port: int,
     0.0.0.0 with the user's real model definitions, so it must not share
     the production credential (a leaked QA page could not touch prod)
     and must not carry a well-known one either. QA tooling reads the key
-    from the seeded file locally — it never belongs in a transcript.
+    from the seeded file locally - it never belongs in a transcript.
     Pure file function; never writes real_path."""
     import json
     import secrets
@@ -735,13 +763,13 @@ def _qa_seed_settings(real_path: Path, qa_path: Path, port: int,
 
 
 def cmd_serve(argv=None) -> int:
-    """Delegate everything to omlx.cli — same args, same startup order,
+    """Delegate everything to omlx.cli - same args, same startup order,
     same settings resolution (drift-proof by construction).
 
     QA-2: `--qa` runs a fully isolated instance: base path ~/.omlx-qa
     (override --qa-base), settings seeded once from the real one with
-    the port replaced (--port, default 8099). All runtime persistence —
-    port writes, models.json, metrics store, skins — lands in the QA
+    the port replaced (--port, default 8099). All runtime persistence  - 
+    port writes, models.json, metrics store, skins - lands in the QA
     base, so a QA server can never rewrite production settings (the
     port-persistence incident of 2026-10-03). The SHARED uplift store
     (patch manifest, family B in paths.py) stays shared by design."""
@@ -780,7 +808,7 @@ def cmd_serve(argv=None) -> int:
         os.environ["OMLX_BASE_PATH"] = str(qa_base)
         if "--port" not in argv:
             argv += ["--port", str(port)]
-        print(f"qa: isolated instance — base {qa_base}, port {port}")
+        print(f"qa: isolated instance - base {qa_base}, port {port}")
 
     sys.argv = ["omlx", "serve", *argv]
     import omlx.cli as cli
@@ -806,7 +834,7 @@ def cmd_serve(argv=None) -> int:
 def cmd_view(argv=None) -> int:
     import uvicorn
 
-    ap = argparse.ArgumentParser(
+    ap = _Parser(
         prog="omlx-uplift view",
         description="standalone Uplift viewer (for DMG/remote oMLX over HTTP)",
     )
@@ -828,7 +856,7 @@ def cmd_view(argv=None) -> int:
 def _kill_switch(store, action: str) -> dict:
     """Arm or clear the boot kill switch.
 
-    Deliberately reachable WITHOUT an importable omlx tree — these verbs touch
+    Deliberately reachable WITHOUT an importable omlx tree - these verbs touch
     only the manifest and the sentinel file, never tree bytes. The kill switch
     is the verb you reach for when the runtime patches are the problem, so
     'is omlx installed for this python?' must never stand between an operator
@@ -861,7 +889,7 @@ def _kill_switch(store, action: str) -> dict:
             patch["enabled"] = True
             if patch.get("state") == "disabled":
                 store.set_state(patch, "pending",
-                                f"enabled — applies on "
+                                f"enabled - applies on "
                                 f"{patchsource.applies_phrase(patch)}")
             restored.append(patch.get("id"))
     store.save(manifest)
@@ -874,6 +902,18 @@ def _kill_switch(store, action: str) -> dict:
     return {"ok": True, "sentinel": store.sentinel_path,
             "restored": restored,
             "kill_switch_active": store.patches_disabled()}
+
+
+def _verb_out(args, verb: str, out: dict, store=None) -> int:
+    """Print one patch verb's result: the raw dict with --json (the old
+    default, unchanged), plain words otherwise (cliview)."""
+    import json as _json
+
+    if getattr(args, "json", False):
+        print(_json.dumps(out, indent=2))
+        return 0 if out.get("ok") else 1
+    from . import cliview
+    return cliview.action(verb, getattr(args, "id", None) or "", out, store)
 
 
 def _patch_add_update(args, store, source, tree_root, build_root,
@@ -890,18 +930,16 @@ def _patch_add_update(args, store, source, tree_root, build_root,
                                        source=source, scope=args.scope,
                                        build_root=build_root,
                                        approve=args.approve)
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, "update", out, store)
     out = patchsource.add_patch(store, args.id, source, tree_root,
                                 scope=args.scope, build_root=build_root)
     if not out.get("ok") and out.get("stage") == "classification":
-        print(_json.dumps(out, indent=2))
-        print("hint: re-run with --scope both (recommended: full diff "
-              "to uplift-dev + pruned overlay on the keg) or --scope "
-              "dev (dev-src only)", file=sys.stderr)
+        _verb_out(args, "add", out, store)
+        print("hint: part of this diff exists only in the omlx sources; "
+              "re-run with --scope both (build + running server) or "
+              "--scope dev (build only)", file=sys.stderr)
         return 3
-    print(_json.dumps(out, indent=2))
-    return 0 if out.get("ok") else 1
+    return _verb_out(args, "add", out, store)
 
 
 def cmd_patches(argv=None) -> int:
@@ -914,14 +952,14 @@ def cmd_patches(argv=None) -> int:
       check        re-fetch sources, report drift (JSON)
       disable-all  kill switch on (sentinel) + disable every patch. Twin:
                    enable-all. Both write only the manifest and the sentinel,
-                   so they answer BEFORE the omlx-tree check below — the
+                   so they answer BEFORE the omlx-tree check below - the
                    runtime being unreachable is exactly when you need them.
       add          fetch -> gate -> store a patch (id + --pr/--url/--file)
       update       re-check a stored patch: online source (pr/url) or new
                    diff via --file (also accepts --pr/--url to re-point).
                    UPDATE-ADOPT: after storing, the newest version becomes
                    desired and the patch enables (safeguard holds still
-                   need --approve) — an update you asked for takes effect.
+                   need --approve) - an update you asked for takes effect.
       rebase       carry an own build patch (upload, scope dev/both) onto
                    the next build base: 3-way merge in a detached worktree,
                    then the normal strict gate stores + promotes vN+1.
@@ -932,7 +970,7 @@ def cmd_patches(argv=None) -> int:
       enable|disable|remove   per-patch control (same paths as the dashboard)
       approve      record a safeguard approval (once|always) without enabling
       promote      accept the newest validated candidate as desired (and
-                   enable) — the CLI twin of the dashboard's Promote button.
+                   enable) - the CLI twin of the dashboard's Promote button.
                    Without this a DISABLED patch whose source later gets a
                    fixed version had no CLI way to adopt it: the drift
                    check's auto-promote is enabled-only, so 'enable' would
@@ -943,24 +981,24 @@ def cmd_patches(argv=None) -> int:
                    needs no browser.
     Also: 'disable-all' arms a sentinel file that makes every boot skip
     the runtime patch pass AND records which patches it switched off;
-    'enable-all' is its twin — it removes the sentinel and restores
+    'enable-all' is its twin - it removes the sentinel and restores
     exactly those recorded flags, leaving patches the user had disabled
     by hand off. PAT-3 shipped the promise of '--enable-sentinel-off' in
-    this docstring with no code behind it — the only way out of the kill
+    this docstring with no code behind it - the only way out of the kill
     switch was rm(1) on a path the user had to find. Command name:
     'omlx-uplift patch' (singular); legacy 'patches' still dispatches
     here for compatibility.
 
     --target omlx|dev|both selects WHICH install the verb works on (the
-    omlx server keg — vanilla or omlx-dev — or the omlx-dev build tree;
+    omlx server keg - vanilla or omlx-dev - or the omlx-dev build tree;
     'both' runs status/apply/check/
     update-all once per tree). Default: the choice persisted by
     'omlx-uplift install --default-target', else omlx. Store-only verbs
     (enable/disable/promote/rollback/approve/adopt/order/remove, kill
-    switch) ignore it — the store is shared by both trees."""
+    switch) ignore it - the store is shared by both trees."""
     import json as _json
 
-    ap = argparse.ArgumentParser(prog="omlx-uplift patch")
+    ap = _Parser(prog="omlx-uplift patch")
     ap.add_argument("action", choices=["status", "apply", "check",
                                        "disable-all", "enable-all", "add",
                                        "update", "enable", "disable",
@@ -991,14 +1029,14 @@ def cmd_patches(argv=None) -> int:
     ap.add_argument("--scope", choices=["omlx", "dev", "both",
                                         "runtime", "build"],
                     help="patch scope. omlx: lands in the running server "
-                         "at every restart — works on both the vanilla and "
+                         "at every restart - works on both the vanilla and "
                          "the omlx-dev install, no rebuild needed; can only "
                          "change files the installed server already has. "
                          "dev: applied to the omlx sources just before "
-                         "omlx-dev is compiled — can also reach compiled "
+                         "omlx-dev is compiled - can also reach compiled "
                          "kernels; takes effect on the next build "
                          "(--build-root or the dev-src clone gates the "
-                         "full diff). both: both effects — restart lands "
+                         "full diff). both: both effects - restart lands "
                          "the runtime half, the next build compiles the "
                          "rest. Omit to auto-classify (a PR with build-only "
                          "sections suggests 'both'). 'runtime'/'build' are "
@@ -1008,13 +1046,12 @@ def cmd_patches(argv=None) -> int:
                                          "temporary worktree of the next "
                                          "build's base, made from dev-src)")
     ap.add_argument("--json", action="store_true",
-                    help="status: machine-readable JSON dump (the pre-2026 "
-                         "default); without it status prints one colour-"
-                         "coded line per patch")
+                    help="print the raw result as JSON (every verb); "
+                         "without it the result is printed in plain words")
     ap.add_argument("--target", choices=["omlx", "dev", "both"],
                     default=None,
                     help="which install the command works on: omlx (omlx "
-                         "server keg — vanilla or omlx-dev), dev (omlx-dev "
+                         "server keg - vanilla or omlx-dev), dev (omlx-dev "
                          "keg) or both (status/apply/"
                          "check/update-all run per tree). Default: the "
                          "choice saved by 'omlx-uplift install "
@@ -1034,7 +1071,19 @@ def cmd_patches(argv=None) -> int:
         # problem', where refusing with 'is omlx installed for this python?'
         # would lock the operator out of the one command that fixes it.
         out = _kill_switch(store, args.action)
-        print(_json.dumps(out, indent=2))
+        if args.json or not out.get("ok"):
+            print(_json.dumps(out, indent=2))
+        elif args.action == "disable-all":
+            print("kill switch ON: every patch is off and the next start "
+                  "runs unpatched")
+            print("undo with: omlx-uplift patch enable-all")
+        else:
+            back = out.get("restored") or []
+            print("kill switch OFF: " + (
+                "re-enabled " + ", ".join(back) if back
+                else "no patch was switched off by it"))
+            print("patches land at the next server restart or omlx-dev "
+                  "build")
         return 0 if out.get("ok") else 1
 
     want, rows, missing = _patch_targets(store, args.target)
@@ -1105,26 +1154,14 @@ def cmd_patches(argv=None) -> int:
                                       cont=args.cont)
         except devsrc.DevsrcError as exc:
             out = {"ok": False, "reason": str(exc)}
-        print(_json.dumps(out, indent=2))
-        if out.get("ok") and out.get("note") and out.get("unchanged"):
-            print(f"{args.id}: {out['note']}", file=sys.stderr)
-        elif out.get("ok"):
-            print(f"{args.id}: rebased v{out.get('rebased_from')} onto "
-                  f"{str(out.get('base'))[:12]} -> stored as "
-                  f"v{out.get('desired_version') or out.get('newest_version')}"
-                  "; run 'omlx-uplift dev upgrade' to build it",
-                  file=sys.stderr)
-        elif out.get("reason"):
-            print(f"{args.id}: {out['reason']}", file=sys.stderr)
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, "rebase", out, store)
 
     if args.action == "approve":
         if not args.id:
             ap.error("approve needs a patch id")
         out = patchsource.approve(store, args.id,
                                   mode=args.approve or "once")
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, "approve", out, store)
 
     if args.action == "curated":
         from . import curated
@@ -1142,16 +1179,19 @@ def cmd_patches(argv=None) -> int:
                     if p is not None:
                         e["under_id"] = p["id"]
                         e["adopted"] = bool(p.get("curated_adopted"))
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        if args.json:
+            print(_json.dumps(out, indent=2))
+            return 0 if out.get("ok") else 1
+        from . import cliview
+        return (cliview.curated_sync(out) if args.sync
+                else cliview.curated_list(out))
 
     if args.action == "adopt":
         from . import curated
         if not args.id:
             ap.error("adopt needs a patch id")
         out = curated.adopt(store, args.id)
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, "adopt", out, store)
 
     if args.action == "order":
         # P4 Apply priority: manifest-only (KILL-NOTREE lane — works with no
@@ -1160,8 +1200,7 @@ def cmd_patches(argv=None) -> int:
         if not args.id:
             ap.error("order needs <id> <priority>")
         out = patchsource.set_order(store, args.id, args.value)
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, "order", out, store)
 
     if args.action in ("enable", "disable", "remove", "promote", "rollback"):
         if not args.id:
@@ -1178,8 +1217,7 @@ def cmd_patches(argv=None) -> int:
             out = patchsource.set_enabled(store, args.id,
                                           args.action == "enable",
                                           approve=args.approve)
-        print(_json.dumps(out, indent=2))
-        return 0 if out.get("ok") else 1
+        return _verb_out(args, args.action, out, store)
 
     if args.action in ("status", "apply", "check", "update-all"):
         # PER-TARGET lane: one pass per selected tree. 'both' shows/acts on
@@ -1237,8 +1275,15 @@ def cmd_patches(argv=None) -> int:
                 _print_patch_status(out)
             return 0
         payload = outs[0] if len(outs) == 1 else {"targets": outs}
-        print(_json.dumps(payload, indent=2))
-        return 0 if ok else 1
+        if args.json:
+            print(_json.dumps(payload, indent=2))
+            return 0 if ok else 1
+        from . import cliview
+        if args.action == "apply":
+            return cliview.apply_report(payload) or (0 if ok else 1)
+        return cliview.check_reports(
+            "patch check" if args.action == "check" else "patch update-all",
+            payload) or (0 if ok else 1)
 
 
 # ------------------------------------------------------------- patch targets
@@ -1370,7 +1415,7 @@ def _dev11_disable_auto_update(via: str) -> bool:
 def _warn_link_sync(r: dict) -> None:
     """LINK-RECORD: activate() keeps brew's link state (var/homebrew/
     linked record + bin symlinks) in sync with the switched keg. When a
-    sync edit failed, say so — the NEXT `omlx-uplift dev upgrade` would
+    sync edit failed, say so - the NEXT `omlx-uplift dev upgrade` would
     otherwise die in brew's link step with no connection to this run."""
     for p in (r.get("link_sync_problems") or []):
         print(f"WARNING: brew link state NOT fully synced ({p})",
@@ -1378,7 +1423,7 @@ def _warn_link_sync(r: dict) -> None:
 
 
 def cmd_dev_setup(args) -> int:
-    """omlx-uplift dev setup [--yes] — lane questionnaire + dev-src clone +
+    """omlx-uplift dev setup [--yes] - lane questionnaire + dev-src clone +
     dev.json + uplift-dev formula branch (aliases: dev bootstrap,
     dev configure). Re-runnable: an existing lane's values are the
     questionnaire defaults and reconfiguring asks first (E2E-4), so a
@@ -1423,7 +1468,7 @@ def cmd_dev_setup(args) -> int:
         if ans:
             args.port = int(ans) if ans.isdigit() else None
             if args.port is None:
-                print(f"not a number — keeping default "
+                print(f"not a number - keeping default "
                       f"{devsrc.RUNTIME_DEFAULTS['port']}")
     # DEV-4 work item 3: runtime/sharing questionnaire lives in
     # reconfigure (one code path); setup runs it as a quiet
@@ -1440,7 +1485,7 @@ def _auto_bootstrap_for_install(args) -> int:
     was never set up runs the setup itself instead of naming another
     command. TTY: the same questions `dev setup` asks. --yes: the
     documented defaults (custom Metal kernels + xgrammar, port 8001).
-    Scripted without --yes: refuse — those defaults mean an Xcode-grade
+    Scripted without --yes: refuse - those defaults mean an Xcode-grade
     kernel build and ~2 GB of torch, and a surprise that big belongs to a
     human or to an explicit --yes, never to a typo."""
     from . import devsrc
@@ -1458,11 +1503,11 @@ def _auto_bootstrap_for_install(args) -> int:
                   "                        build_options in "
                   "~/.omlx/uplift/dev.json", file=sys.stderr)
             return 2
-        print("omlx-dev is not set up yet — bootstrapping with the "
+        print("omlx-dev is not set up yet - bootstrapping with the "
               "documented defaults (--yes): custom Metal kernels + "
               "xgrammar, port 8001.", file=sys.stderr)
     else:
-        print("omlx-dev is not set up yet — a few questions first "
+        print("omlx-dev is not set up yet - a few questions first "
               "(the same `dev setup` asks):")
     rc = cmd_dev_setup(args)
     if rc:
@@ -1471,7 +1516,7 @@ def _auto_bootstrap_for_install(args) -> int:
     port = devsrc.runtime_config(cfg)["port"]
     if port != devsrc.vanilla_port() and devsrc.port_in_use(port):
         print(f"ERROR: dev port {port} is already in use by something "
-              "else — choose another: omlx-uplift dev setup --port N",
+              "else - choose another: omlx-uplift dev setup --port N",
               file=sys.stderr)
         return 1
     return 0
@@ -1483,7 +1528,7 @@ def cmd_dev(argv=None) -> int:
                   branch (aliases: bootstrap, configure; `dev install`
                   runs it automatically on a fresh box)
       status      dev-src state as JSON (branch/tip/drift)
-      install     materialize build patches + rebuild the keg — ALWAYS
+      install     materialize build patches + rebuild the keg - ALWAYS
                   rebuilds (DEV-3)
       upgrade     same pipeline, but CONDITIONAL (user 2026-10-20): rebuilds
                   only when omlx HEAD or the patch set moved; --force
@@ -1492,7 +1537,7 @@ def cmd_dev(argv=None) -> int:
       reconfigure port/base-path/sharing (DEV-4)"""
     import json as _json
 
-    ap = argparse.ArgumentParser(prog="omlx-uplift dev")
+    ap = _Parser(prog="omlx-uplift dev")
     ap.add_argument("action", choices=["bootstrap", "setup", "configure",
                                        "install", "status",
                                        "reconfigure", "upgrade", "patches",
@@ -1531,7 +1576,7 @@ def cmd_dev(argv=None) -> int:
                     help="install: install xgrammar (sticky like "
                          "--with-custom-kernel)")
     ap.add_argument("--with-python312", action="store_true",
-                    help="install: EXPERIMENT — build the engine venv on "
+                    help="install: EXPERIMENT - build the engine venv on "
                          "python 3.12 instead of the upstream-pinned 3.11 "
                          "(inside upstream's supported range; 3.13+ is "
                          "impossible for the engine: mlx-audio[all] -> "
@@ -1543,9 +1588,10 @@ def cmd_dev(argv=None) -> int:
                     help="install: materialize check + print the brew "
                          "command, build nothing")
     ap.add_argument("--restart", action="store_true",
-                    help="install/upgrade: kickstart the omlx-dev service "
-                         "after a REBUILD (a skipped upgrade does not "
-                         "restart — the running server is already current)")
+                    help="install/upgrade: restart the omlx-dev service "
+                         "after a rebuild (a skipped upgrade does not "
+                         "restart: the running server is already current); "
+                         "use/rollback: restart it on the chosen build")
     ap.add_argument("--port", type=int,
                     help="reconfigure: dev server port (default 8001)")
     ap.add_argument("--base-path", help="reconfigure: dev data root "
@@ -1559,6 +1605,8 @@ def cmd_dev(argv=None) -> int:
                          "comma-list)")
     ap.add_argument("--interactive", action="store_true",
                     help="reconfigure: ask the sharing questionnaire")
+    ap.add_argument("--json", action="store_true",
+                    help="status/patches/kegs: print the raw result as JSON")
     args = ap.parse_args(argv)
 
     from . import devsrc, patchsource
@@ -1589,7 +1637,12 @@ def cmd_dev(argv=None) -> int:
         else:
             out["patches"] = [p for p in out["patches"]
                               if _patches_mod.scope_touches_dev(p["scope"])]
-        print(_json.dumps(out, indent=2))
+        if args.json:
+            print(_json.dumps(out, indent=2))
+        else:
+            out["target"] = "dev"
+            out["tree"] = ""
+            _print_patch_status(out)
         return 0
 
     if args.action in ("kegs", "stash-keg", "use", "prune"):
@@ -1608,21 +1661,36 @@ def cmd_dev(argv=None) -> int:
             rows = kegstash.list_builds()
             act = kegstash.active_keg()
             if not rows:
-                print("no kegs to switch between — every 'dev install' "
+                print("no kegs to switch between - every 'dev install' "
                       "build keeps its own Cellar directory "
                       "(KEG-VERSIONED); legacy stash entries show here too")
                 return 0
+            if args.json:
+                for m in rows:
+                    m["active"] = (m.get("cellar_name") or m.get("name")) == act
+                print(_json.dumps(rows, indent=2))
+                return 0
+            namew = max(len(str(m.get("name"))) for m in rows)
+            print(f"  {'build':<{namew}}  {'built (UTC)':<16}  {'size':>8}")
             for m in rows:
                 size = m.get("bytes") or 0
                 # DEV-13: the ACTIVE guard is the Cellar address — several
                 # stash builds can share one address; only the installed
                 # one is active. KEG-VERSIONED: cellar rows are the address.
-                mark = ("  <- active"
-                        if (m.get("cellar_name") or m.get("name")) == act
-                        else "")
-                print(f"{m.get('name')}  {m.get('stashed_at', '?')}  "
-                      f"{size / 2**30:.1f} GiB  {m.get('source', 'stash')}"
-                      f"{mark}")
+                active = (m.get("cellar_name") or m.get("name")) == act
+                at = str(m.get("stashed_at") or "")
+                # no receipt = brew has not finished this build (or it
+                # died): never offer it as a rollback target in silence
+                when = (at[:16].replace("T", " ") if at
+                        else "unfinished")
+                mark = (_paint(sys.stdout, "  <- running build", "1;32")
+                        if active else "")
+                if m.get("source") == "stash":
+                    mark += "  (old stash copy)"
+                print(f"  {str(m.get('name')):<{namew}}  {when:<16}  "
+                      f"{size / 2**30:>6.1f} GiB{mark}")
+            print(_paint(sys.stdout, "switch with: omlx-uplift dev use "
+                         "<build> --restart", "90"))
             return 0
         if args.action == "prune":
             # KEG-VERSIONED: retention covers the Cellar build dirs; the
@@ -1630,13 +1698,13 @@ def cmd_dev(argv=None) -> int:
             removed = kegstash.prune(keep=args.keep)
             removed += kegstash.prune_cellar(keep=args.keep)
             kept = args.keep if args.keep is not None else kegstash.stash_keep()
-            print("removed: " + (", ".join(removed) if removed else "nothing")
-                  + f" (kept newest {kept})")
+            print(f"kept the newest {kept} builds; removed: "
+                  + (", ".join(removed) if removed else "nothing"))
             return 0
         # use
         if not args.name:
-            print("usage: omlx-uplift dev use "
-                  "<sha|build-version|HEAD-sha>  (see: dev kegs)",
+            print("usage: omlx-uplift dev use <build|sha> [--restart] "
+                  "(list builds with: omlx-uplift dev kegs)",
                   file=sys.stderr)
             return 2
         try:
@@ -1647,12 +1715,16 @@ def cmd_dev(argv=None) -> int:
         # DEV-11 invariant: switching to a specific (possibly older) keg is
         # going back to manual — auto-update must not undo it on next boot.
         _dev11_disable_auto_update("dev use")
-        pth_msg = ("yes" if r["pth"] else
-                   "NO — run: omlx-uplift install --formula omlx-dev")
-        print(f"active keg -> {r['name']} ({r['cellar']})\n"
-              f"uplift .pth remounted: {pth_msg}\n"
-              "load it with: brew services restart omlx-dev")
+        print(f"omlx-dev now uses build {r['name']}")
+        if not r["pth"]:
+            print("WARNING: Uplift is not connected to this build - run: "
+                  "omlx-uplift install --formula omlx-dev", file=sys.stderr)
+        print("automatic rebuilds are off (you chose a build by hand)")
         _warn_link_sync(r)
+        if args.restart:
+            return _dev_restart()
+        print("the running server keeps the old build until a restart: "
+              "brew services restart omlx-dev (or add --restart)")
         return 0
 
     if args.action == "rollback":
@@ -1669,7 +1741,7 @@ def cmd_dev(argv=None) -> int:
         rows = [m for m in rows
                 if (m.get("cellar_name") or m.get("name")) != act]
         if not rows:
-            print("nothing to roll back to — no previous keg other than "
+            print("nothing to roll back to - no previous keg other than "
                   "the active one (see: omlx-uplift dev kegs)",
                   file=sys.stderr)
             return 1
@@ -1689,22 +1761,26 @@ def cmd_dev(argv=None) -> int:
             dcfg = devsrc.load_config()
             if dcfg and dcfg.pop("base_pin", None) is not None:
                 devsrc.save_config(dcfg)
-                print("base pin cleared — tracking HEAD again (manual)",
+                print("base pin cleared - tracking HEAD again (manual)",
                       file=sys.stderr)
         except Exception as exc:  # rollback itself succeeded — stay advisory
             # LOG-SILENT-1: used to pass silently, so a stale base_pin hid
             # inside a 'successful' rollback and the next boot refused to
             # auto-build with no paper trail.
-            print(f"WARNING: base pin NOT cleared ({exc}) — run: "
+            print(f"WARNING: base pin NOT cleared ({exc}) - run: "
                   "omlx-uplift dev auto-build off/on or edit dev.json",
                   file=sys.stderr)
-        pth_msg = ("yes" if r["pth"] else
-                   "NO — run: omlx-uplift install --formula omlx-dev")
-        print(f"rolled back to {r['name']} ({r['cellar']})\n"
-              f"auto-update flag: {'OFF' if off else 'unchanged (no dev.json)'}\n"
-              f"uplift .pth remounted: {pth_msg}\n"
-              "load it with: brew services restart omlx-dev")
+        print(f"rolled back: omlx-dev now uses build {r['name']}")
+        if not r["pth"]:
+            print("WARNING: Uplift is not connected to this build - run: "
+                  "omlx-uplift install --formula omlx-dev", file=sys.stderr)
+        print("automatic rebuilds: " + ("off" if off else
+                                         "unchanged (no omlx-dev setup file)"))
         _warn_link_sync(r)
+        if args.restart:
+            return _dev_restart()
+        print("the running server keeps the old build until a restart: "
+              "brew services restart omlx-dev (or add --restart)")
         return 0
 
     if args.action == "auto-build":
@@ -1723,10 +1799,14 @@ def cmd_dev(argv=None) -> int:
     if args.action == "status":
         cfg = devsrc.load_config()
         if not cfg:
-            print(_json.dumps({"installed": False,
-                               "reason": "dev.json missing — run "
-                                         "omlx-uplift dev bootstrap"}, indent=2))
-            return 1
+            miss = {"installed": False,
+                    "reason": "omlx-dev is not set up on this machine - run "
+                              "omlx-uplift dev install"}
+            if args.json:
+                print(_json.dumps(miss, indent=2))
+                return 1
+            from . import cliview
+            return cliview.dev_status({}, miss, None)
         if args.fetch:
             try:
                 devsrc.fetch_sync_ref(cfg)
@@ -1736,8 +1816,15 @@ def cmd_dev(argv=None) -> int:
             _patches_store()), residue_patches=patchsource.build_residue_pool(
             _patches_store(), patchsource.enabled_build_patches(
                 _patches_store(), with_bytes=False)))
-        print(_json.dumps(out, indent=2))
-        return 0
+        if args.json:
+            print(_json.dumps(out, indent=2))
+            return 0
+        from . import cliview, kegstash
+        try:
+            act = kegstash.active_keg()
+        except Exception as exc:         # noqa: BLE001 - display only
+            act = f"unknown ({exc})"
+        return cliview.dev_status(cfg, out, act)
 
     print(f"dev {args.action} lands with the later DEV ticket",
           file=sys.stderr)
@@ -1752,7 +1839,7 @@ def _patches_store():
 
 def _service_state(formula: str) -> str:
     """brew services state for a formula ('started', 'stopped', ... or '').
-    NOTE: this brew's `services list` takes NO name argument — parse the
+    NOTE: this brew's `services list` takes NO name argument - parse the
     full table."""
     try:
         out = subprocess.run(["brew", "services", "list"],
@@ -1787,7 +1874,7 @@ def _coexistence_warnings() -> None:
     dev_port = cfg.get("port", 8001)
     vanilla_port = devsrc.vanilla_port()
     if int(dev_port) == int(vanilla_port):
-        print(f"WARNING: dev port {dev_port} equals the vanilla omlx port — "
+        print(f"WARNING: dev port {dev_port} equals the vanilla omlx port - "
               "the two servers would fight. Change it: omlx-uplift dev "
               "reconfigure", file=sys.stderr)
 
@@ -1817,13 +1904,13 @@ def _share_answers(args, cfg: dict, devsrc) -> dict:
         for name in names:
             rec = "Y" if devsrc.SHARE_DEFAULTS[name] else "n"
             if name == "models":
-                hint = ("recommended yes — big, mostly immutable")
+                hint = ("recommended yes - big, mostly immutable")
             elif name == "settings":
                 hint = ("yes if dev REPLACES vanilla (copies auth/api keys; "
                         "the dev port comes from dev.json, not this file); "
                         "no if BOTH servers will run (admin saves clobber)")
             else:
-                hint = ("recommended no while BOTH servers run — mutable, "
+                hint = ("recommended no while BOTH servers run - mutable, "
                         "concurrent writes race")
             ans = devsrc.ask(f"  share {name}? [{rec}] ({hint}): ").strip().lower()
             share[name] = (ans.startswith("y") if ans
@@ -1847,7 +1934,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None,
     if cfg is None:
         cfg = devsrc.load_config()
         if not cfg:
-            print("dev.json missing — run: omlx-uplift dev bootstrap",
+            print("dev.json missing - run: omlx-uplift dev bootstrap",
                   file=sys.stderr)
             return 2
 
@@ -1860,7 +1947,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None,
         vp = devsrc.vanilla_port()
         if port == vp:
             print(f"WARNING: dev port {port} equals the vanilla omlx port "
-                  f"({vp}) — the two servers would fight over it.",
+                  f"({vp}) - the two servers would fight over it.",
                   file=sys.stderr)
         if port != vp and devsrc.port_in_use(port):
             print(f"port {port} is already in use by something else",
@@ -1886,7 +1973,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None,
     for a in actions:
         line = f"  {a['name']}: {a['action']}"
         if a.get("reason"):
-            line += f" — {a['reason']}"
+            line += f" - {a['reason']}"
         print(line)
 
     rt = devsrc.runtime_config(cfg)
@@ -1910,7 +1997,7 @@ def cmd_dev_reconfigure(args, cfg: dict | None = None,
 
 def _patch_failure_prompt(pid: str, reason: str, tried: list) -> str:
     """VER-1 CLI resolver (dev install, tty only). The patch store has no
-    version of this patch that applies onto the current base — the build
+    version of this patch that applies onto the current base - the build
     stops HERE and asks the human. Returns 'skip' (build without it) or
     anything else ('abort' semantics: materialize re-raises and the pass
     restores the branch). The current keg stays installed either way on
@@ -1945,7 +2032,7 @@ def _patch_failure_prompt(pid: str, reason: str, tried: list) -> str:
 
 def _dev_restart() -> int:
     """--restart: kickstart the omlx-dev launchd service in place. The
-    KEG-VERSIONED switch only reaches the RUNNING server after a restart —
+    KEG-VERSIONED switch only reaches the RUNNING server after a restart  - 
     until then the old process keeps the old code (every build note says
     so). launchd restarts it from the same plist, new keg picked up via the
     opt symlink. Falls back to a hint if the label isn't loaded."""
@@ -1954,7 +2041,7 @@ def _dev_restart() -> int:
                         f"gui/{os.getuid()}/sh.brew.omlx-dev"],
                        capture_output=True, text=True)
     if r.returncode == 0:
-        print("omlx-dev restarted — the board now runs the current keg",
+        print("omlx-dev restarted - the board now runs the current keg",
               flush=True)
         return 0
     last = (r.stderr or r.stdout or "").strip().splitlines()
@@ -1968,8 +2055,8 @@ def _dev_restart() -> int:
 def cmd_dev_install(args) -> int:
     """`omlx-uplift dev install|upgrade`: thin CLI skin over
     devsrc.run_dev_build (BE-1). The engine is pure data in/out; this
-    function only decides what to print — the patch table, the colored
-    header, the next-step hints — and (upgrade) whether a rebuild is even
+    function only decides what to print - the patch table, the colored
+    header, the next-step hints - and (upgrade) whether a rebuild is even
     due. --restart kickstarts the service after an actual rebuild; a
     skipped upgrade leaves the running server alone.
 
@@ -2049,7 +2136,7 @@ def cmd_dev_install(args) -> int:
         elif getattr(args, "restart", False):
             # (user 2026-10-20) no rebuild -> nothing new to load -> the
             # running server is already right; do NOT bounce it.
-            print("no restart — nothing was rebuilt", flush=True)
+            print("no restart - nothing was rebuilt", flush=True)
         if res.stage == 'ok':
             # VERY LAST: the one command that matters now (brew's own
             # 'after an upgrade' caveat is skipped — the build runs
@@ -2062,7 +2149,7 @@ def cmd_dev_install(args) -> int:
 
 def _dev_patch_table(commits: list[dict], upstreamed: dict,
                      skipped: list[dict] | None = None) -> None:
-    """Coloured per-patch table for `dev install` — one row per ENABLED
+    """Coloured per-patch table for `dev install` - one row per ENABLED
     dev/both patch in materialize order, plus every DISABLED dev/both patch
     shown explicitly as DISABLED (silent omission made people hunt for
     patches they had simply switched off). Verdicts stay single uppercase
@@ -2076,29 +2163,29 @@ def _dev_patch_table(commits: list[dict], upstreamed: dict,
     style = {  # verdict -> (word, colour, extra)
         "APPLIED": ("APPLIED", "32", "commit {sha}"),
         "UPSTREAMED": ("UPSTREAMED", "31",
-                       "PR merged upstream — no commit, patch no longer "
+                       "PR merged upstream - no commit, patch no longer "
                        "needed (disabled candidates: re-enable or remove)"),
         # an enabled build patch that dropped out BEFORE materialize: the
         # drift check proved the base carries it (user report 2026-10-19 —
         # this patch used to vanish from the table without a word)
         "OBSOLETE": ("UPSTREAMED", "31",
-                     "upstream now carries the patch — marked obsolete, not "
+                     "upstream now carries the patch - marked obsolete, not "
                      "rebuilt into this branch (disable/remove to retire it)"),
         "ALREADY PRESENT": ("SKIPPED", "33",
-                            "the current sources already carry it 1:1 — "
+                            "the current sources already carry it 1:1 - "
                             "no commit needed"),
         "DISABLED": ("DISABLED", "35", "not in this build"),
         # VER-1: built, but not the version you asked for
         "FALLBACK": ("FALLBACK", "33",
-                     "wanted v{from} does not apply onto this base — built "
+                     "wanted v{from} does not apply onto this base - built "
                      "v{v} (nearest tested version)"),
         # VER-1: the resolver chose 'continue without it'
         "RESOLVER SKIP": ("SKIPPED", "31",
-                          "no stored version applies — built WITHOUT this "
+                          "no stored version applies - built WITHOUT this "
                           "patch (tried {tried})"),
         # enabled, dev/both scope, and nothing of it landed on the branch
         "UNBUILT": ("SKIPPED", "31",
-                    "enabled but NOT in this build — {why}"),
+                    "enabled but NOT in this build - {why}"),
     }
     rows = []
     for c in commits:
@@ -2161,7 +2248,7 @@ def _dev_next_steps(cfg: dict, fresh: bool) -> None:
     """The ONE command that matters after a build. Bootstrap is already a
     done deal here (install refuses without it), so never mention it; the
     coexistence warning above already printed the switch commands. After a
-    rebuild the only next step is the restart hint — printed by the caller
+    rebuild the only next step is the restart hint - printed by the caller
     as the very last output after RESULT."""
     from . import devsrc
 
@@ -2187,13 +2274,13 @@ def cmd_env(argv=None) -> int:
       env enable-all            allow seeding again
 
     The store belongs to the DEV instance (~/.omlx-dev/uplift/env.json by
-    default), resolved through dev.json — the CLI runs from the uplift keg, so
+    default), resolved through dev.json - the CLI runs from the uplift keg, so
     it is never itself the dev runtime. Values take effect when omlx-dev
     starts; this command does not restart anything and says so.
     """
     import json as _json
 
-    ap = argparse.ArgumentParser(
+    ap = _Parser(
         prog="omlx-uplift env",
         description="show/set omlx-dev environment overrides")
     ap.add_argument("action", nargs="?", default="list",
@@ -2227,7 +2314,7 @@ def cmd_env(argv=None) -> int:
         if args.name not in et.ALLOWED:
             why = et.not_editable_reason(args.name)
             if why is None:
-                print(f"env set: unknown tunable {args.name!r} — not documented "
+                print(f"env set: unknown tunable {args.name!r} - not documented "
                       f"in the catalog; this is not a free-form env editor",
                       file=sys.stderr)
             else:
@@ -2240,7 +2327,7 @@ def cmd_env(argv=None) -> int:
             print(f"env set: {exc}", file=sys.stderr)
             return 2
         if value == "":
-            print(f"env set: {args.name}: empty value resets instead — "
+            print(f"env set: {args.name}: empty value resets instead - "
                   f"use 'omlx-uplift env reset {args.name}'", file=sys.stderr)
             return 2
         data = et.load_overrides(path)
@@ -2314,7 +2401,7 @@ def cmd_skin(argv=None) -> int:
                                    dir (default: the live uplift skins dir;
                                    never overwrites an existing dir)
     """
-    ap = argparse.ArgumentParser(prog="omlx-uplift skin")
+    ap = _Parser(prog="omlx-uplift skin")
     ap.add_argument("action", choices=["compile", "decompile"])
     ap.add_argument("path", help="skin dir (compile) or crate .yml (decompile)")
     ap.add_argument("-o", "--out", default=None,

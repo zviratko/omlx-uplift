@@ -79,7 +79,7 @@ class TestPatchActions(unittest.TestCase):
              mock.patch.object(ps, "approve", ap_), \
              mock.patch.object(ps, "add_patch", ad), \
              contextlib.redirect_stdout(out):
-            rc = cli.cmd_patches(argv)
+            rc = cli.cmd_patches(list(argv) + ["--json"])
         return rc, rm, se, ap_, ad
 
     def test_disable_calls_set_enabled_false(self):
@@ -171,7 +171,7 @@ class TestPatchActions(unittest.TestCase):
              mock.patch("omlx_uplift.patches._omlx_root",
                         lambda: "/x/site-packages/omlx/__init__.py"), \
              contextlib.redirect_stdout(out):
-            rc = cli.cmd_patches(["update", "my-pr"])
+            rc = cli.cmd_patches(["update", "my-pr", "--json"])
         self.assertEqual(rc, 1)
         self.assertIn("--file", out.getvalue())
 
@@ -183,7 +183,7 @@ class TestPatchActions(unittest.TestCase):
              mock.patch("omlx_uplift.patches._omlx_root",
                         lambda: "/x/site-packages/omlx/__init__.py"), \
              contextlib.redirect_stdout(out):
-            rc = cli.cmd_patches(["update", "ghost"])
+            rc = cli.cmd_patches(["update", "ghost", "--json"])
         self.assertEqual(rc, 1)
         self.assertIn("use 'add'", out.getvalue())
 
@@ -204,7 +204,7 @@ class TestPatchActions(unittest.TestCase):
                         lambda: "/x/site-packages/omlx/__init__.py"), \
              mock.patch.object(ps, "promote", pm), \
              contextlib.redirect_stdout(out):
-            rc = cli.cmd_patches(["promote", "my-pr"])
+            rc = cli.cmd_patches(["promote", "my-pr", "--json"])
         self.assertEqual(rc, 0)
         pm.assert_called_once()
         self.assertEqual(pm.call_args[0][1], "my-pr")

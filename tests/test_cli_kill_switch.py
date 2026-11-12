@@ -49,7 +49,7 @@ class KillSwitchRoundTrip(unittest.TestCase):
     def _run(self, *argv):
         out = io.StringIO()
         with redirect_stdout(out):
-            rc = cli.cmd_patches(list(argv))
+            rc = cli.cmd_patches(list(argv) + ["--json"])
         return rc, json.loads(out.getvalue())
 
     def _enabled(self, pid):
@@ -167,7 +167,7 @@ class KillSwitchRoundTrip(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(_patches, "_omlx_root", return_value=None), \
                 redirect_stdout(out), redirect_stderr(err):
-            rc = cli.cmd_patches(["apply"])
+            rc = cli.cmd_patches(["apply", "--json"])
         self.assertEqual(rc, 2)
         self.assertIn("needs a real install tree", err.getvalue())
         self.assertIn("tree not found", err.getvalue())

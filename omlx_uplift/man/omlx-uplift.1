@@ -205,7 +205,10 @@ Manifest-only; it takes effect at the next restart (runtime scope) or
 Build (dev scope).
 .It Ic patch Ic remove Ar id
 Out-of-band patch-carrier recovery when the dashboard is unreachable:
-the same engine the .pth startup reconcile uses, no re-exec, JSON output.
+the same engine the .pth startup reconcile uses, no re-exec.
+Every patch verb prints its result in plain words, one line per patch;
+.Fl -json
+prints the raw result instead.
 The command is singular
 .Ic patch ;
 legacy
@@ -279,7 +282,11 @@ A checkout in your home directory is never guessed at.
 .It Ic dev
 .Ic status
 .Op Fl -fetch
-dev-src state as JSON (branch, tip, drift, staleness).
+.Op Fl -json
+The build branch in plain words: upstream base, commits behind, the
+patches on the branch, and whether the running build is current.
+.Fl -json
+prints the raw state.
 .It Ic dev
 .Ic patches
 .Op Fl -scope Ar omlx|dev|both
@@ -334,6 +341,31 @@ to kickstart the
 .Em omlx-dev
 service after an actual rebuild; an upgrade that skips the rebuild
 leaves the running server alone.
+.It Ic dev
+.Ic kegs
+.Op Fl -json
+Every omlx-dev build on disk, newest first, with build time and size.
+The running build is marked; a build without a finished install receipt
+reads
+.Dq unfinished .
+.It Ic dev
+.Ic use Ar build
+.Op Fl -force
+.Op Fl -restart
+Switch omlx-dev to another build on disk and switch automatic rebuilds
+off.
+.Fl -restart
+restarts the service on that build.
+.It Ic dev
+.Ic rollback
+.Op Fl -restart
+The same switch to the newest build that is not the running one; it also
+clears a base pin.
+.It Ic dev
+.Ic prune
+.Op Fl -keep Ar N
+Delete old builds and keep the newest
+.Ar N .
 .It Ic dev
 .Ic reconfigure
 .Op Fl -port Ar N

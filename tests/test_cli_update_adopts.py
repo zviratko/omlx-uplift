@@ -61,7 +61,7 @@ class _Base(unittest.TestCase):
                                lambda: os.path.join(self.pkg, "omlx")):
             out = io.StringIO()
             with redirect_stdout(out):
-                rc = cli.cmd_patches(list(argv))
+                rc = cli.cmd_patches(list(argv) + ["--json"])
         return rc, json.loads(out.getvalue())
 
     def _entry(self, pid, kind="url", enabled=False, desired=1,

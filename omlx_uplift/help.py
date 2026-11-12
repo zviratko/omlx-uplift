@@ -14,103 +14,119 @@ import os
 import subprocess
 import sys
 
-# (command, one-line summary) — the whole point is ONE line per command.
+# (command, one-line summary) - the whole point is ONE line per command.
+# CLI-REVIEW (user 2026-11-12): every verb the command accepts is named,
+# no em dashes, no internal nouns; details live in `help <command>`.
 COMMANDS = [
-    ("serve", "run oMLX + Uplift (wrapper around 'omlx serve', same args;"
-              " --qa = isolated instance, port 8099, base ~/.omlx-qa)"),
-    ("view", "standalone viewer for installs that cannot load Python (DMG)"),
-    ("install", "mount uplift into an omlx python (REQUIRED after every"
-                " 'brew upgrade omlx')"),
-    ("uninstall", "remove the mount (.pth) again"),
-    ("patch", "status|apply|check|disable-all|enable-all|enable|disable|"
-              "update|update-all|rebase|promote|rollback|remove|order — patch "
-              "recovery without the dashboard ('patches' = legacy alias)"),
-    ("skin", "compile <dir>|decompile <yml> — pack/unpack skin crates"),
-    ("dev", "omlx-dev: bootstrap|install|status|patches|reconfigure|kegs —"
-            " dev patches in a separate keg, keg rollback"),
-    ("env", "list|set|reset|disable-all|enable-all — omlx-dev environment"
-            " overrides (the dashboard's ENVIRONMENT VARIABLES modal)"),
-    ("doctor", "check the installed omlx tree against its wheel RECORD"
-               " (read-only; exit 1 = unexpected drift)"),
-    ("bench-env", "status|create — pinned lm-eval venv for the harness"
-                  " accuracy engine (own venv, never a keg)"),
-    ("mteb-env", "status|create — pinned MTEB venv for the embeddings/"
-                 "rerankers bench (own venv; carries torch — never a keg)"),
+    ("serve", "run oMLX with Uplift (same arguments as 'omlx serve'; "
+              "--qa = separate test instance)"),
+    ("view", "standalone viewer for an oMLX that cannot load Uplift (DMG)"),
+    ("install", "connect Uplift to an omlx install (needed after every "
+                "'brew upgrade omlx')"),
+    ("uninstall", "disconnect Uplift from an omlx install"),
+    ("patch", "status, check, add, update, update-all, rebase, enable, remove "
+              "and more: manage omlx patches"),
+    ("dev", "install, upgrade, status, kegs, use, rollback and more: the "
+            "omlx-dev build with your patches"),
+    ("env", "list, set, reset: omlx-dev environment variables"),
+    ("skin", "compile, decompile: pack and unpack dashboard skins"),
+    ("doctor", "compare the installed omlx files with the release "
+               "(read-only)"),
+    ("bench-env", "status, create: Python environment for accuracy "
+                  "benchmarks"),
+    ("mteb-env", "status, create: Python environment for embedding "
+                 "benchmarks"),
 ]
 
 _TOP_USAGE = """\
 usage: omlx-uplift <command> [args]
 """
 
-# per-command one-screen usage (what argparse would say, without the wall)
+_P = "  omlx-uplift "
+# per-command usage: one full command per line, notes indented below it
 COMMAND_USAGE = {
-    "serve": ("omlx-uplift serve [oMLX serve args...]   (--port, --model-dir, …)\n"
-              "       omlx-uplift serve --qa [--port N] [--qa-base DIR]\n"
-              "         isolated QA instance: base ~/.omlx-qa seeded once from the\n"
-              "         real settings (port replaced); never touches ~/.omlx"),
-    "view": "omlx-uplift view [--api URL] [--port N]",
-    "install": ("omlx-uplift install [--python PATH] [--yes|--keep-skins]"
-                " [--formula NAME] [--default-target omlx|dev]"),
-    "uninstall": "omlx-uplift uninstall [--python PATH]",
-    "patch": ("omlx-uplift patch status|apply|check"
-              " [--target omlx|dev|both]\n"
-              "                 patch disable-all | enable-all\n"
-              "                 patch add ID (--pr R/N | --url U | --file F)"
-              " [--scope omlx|dev|both]\n"
-              "                 patch update ID [--file F | --pr R/N | --url U]"
-              " [--approve once|always]\n"
-              "                 patch update-all\n"
-              "                 patch rebase ID [--continue]  (own build "
-              "patch onto the new base)\n"
-              "                 patch enable|disable ID [--approve"
-              " once|always]\n"
-              "                 patch approve ID [--approve once|always]\n"
-              "                 patch promote ID [--approve once|always]\n"
-              "                 patch rollback ID [--to-v N]\n"
-              "                 patch order ID N  (apply priority: lower "
-              "applies first when patches collide)\n"
-              "                 patch remove ID\n"
-              "                 ('patches' is accepted as a legacy alias)"),
-    "skin": ("omlx-uplift skin compile <dir> [-o out.yml]\n"
-             "                 skin decompile <yml> [-C skins-dir]"),
-    "dev": ("omlx-uplift dev install [--yes] [--with-custom-kernel]"
-            " [--with-grammar] [--dry-run] [--restart]\n"
-            "                 (one command: on a fresh box it runs the\n"
-            "                 setup questions first, builds the keg, then\n"
-            "                 mounts and proves the Uplift connection)\n"
-            "                 dev setup [--yes] [--src PATH] [--origin URL]"
-            " [--sync-ref REF] [--port N]\n"
-            "                 — the lane questionnaire; dev bootstrap and\n"
-            "                 dev configure are aliases\n"
-            "                 dev status [--fetch]\n"
-            "                 dev upgrade [--force] [--restart] (rebuilds"
-            " only when HEAD or patches moved)\n"
-            "                 dev patches [--scope omlx|dev|both]\n"
-            "                 dev reconfigure [--port N] [--base-path P]"
-            " [--share K,...] [--no-share K,...] [--interactive]\n"
-            "                 dev kegs | dev stash-keg\n"
-            "                 dev use <sha> [--force] | dev prune [--keep N]"),
-    "bench-env": ("omlx-uplift bench-env [status] [--json]\n"
-              "                 bench-env create [--reinstall]\n"
-              "                 pinned lm-eval venv under ~/.omlx/uplift/bench-env\n"
-              "                 (harness accuracy engine; no torch, ever)"),
-    "mteb-env": ("omlx-uplift mteb-env [status] [--json]\n"
-              "                 mteb-env create [--reinstall]\n"
-              "                 pinned MTEB venv under ~/.omlx/uplift/mteb-env\n"
-              "                 (embeddings/rerankers bench; torch lives HERE,\n"
-              "                 still never in a keg)"),
-    "env": ("omlx-uplift env [list] [--json]\n"
-            "                 env set NAME VALUE | env reset NAME\n"
-            "                 env disable-all | env enable-all\n"
-            "                 (the omlx-dev store only; values land at the next dev start)"),
-    "doctor": ("omlx-uplift doctor [--json]\n"
-               "                 read-only: every omlx file vs the wheel RECORD;\n"
-               "                 files an applied patch owns are expected drift"),
+    "serve": (_P + "serve [omlx serve args...]\n"
+              + _P + "serve --qa [--port N] [--qa-base DIR]\n"
+              "      --qa: separate test instance (base ~/.omlx-qa, port "
+              "8099),\n"
+              "      seeded once from your settings; never touches ~/.omlx"),
+    "view": _P + "view [--api URL] [--port N]",
+    "install": (_P + "install [--python PATH] [--formula NAME] [--yes | "
+                "--keep-skins]\n"
+                "                      [--default-target omlx|dev]"),
+    "uninstall": _P + "uninstall [--python PATH]",
+    "patch": (
+        "show and check (add --json to any patch command for the raw result):\n"
+        + _P + "patch status [--target omlx|dev|both]\n"
+        + _P + "patch check   [--target ...]   look for new versions\n"
+        + _P + "patch apply   [--target ...]   write enabled patches into the install now\n"
+        + _P + "patch curated [--sync]         the published catalog\n"
+        "add and update:\n"
+        + _P + "patch add ID (--pr REPO/N | --url URL | --file FILE) "
+        "[--scope omlx|dev|both]\n"
+        + _P + "patch update ID [--pr REPO/N | --url URL | --file FILE] "
+        "[--approve once|always]\n"
+        + _P + "patch update-all\n"
+        + _P + "patch rebase ID [--continue]   carry your own build patch "
+        "onto the new base\n"
+        "one patch:\n"
+        + _P + "patch enable|disable ID [--approve once|always]\n"
+        + _P + "patch promote ID [--approve once|always]   use the newest "
+        "stored version\n"
+        + _P + "patch rollback ID [--to-v N]\n"
+        + _P + "patch approve ID [--approve once|always]\n"
+        + _P + "patch order ID N               lower N applies first\n"
+        + _P + "patch adopt ID                 own a catalog patch\n"
+        + _P + "patch remove ID\n"
+        "all patches:\n"
+        + _P + "patch disable-all | enable-all   kill switch and its undo\n"
+        "('patches' works as another name for 'patch')"),
+    "skin": (_P + "skin compile DIR [-o OUT.yml]\n"
+             + _P + "skin decompile FILE.yml [-C SKINS-DIR]"),
+    "dev": (
+        "build:\n"
+        + _P + "dev install [--yes] [--with-custom-kernel] [--with-grammar] "
+        "[--dry-run] [--restart]\n"
+        "      always rebuilds; on a new machine it asks the setup "
+        "questions first\n"
+        + _P + "dev upgrade [--force] [--restart]\n"
+        "      rebuilds only when upstream or your patches moved\n"
+        + _P + "dev status [--fetch] [--json]\n"
+        + _P + "dev patches [--scope omlx|dev|both] [--json]\n"
+        "builds on disk:\n"
+        + _P + "dev kegs [--json]\n"
+        + _P + "dev use BUILD [--force] [--restart]\n"
+        + _P + "dev rollback [--restart]       back to the previous build\n"
+        + _P + "dev prune [--keep N]\n"
+        + _P + "dev stash-keg\n"
+        "setup:\n"
+        + _P + "dev setup [--yes] [--src PATH] [--origin URL] "
+        "[--sync-ref REF] [--port N]\n"
+        "      (dev bootstrap and dev configure are other names for it)\n"
+        + _P + "dev reconfigure [--port N] [--base-path P] [--share K,...] "
+        "[--no-share K,...] [--interactive]"),
+    "bench-env": (_P + "bench-env [status] [--json]\n"
+                  + _P + "bench-env create [--reinstall]\n"
+                  "      lm-eval environment in ~/.omlx/uplift/bench-env "
+                  "(no torch)"),
+    "mteb-env": (_P + "mteb-env [status] [--json]\n"
+                 + _P + "mteb-env create [--reinstall]\n"
+                 "      MTEB environment in ~/.omlx/uplift/mteb-env "
+                 "(carries torch)"),
+    "env": (_P + "env [list] [--json]\n"
+            + _P + "env set NAME VALUE\n"
+            + _P + "env reset NAME\n"
+            + _P + "env disable-all | enable-all\n"
+            "      omlx-dev only; values apply at the next omlx-dev start"),
+    "doctor": (_P + "doctor [--json]\n"
+               "      read-only: every omlx file against the release file "
+               "list;\n"
+               "      files that an applied patch changes are expected"),
 }
 
 _CONFIG_FILES = [
     ("metrics.sqlite3", "uplift's own metrics database"),
-    ("env.json", "stored experimental env overrides — omlx-dev only (ENV-4)"),
+    ("env.json", "stored experimental env overrides - omlx-dev only (ENV-4)"),
     ("patches.json", "patch manifest (desired state per patch)"),
     ("patches/", "stored diffs + byte-exact pre-apply backups"),
     ("patches.lock", "reconcile lock (startup and CLI share it)"),
@@ -140,7 +156,7 @@ def print_help(cmd: str | None = None) -> int:
         if not usage:
             print(f"no usage for '{cmd}'", file=sys.stderr)
             return 1
-        print(_paint_head(f"usage ({cmd}):"))
+        print(_paint_head(f"usage: omlx-uplift {cmd}"))
         print(usage)
         return 0
     print(_paint_head(_TOP_USAGE.rstrip()))
@@ -150,8 +166,8 @@ def print_help(cmd: str | None = None) -> int:
     for name, summary in COMMANDS:
         print(f"  {_paint_cmd(name.ljust(width))}  {summary}")
     print()
-    print("details: 'omlx-uplift help <command>' (usage) or 'omlx-uplift man'"
-          " (full documentation).")
+    print("more: omlx-uplift help <command>   (usage of one command)")
+    print("      omlx-uplift man              (full manual)")
     out.flush()
     return 0
 

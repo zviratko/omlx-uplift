@@ -185,7 +185,7 @@ def test_cli_restart_only_after_a_real_rebuild(monkeypatch, capsys):
     seen, restarts = _cli_capture(monkeypatch, result=skip)
     assert cli.cmd_dev(["upgrade", "--restart"]) == 0
     assert restarts == []
-    assert "no restart — nothing was rebuilt" in capsys.readouterr().out
+    assert "no restart - nothing was rebuilt" in capsys.readouterr().out
     # failure never restarts
     bad = devsrc.BuildResult(ok=False, stage="brew", returncode=1, lines=[])
     seen, restarts = _cli_capture(monkeypatch, result=bad)

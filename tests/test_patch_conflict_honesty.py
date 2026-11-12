@@ -411,7 +411,7 @@ class SetOrderVerb(unittest.TestCase):
                  mock.patch("omlx_uplift.paths.brew_prefix_candidates",
                             return_value=[]), \
                  redirect_stdout(buf_out):
-                rc = cli.cmd_patches(["order", "say-a", "7"])
+                rc = cli.cmd_patches(["order", "say-a", "7", "--json"])
         finally:
             if old is None:
                 del os.environ["UPLIFT_HOME"]

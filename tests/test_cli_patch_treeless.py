@@ -103,7 +103,7 @@ class TreelessStoreVerbs(unittest.TestCase):
 
     # ---- per-patch control is store state, not tree bytes ----------------
     def test_disable_works_without_a_tree(self):
-        rc, out, err = _run(["patch", "disable", "demo-runtime"], *self.no_rows,
+        rc, out, err = _run(["patch", "disable", "demo-runtime", "--json"], *self.no_rows,
                             self.base)
         self.assertEqual(rc, 0, msg=err)
         self.assertTrue(json.loads(out)["ok"])
@@ -113,13 +113,13 @@ class TreelessStoreVerbs(unittest.TestCase):
 
     def test_promote_and_rollback_answer_without_a_tree(self):
         for verb in ("promote", "rollback"):
-            rc, out, err = _run(["patch", verb, "demo-build"], *self.no_rows,
+            rc, out, err = _run(["patch", verb, "demo-build", "--json"], *self.no_rows,
                                 self.base)
             self.assertEqual(rc, 1, msg=err)     # honest 'no candidate', not rc 2
             self.assertIn("ok", out)
 
     def test_remove_forgets_the_entry_and_keeps_the_backups(self):
-        rc, out, err = _run(["patch", "remove", "demo-runtime"], *self.no_rows,
+        rc, out, err = _run(["patch", "remove", "demo-runtime", "--json"], *self.no_rows,
                             self.base)
         self.assertEqual(rc, 0, msg=err)
         payload = json.loads(out)
