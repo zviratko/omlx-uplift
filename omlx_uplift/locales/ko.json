@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "처리량",
  "uplift.bench.tp.out_hint": "측정된 출력 토큰과 요청한 tg 길이 비교.",
  "uplift.bench.tp.cache_off": "이 실행에서는 캐시 비활성화",
+ "uplift.bench.tp.concurrency_lift": "이 실행에서는 동시 요청 한도 상향",
  "uplift.bench.tp.no_hot_cache": "이 실행에서 핫 캐시 끄기",
  "uplift.bench.tp.no_hot_cache_hint": "벤치마크 실행 중 핫 캐시(메모리) 한도를 0으로 설정했다가 실행 후 원래 설정으로 되돌립니다. 로드된 모델은 실행 시작과 종료 시 다시 로드됩니다.",
  "uplift.bench.tp.no_ssd_cache": "이 실행에서 SSD 캐시 끄기",

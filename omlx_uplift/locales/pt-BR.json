@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "Vazão",
  "uplift.bench.tp.out_hint": "Tokens de saída medidos vs. o comprimento tg solicitado.",
  "uplift.bench.tp.cache_off": "Cache desativado durante esta execução",
+ "uplift.bench.tp.concurrency_lift": "Limite de requisições simultâneas elevado para esta execução",
  "uplift.bench.tp.no_hot_cache": "Desativar o cache hot nesta execução",
  "uplift.bench.tp.no_hot_cache_hint": "Define o limite do cache hot (em memória) como 0 durante o benchmark e depois restaura sua configuração. Modelos carregados são recarregados no início e no fim da execução.",
  "uplift.bench.tp.no_ssd_cache": "Desativar o cache SSD nesta execução",

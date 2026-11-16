@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "Rendimiento",
  "uplift.bench.tp.out_hint": "Tokens de salida medidos frente a la longitud tg solicitada.",
  "uplift.bench.tp.cache_off": "Caché desactivada durante esta prueba",
+ "uplift.bench.tp.concurrency_lift": "Límite de peticiones simultáneas elevado para esta prueba",
  "uplift.bench.tp.no_hot_cache": "Desactivar la caché hot para esta prueba",
  "uplift.bench.tp.no_hot_cache_hint": "Pone el límite de la caché hot (en memoria) a 0 mientras se ejecuta la prueba y luego restaura tu ajuste. Los modelos cargados se recargan al inicio y al final.",
  "uplift.bench.tp.no_ssd_cache": "Desactivar la caché SSD para esta prueba",

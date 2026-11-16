@@ -359,6 +359,10 @@ test('the classic collect() payload is byte-identical (frozen)', () => {
         align_prompt_to_ane: false,
         force_lm_engine: false,
         upload: false,
+        // user 2026-11-16: 'Hot cache off' is checked by default, so the
+        // flag rides the default body — the ONLY addition, and it comes
+        // from the box, not the probe block
+        no_hot_cache: true,
     }, 'the probe block must not add, rename or reorder a single key');
     // and the probe's own fields never leak into it
     assert.ok(!('prefill_tokens' in body) && !('parallel' in body));

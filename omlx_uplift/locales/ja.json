@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "スループット",
  "uplift.bench.tp.out_hint": "測定された出力トークン数（要求した tg 長さとの比較）。",
  "uplift.bench.tp.cache_off": "このベンチマーク実行中はキャッシュ無効",
+ "uplift.bench.tp.concurrency_lift": "このベンチマーク実行中は同時リクエスト上限を引き上げ",
  "uplift.bench.tp.no_hot_cache": "この実行ではホットキャッシュを無効化",
  "uplift.bench.tp.no_hot_cache_hint": "ベンチマーク実行中はホットキャッシュ(メモリ内)の制限を 0 にし、終了後に設定を戻します。読み込み中のモデルは実行の開始と終了時に再読み込みされます。",
  "uplift.bench.tp.no_ssd_cache": "この実行ではSSDキャッシュを無効化",

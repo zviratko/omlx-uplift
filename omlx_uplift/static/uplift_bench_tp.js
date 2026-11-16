@@ -702,14 +702,17 @@ var TP = {
         // locales carry the 'tg128' token in this string — replace is a
         // no-op if a future locale does not.
         var batchHint = el('p', 'native-stub-note', t('bench.config.batch_hint', 'Batch tests use pp1024 / tg128'));
-        // CACHE-OFF (user item 3, client half): per-run cache overrides, off
-        // by default and rebuilt unchecked on every panel render. The hints
-        // are title attributes (the row is a chip-sized label, no room for a
-        // second line), and the pair is DEAD for external endpoints — the
-        // caches being disabled live in this process, so an external run has
-        // nothing to turn off.
+        // CACHE-OFF (user item 3, client half): per-run cache overrides,
+        // rebuilt on every panel render. HOT is ON by default (user
+        // 2026-11-16: cold-cache measurement is what a benchmark should
+        // show; the box stays there to un-tick it), SSD stays off — that
+        // one changes the writer path, so it remains an explicit choice.
+        // The hints are title attributes (the row is a chip-sized label,
+        // no room for a second line), and the pair is DEAD for external
+        // endpoints — the caches being disabled live in this process, so
+        // an external run has nothing to turn off.
         var noHot = checkI18n('bench-tp-no-hot',
-            'uplift.bench.tp.no_hot_cache', 'Hot cache off for this run');
+            'uplift.bench.tp.no_hot_cache', 'Hot cache off for this run', true);
         var noSsd = checkI18n('bench-tp-no-ssd',
             'uplift.bench.tp.no_ssd_cache', 'SSD cache off for this run');
         var HINTS = [

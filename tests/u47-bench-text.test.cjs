@@ -426,6 +426,23 @@ test('TP-TABLES: history notes the cache-off run under its title', () => {
         'empty array is not a disabled cache');
 });
 
+test('BENCH-LIFT: history notes a run whose concurrency limit was raised', () => {
+    const { B } = loadVm();
+    const withNote = B._benchText.tpConcurrencyNote(
+        { meta: { concurrency_lift: { from: 4, to: 8 } } });
+    assert.ok(withNote, 'the note exists when the snapshot says so');
+    assert.equal(withNote.textContent,
+        'Concurrent-request limit raised for this run');
+    assert.equal(withNote.dataset.i18n, 'uplift.bench.tp.concurrency_lift');
+    assert.equal(withNote.dataset.en,
+        'Concurrent-request limit raised for this run');
+    assert.equal(B._benchText.tpConcurrencyNote({ meta: {} }), null,
+        'no lift -> no note');
+    assert.equal(B._benchText.tpConcurrencyNote({}), null, 'no meta at all');
+    assert.equal(B._benchText.tpConcurrencyNote(
+        { meta: { concurrency_lift: {} } }), null, 'no target -> no note');
+});
+
 test('TP-TABLES: the live table and the history card paint the same spec', () => {
     const { B } = loadVm();
     const live = B._u49.buildTpTables([TP1K, TPB2]);
@@ -443,6 +460,8 @@ const NEW_KEYS = {
     'uplift.bench.tp.out_hint':
         'Measured output tokens vs the requested tg length.',
     'uplift.bench.tp.cache_off': 'Cache disabled during this run',
+    'uplift.bench.tp.concurrency_lift':
+        'Concurrent-request limit raised for this run',
     'uplift.bench.tp.no_hot_cache': 'Hot cache off for this run',
     'uplift.bench.tp.no_hot_cache_hint':
         'Sets the in-memory Hot Cache limit to 0 while this benchmark runs, '

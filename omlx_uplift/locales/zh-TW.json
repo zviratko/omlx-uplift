@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "吞吐量",
  "uplift.bench.tp.out_hint": "實測輸出 token 數與請求的 tg 長度對比。",
  "uplift.bench.tp.cache_off": "本次基準測試期間已停用快取",
+ "uplift.bench.tp.concurrency_lift": "本次基準測試期間已提高並行請求上限",
  "uplift.bench.tp.no_hot_cache": "本次執行停用熱快取",
  "uplift.bench.tp.no_hot_cache_hint": "基準測試執行期間將熱快取（記憶體）上限設為 0，結束後恢復您的設定。已載入的模型會在執行開始與結束時重新載入。",
  "uplift.bench.tp.no_ssd_cache": "本次執行停用 SSD 快取",

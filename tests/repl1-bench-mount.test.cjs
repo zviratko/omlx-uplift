@@ -522,14 +522,16 @@ const tables = (node, out) => {
 const heads = (t) => t.children[0].children.map(th => th.textContent);
 const cells = (t, i) => t.children[i].children.map(td => td.textContent);
 
-test('CACHE-OFF: the Advanced section carries both boxes, unchecked', () => {
+test('CACHE-OFF: the Advanced section carries both boxes; HOT is the default', () => {
     const { win, byId } = mountLoad();
     win.UpliftNativeBench.mount();
     const hot = byId['bench-tp-no-hot'], ssd = byId['bench-tp-no-ssd'];
     assert.equal(hot.type, 'checkbox', 'hot cache box is a real checkbox');
     assert.equal(ssd.type, 'checkbox');
-    assert.equal(hot.checked, false, 'off by default — the run must not touch my settings');
-    assert.equal(ssd.checked, false);
+    // user 2026-11-16: cold-cache measurement is the benchmark default;
+    // the box stays visible so a run can un-tick it deliberately
+    assert.equal(hot.checked, true, 'hot cache off is ON by default');
+    assert.equal(ssd.checked, false, 'ssd stays an explicit choice');
     // reached THROUGH THE PARENT: a control built but never appended would
     // pass a byId lookup and show nothing in the browser
     const panel = byId['bench-subpanel'];
@@ -568,14 +570,22 @@ test('CACHE-OFF: the start body carries the flags only when checked', () => {
     win.UpliftNativeBench.mount();
     const TP = win.UpliftNativeBench.tp;
     byId['bench-tp-model'].value = 'M1';
-    assert.deepEqual(
-        Object.keys(TP.collect()).filter(k => k.indexOf('no_') === 0), [],
-        'neither key exists while both boxes are off (absent = leave my setting)');
-    byId['bench-tp-no-hot'].checked = true;
+    // HOT is checked by default (user 2026-11-16), so the default body
+    // carries no_hot_cache; un-ticking removes it again (absent = leave
+    // my setting alone — the two-state contract is unchanged)
     let body = TP.collect();
-    assert.equal(body.no_hot_cache, true);
-    assert.equal('no_ssd_cache' in body, false, 'only the checked one rides');
+    assert.equal(body.no_hot_cache, true, 'default run measures cold-ish');
+    assert.equal('no_ssd_cache' in body, false, 'ssd stays absent while off');
+    byId['bench-tp-no-hot'].checked = false;
+    body = TP.collect();
+    assert.deepEqual(
+        Object.keys(body).filter(k => k.indexOf('no_') === 0), [],
+        'neither key exists while both boxes are off');
     byId['bench-tp-no-ssd'].checked = true;
+    body = TP.collect();
+    assert.equal(body.no_ssd_cache, true);
+    assert.equal('no_hot_cache' in body, false, 'only the checked one rides');
+    byId['bench-tp-no-hot'].checked = true;
     body = TP.collect();
     assert.equal(body.no_hot_cache, true);
     assert.equal(body.no_ssd_cache, true);
@@ -687,6 +697,27 @@ test('TP-TABLES: history renders the same tables plus the cache-off note', async
         ['Test', 'TTFT (ms)', 'TPOT (ms/tok)', 'PP TPS', 'TG TPS',
          'E2E Latency', 'Throughput', 'Peak MLX', 'out'],
         'live and history cannot drift: one painter');
+});
+
+test('BENCH-LIFT: a lifted history run says so beside the cache note', async () => {
+    const hist = [
+        { id: 'h3', ts: 1760000002, model_id: 'M1', rows: ROWS,
+          meta: { cache_off: ['hot'],
+                  concurrency_lift: { from: 4, to: 8 } } },
+    ];
+    const { win, byId } = mountLoad(hist);
+    win.UpliftNativeBench.mount();
+    await new Promise(r => setTimeout(r, 5));
+    const notes = [];
+    (function walk(n) {
+        if (n && n._classes && n._classes.has('bench-tp-note')) notes.push(n);
+        for (const k of (n && n.children) || []) walk(k);
+    })(byId['bench-tp-history']);
+    assert.equal(notes.length, 2, 'cache note + lift note, one card');
+    assert.equal(notes[0].dataset.i18n, 'uplift.bench.tp.cache_off');
+    assert.equal(notes[1].dataset.i18n, 'uplift.bench.tp.concurrency_lift');
+    assert.equal(notes[1].textContent,
+        'Concurrent-request limit raised for this run');
 });
 
 test('TP-TABLES: the results head still offers Copy + Download for both tables', () => {

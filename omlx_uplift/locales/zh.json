@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "吞吐量",
  "uplift.bench.tp.out_hint": "实测输出 token 数与请求的 tg 长度对比。",
  "uplift.bench.tp.cache_off": "本次基准测试期间已禁用缓存",
+ "uplift.bench.tp.concurrency_lift": "本次基准测试期间已提高并发请求上限",
  "uplift.bench.tp.no_hot_cache": "本次运行禁用热缓存",
  "uplift.bench.tp.no_hot_cache_hint": "基准测试运行期间将热缓存（内存）上限设为 0，结束后恢复您的设置。已加载的模型会在运行开始和结束时重新加载。",
  "uplift.bench.tp.no_ssd_cache": "本次运行禁用 SSD 缓存",

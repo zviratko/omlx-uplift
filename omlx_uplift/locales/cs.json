@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "Průtok dat",
  "uplift.bench.tp.out_hint": "Naměřené výstupní tokeny oproti požadované délce tg.",
  "uplift.bench.tp.cache_off": "Běhu tohoto testu bylo vypnuto cachování",
+ "uplift.bench.tp.concurrency_lift": "Limit souběžných požadavků byl pro tento test zvýšen",
  "uplift.bench.tp.no_hot_cache": "Vypnout hot cache pro tento test",
  "uplift.bench.tp.no_hot_cache_hint": "Po dobu testu nastaví limit hot cache (v paměti) na 0 a pak vrátí vaše nastavení. Načtené modely se při startu a konci testu znovu načetou.",
  "uplift.bench.tp.no_ssd_cache": "Vypnout SSD cache pro tento test",

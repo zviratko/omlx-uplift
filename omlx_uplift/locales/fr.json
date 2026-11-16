@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "Débit",
  "uplift.bench.tp.out_hint": "Jetons de sortie mesurés par rapport à la longueur tg demandée.",
  "uplift.bench.tp.cache_off": "Cache désactivée pendant ce test",
+ "uplift.bench.tp.concurrency_lift": "Limite de requêtes simultanées relevée pendant ce test",
  "uplift.bench.tp.no_hot_cache": "Désactiver le cache hot pour ce test",
  "uplift.bench.tp.no_hot_cache_hint": "Met la limite du cache hot (en mémoire) à 0 pendant le test, puis restaure votre réglage. Les modèles chargés sont rechargés au début et à la fin du test.",
  "uplift.bench.tp.no_ssd_cache": "Désactiver le cache SSD pour ce test",

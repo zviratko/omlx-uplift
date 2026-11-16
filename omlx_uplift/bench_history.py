@@ -122,6 +122,11 @@ def capture_run(run: Any) -> None:
                 # cache-off flags active for this run (statics render
                 # meta.cache_off; absent when nothing was toggled)
                 meta["cache_off"] = list(run._uplift_cache_off)
+            if getattr(run, "_uplift_concurrency_lift", None):
+                # the batch rows ran with the server's concurrent-request
+                # cap raised to the widest batch ({from,to}); absent when
+                # the cap already covered the batch or no batch tests ran
+                meta["concurrency_lift"] = dict(run._uplift_concurrency_lift)
             rows = list(getattr(run, "results", None) or [])
         entry = {"id": eid, "surface": surface, "kind": "run",
                  "model_id": run.request.model_id,

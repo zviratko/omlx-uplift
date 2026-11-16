@@ -41,6 +41,7 @@
  "uplift.bench.throughput": "Throughput",
  "uplift.bench.tp.out_hint": "Measured output tokens vs the requested tg length.",
  "uplift.bench.tp.cache_off": "Cache disabled during this run",
+ "uplift.bench.tp.concurrency_lift": "Concurrent-request limit raised for this run",
  "uplift.bench.tp.no_hot_cache": "Hot cache off for this run",
  "uplift.bench.tp.no_hot_cache_hint": "Sets the in-memory Hot Cache limit to 0 while this benchmark runs, then restores your setting. Loaded models are reloaded at run start and finish.",
  "uplift.bench.tp.no_ssd_cache": "SSD cache off for this run",

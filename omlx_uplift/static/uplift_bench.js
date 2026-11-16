@@ -1759,6 +1759,20 @@ function tpCacheOffNote(e) {
     p.dataset.en = p.textContent;
     return p;
 }
+// BENCH-LIFT (user 2026-11-16): batch runs raise the server's
+// concurrent-request limit to the widest batch for the run window, so a
+// history card whose batch rows ran under a lifted limit says so — the
+// row shape differs from a run measured under the user's own ceiling.
+function tpConcurrencyNote(e) {
+    var lift = e && e.meta && e.meta.concurrency_lift;
+    if (!lift || !lift.to) return null;
+    var p = el('p', 'bench-tp-note',
+        t('uplift.bench.tp.concurrency_lift',
+          'Concurrent-request limit raised for this run'));
+    p.dataset.i18n = 'uplift.bench.tp.concurrency_lift';
+    p.dataset.en = p.textContent;
+    return p;
+}
 
 function tpHistoryBody(e) {
     var card = el('div', 'bench-result card');
@@ -1775,6 +1789,8 @@ function tpHistoryBody(e) {
     }));
     var note = tpCacheOffNote(e);
     if (note) card.appendChild(note);
+    var liftNote = tpConcurrencyNote(e);
+    if (liftNote) card.appendChild(liftNote);
     if (!rows.length) {
         card.appendChild(historyEmptyNote());
         return card;
@@ -2041,5 +2057,6 @@ return { mount: mount, isMounted: function () { return _mounted; },
                        tpTableSpecs: tpTableSpecs, tpDlCols: tpDlCols,
                        tpSingles: tpSingles, tpBatch: tpBatch,
                        tpBaseline: tpBaseline, tpPpPerReq: tpPpPerReq,
-                       tpCacheOffNote: tpCacheOffNote } };
+                       tpCacheOffNote: tpCacheOffNote,
+                       tpConcurrencyNote: tpConcurrencyNote } };
 });

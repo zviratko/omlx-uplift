@@ -156,9 +156,19 @@ def fake_bench(monkeypatch):
 class FakePool:
     def __init__(self, entries=None):
         self.entries = entries if entries is not None else {"m1": types.SimpleNamespace(model_type="llm")}
+        # BENCH-LIFT: recorder for the live concurrency seam
+        self.applied: list[int] = []
 
     def get_entry(self, model_id):
         return self.entries.get(model_id)
+
+    async def apply_max_concurrent_requests(self, value):
+        self.applied.append(int(value))
+
+
+class NoSeamPool(FakePool):
+    """Old-keg shape: the pool has no live-apply seam at all."""
+    apply_max_concurrent_requests = None
 
 
 def _engine_mod():
@@ -343,7 +353,8 @@ def _cache_env_gen(fake_bench, seam_cls):
     routes._apply_cache_settings_runtime = seam
     server = types.ModuleType("omlx.server")
     gs = types.SimpleNamespace(cache=types.SimpleNamespace(
-        enabled=True, hot_cache_only=False, hot_cache_max_size="8GB"))
+        enabled=True, hot_cache_only=False, hot_cache_max_size="8GB"),
+        scheduler=types.SimpleNamespace(max_concurrent_requests=8))
     server._server_state = types.SimpleNamespace(global_settings=gs)
     prev = [(sys.modules["omlx.admin"], "routes",
              getattr(sys.modules["omlx.admin"], "routes", None)),
@@ -768,6 +779,154 @@ async def test_history_meta_carries_cache_off(fake_bench, cache_env):
     await _tick()
     e2 = next(e for e in bh.load("throughput") if e["id"] == out2["bench_id"])
     assert "cache_off" not in e2["meta"]
+
+
+# ---------------------------------------------------------------------------
+# BENCH-LIFT (user 2026-11-16): batch runs raise the concurrent-request
+# admission cap to the widest batch for the run window, then restore it.
+# The fake gs (cache_env) carries scheduler.max_concurrent_requests.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_applies_and_restores(fake_bench, cache_env):
+    """Cap 4 with a batch-8 test: the seam is raised BEFORE the run task
+    starts (the bench's engine load must see the lifted template), the run
+    carries the lift info, and the user's own 4 is back at run end."""
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    pool = FakePool()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                          "batch_sizes": [2, 8]}, pool)
+    assert pool.applied == [8]
+    assert cache_env.gs.scheduler.max_concurrent_requests == 8
+    run = fake_bench.get_run(out["bench_id"])
+    assert run._uplift_concurrency_lift == {"from": 4, "to": 8}
+    assert be.active_summary()["concurrency_lift"] == {"from": 4, "to": 8}
+    await asyncio.wait_for(run.task, 2)
+    assert pool.applied == [8, 4]                    # apply + restore
+    assert cache_env.gs.scheduler.max_concurrent_requests == 4
+
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_raise_only_never_demotes(fake_bench,
+                                                         cache_env):
+    """Cap 8, batches up to 8: nothing to lift — the seam is never called
+    and the user's ceiling stands (a batch of 4 on a cap-8 server keeps 8)."""
+    be = _engine_mod()
+    pool = FakePool()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                          "batch_sizes": [4, 8]}, pool)
+    assert pool.applied == []
+    run = fake_bench.get_run(out["bench_id"])
+    assert be.active_summary()["concurrency_lift"] is None
+    await asyncio.wait_for(run.task, 2)
+    assert pool.applied == []
+
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_skipped_without_batch_or_server(fake_bench,
+                                                                cache_env):
+    """No batch tests -> no lift. And a build whose server state cannot be
+    read (no omlx.server in the fake set) still starts the bench — the run
+    just lives under the server's own limits (prefill-probe philosophy)."""
+    be = _engine_mod()
+    pool = FakePool()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024]}, pool)
+    assert pool.applied == []
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+    # external runs never touch OUR scheduler
+    cache_env.gs.scheduler.max_concurrent_requests = 2
+    body = {"model_id": "remote-1", "prompt_lengths": [1024],
+            "batch_sizes": [8],
+            "external": {"base_url": "http://x/v1", "api_key": "",
+                         "model": "r"}}
+    out2 = await be.start(body, pool)
+    assert pool.applied == []
+    await asyncio.wait_for(fake_bench.get_run(out2["bench_id"]).task, 2)
+
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_missing_seam_refuses(fake_bench, cache_env):
+    """A lift that CANNOT be applied must refuse the run, not silently
+    measure the cap: clear BadInput, snapshot untouched, claim abandoned."""
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    with pytest.raises(be.BadInput, match="cannot raise its limit"):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                        "batch_sizes": [8]}, NoSeamPool())
+    assert cache_env.gs.scheduler.max_concurrent_requests == 4
+    assert fake_bench.get_active_run() is None
+    assert [r.status for r in fake_bench.runs.values()] == ["error"]
+
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_apply_failure_rewinds(fake_bench, cache_env):
+    """The seam raising mid-apply: settings rewound, Conflict surfaced,
+    no orphan claim left behind."""
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    pool = FakePool()
+
+    async def boom(value):
+        raise RuntimeError("pool exploded")
+
+    pool.apply_max_concurrent_requests = boom
+    with pytest.raises(be.Conflict, match="Could not raise"):
+        await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                        "batch_sizes": [8]}, pool)
+    assert cache_env.gs.scheduler.max_concurrent_requests == 4
+    assert fake_bench.get_active_run() is None
+    assert [r.status for r in fake_bench.runs.values()] == ["error"]
+
+
+@pytest.mark.asyncio
+async def test_concurrency_lift_restored_on_cancel(fake_bench, cache_env):
+    """cancel() kills the run task; the lift restore still runs — the user
+    must never keep the bench's raised ceiling after stopping the run."""
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    pool = FakePool()
+    gate = asyncio.Event()
+
+    async def hang(run, pool_arg):
+        try:
+            await gate.wait()
+        finally:
+            run.status = "cancelled"
+
+    fake_bench.run_benchmark = hang
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                          "batch_sizes": [8]}, pool)
+    run = fake_bench.get_run(out["bench_id"])
+    await _tick()
+    await be.cancel(run)
+    with pytest.raises(asyncio.CancelledError):
+        await run.task
+    assert pool.applied == [8, 4]
+    assert cache_env.gs.scheduler.max_concurrent_requests == 4
+
+
+@pytest.mark.asyncio
+async def test_history_meta_carries_concurrency_lift(fake_bench, cache_env):
+    """capture_run persists meta.concurrency_lift only for lifted runs —
+    the statics lane reads that for the history-card note."""
+    from omlx_uplift import bench_history as bh
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                          "batch_sizes": [8]}, FakePool())
+    await asyncio.wait_for(fake_bench.get_run(out["bench_id"]).task, 2)
+    await _tick()                        # let the done callback write
+    entries = bh.load("throughput")
+    assert len(entries) == 1 and entries[0]["id"] == out["bench_id"]
+    assert entries[0]["meta"]["concurrency_lift"] == {"from": 4, "to": 8}
+
+    out2 = await be.start({"model_id": "m1", "prompt_lengths": [1024]},
+                          FakePool())
+    await asyncio.wait_for(fake_bench.get_run(out2["bench_id"]).task, 2)
+    await _tick()
+    e2 = next(e for e in bh.load("throughput") if e["id"] == out2["bench_id"])
+    assert "concurrency_lift" not in e2["meta"]
 
 
 # ---------------------------------------------------------------------------

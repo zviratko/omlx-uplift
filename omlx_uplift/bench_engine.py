@@ -159,8 +159,74 @@ async def _enable_cache_off(no_hot_cache: bool, no_ssd_cache: bool):
     return restore, flags
 
 
-async def _finalize_cache_restore(restore) -> None:
-    """Run the cache restore so it completes EVEN inside a cancelled run
+async def _lift_concurrency(pool, batch_sizes):
+    """Temporarily raise the server's concurrent-request admission cap.
+
+    The batch test submits `batch_size` requests at once, but the
+    scheduler admits only `scheduler.max_concurrent_requests` at a time
+    (vanilla default 8, user-settable on the System page), so a batch
+    wider than the cap QUEUES instead of overlapping - the run measures
+    the cap, not the requested parallelism (user bug report 2026-11-16).
+    The lift RAISES the live value to max(batch_sizes) for the run
+    window through the same pair of seams the admin settings route uses:
+    the live `global_settings.scheduler.max_concurrent_requests` write
+    (future engines derive their config from it) plus
+    `pool.apply_max_concurrent_requests` (loaded engines, the pool
+    template, and the live decode cap). IN-MEMORY ONLY: settings.json is
+    never written; the snapshot is restored in _runner's finally.
+
+    RAISE only: a batch of 4 on a server capped at 8 keeps the 8 - the
+    user's own ceiling is never demoted. No-op (None, None) when there
+    are no batch tests, the cap is already wide enough, or this build
+    exposes no server settings to read (measurement then runs under the
+    server's own limits, exactly the prefill probe's pin philosophy).
+    When a lift IS needed but the pool has no live-apply seam, refuse:
+    a silently capped batch row is the bug this function exists to kill.
+    """
+    if not batch_sizes:
+        return None, None
+    needed = max(int(b) for b in batch_sizes)
+    try:
+        from omlx.server import _server_state
+    except ImportError:
+        logger.debug("uplift bench: no server settings access; concurrency "
+                     "cap left as configured")
+        return None, None
+    gs = getattr(_server_state, "global_settings", None)
+    sched = getattr(gs, "scheduler", None) if gs is not None else None
+    current = getattr(sched, "max_concurrent_requests", None)
+    if not isinstance(current, int) or isinstance(current, bool) \
+            or current >= needed:
+        return None, None
+    apply = getattr(pool, "apply_max_concurrent_requests", None)
+    if apply is None:
+        raise BadInput(
+            f"The batch test needs {needed} concurrent requests but this "
+            f"server cannot raise its limit of {current} for the run - the "
+            "row would measure the limit, not the batch size. Update the "
+            "server, or set the Concurrent Requests limit to at least "
+            f"{needed}.")
+    gs.scheduler.max_concurrent_requests = needed
+    try:
+        await apply(needed)
+    except Exception as e:
+        gs.scheduler.max_concurrent_requests = current
+        raise Conflict("Could not raise the concurrent-request limit for "
+                       f"the benchmark: {e.__class__.__name__}: {e}") from e
+
+    async def restore():
+        gs.scheduler.max_concurrent_requests = current
+        try:
+            await apply(current)   # back to the user's own ceiling
+        except Exception as e:
+            logger.warning(f"uplift bench concurrency restore failed: {e}")
+
+    return restore, {"from": current, "to": needed}
+
+
+async def _finalize_restore(restore, what: str = "cache") -> None:
+    """Run a temporary-setting restore (cache or concurrency) so it
+    completes EVEN inside a cancelled run
     task. asyncio delivers one CancelledError per cancel() request, and a
     bench task can be cancelled again while its finally is executing
     (double-click cancel, wait_for teardown) — a bare await could die
@@ -178,10 +244,10 @@ async def _finalize_cache_restore(restore) -> None:
                 break                  # settled; inspect below
             continue                   # keep waiting: config must not stay temp
         except Exception as e:
-            logger.warning(f"uplift bench cache restore failed: {e}")
+            logger.warning(f"uplift bench {what} restore failed: {e}")
             return
     if not task.cancelled() and task.exception() is not None:
-        logger.warning(f"uplift bench cache restore failed: {task.exception()}")
+        logger.warning(f"uplift bench {what} restore failed: {task.exception()}")
 
 
 class Conflict(Exception):
@@ -218,7 +284,13 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
 
     no_hot_cache / no_ssd_cache: temporary IN-MEMORY prefix-cache off
     switches around this run (see _enable_cache_off); never persisted,
-    restored in _runner's finally — including under cancellation."""
+    restored in _runner's finally — including under cancellation.
+
+    Local batch tests additionally get a temporary concurrency lift: the
+    server's max_concurrent_requests admission cap is raised to the
+    widest batch size for the run window and restored at the end (see
+    _lift_concurrency). No flag, no body key - the panel's batch sizes
+    are the promise, the cap must never silently shrink them."""
     B = _engine()
 
     active = B.get_active_run()
@@ -269,6 +341,8 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
     run = B.create_run(bench_request)
     cache_restore = None
     cache_off: list[str] = []
+    concurrency_restore = None
+    concurrency_lift = None
     try:
         if no_hot_cache or no_ssd_cache:
             cache_restore, cache_off = await _enable_cache_off(
@@ -278,9 +352,21 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
                 "uplift bench cache-off mode: "
                 f"hot={'off' if no_hot_cache else 'on'} "
                 f"ssd={'off' if no_ssd_cache else 'on'} (restored at run end)")
+        if bench_request.external is None:
+            # local batch tests only: an external run's parallelism belongs
+            # to the remote server, never ours to lift
+            concurrency_restore, concurrency_lift = await _lift_concurrency(
+                pool, bench_request.batch_sizes)
+            if concurrency_lift is not None:
+                run._uplift_concurrency_lift = concurrency_lift
+                logger.info(
+                    "uplift bench concurrency lift: "
+                    f"{concurrency_lift['from']} -> {concurrency_lift['to']} "
+                    "(restored at run end)")
         upload_allowed = upload and bench_request.external is None
         run.task = asyncio.create_task(
-            _runner(run, pool, upload_allowed, cache_restore))
+            _runner(run, pool, upload_allowed, cache_restore,
+                    concurrency_restore))
     except BaseException as e:
         if run.task is None:
             # a claimed run whose task never launched would sit
@@ -291,11 +377,12 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
             run.terminal = True
         # toggled ON but the run never launched: nothing exists whose
         # finally could restore, so put the config back right here.
-        if cache_restore is not None:
-            try:
-                await cache_restore()
-            except Exception as rerr:
-                logger.warning(f"uplift bench cache restore failed: {rerr}")
+        for undo in (cache_restore, concurrency_restore):
+            if undo is not None:
+                try:
+                    await undo()
+                except Exception as rerr:
+                    logger.warning(f"uplift bench restore failed: {rerr}")
         raise
     # U64: persistent history — snapshot when the run task settles, even
     # if the browser tab closed before the result was ever polled
@@ -311,7 +398,7 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
 
 
 async def _runner(run, pool: Any, upload_allowed: bool,
-                  cache_restore=None) -> None:
+                  cache_restore=None, concurrency_restore=None) -> None:
     B = _engine()
     try:
         if upload_allowed:
@@ -341,11 +428,13 @@ async def _runner(run, pool: Any, upload_allowed: bool,
             await B._send_event(run, {"type": "error",
                                       "message": "benchmark ended without terminal event"})
     finally:
-        # cache-off window: the snapshot must go back whether the run
-        # completed, failed or was cancelled (shielded await — see
-        # _finalize_cache_restore for why a bare await is not enough)
+        # temporary windows: the snapshots must go back whether the run
+        # completed, failed or was cancelled (shielded awaits — see
+        # _finalize_restore for why a bare await is not enough)
         if cache_restore is not None:
-            await _finalize_cache_restore(cache_restore)
+            await _finalize_restore(cache_restore, "cache")
+        if concurrency_restore is not None:
+            await _finalize_restore(concurrency_restore, "concurrency")
 
 
 # --------------------------------------------------------------------------
@@ -366,6 +455,9 @@ def active_summary() -> dict:
         "force_lm_engine": run.request.force_lm_engine,
         # cache-off window active for this run ([] when not)
         "cache_off": list(getattr(run, "_uplift_cache_off", [])),
+        # concurrency lift active for this run (null when the cap already
+        # covered the widest batch or no batch tests ran)
+        "concurrency_lift": getattr(run, "_uplift_concurrency_lift", None),
         # classic parity: never expose base_url/api_key — model_id already
         # carries the external model name.
         "external": run.request.external is not None,
