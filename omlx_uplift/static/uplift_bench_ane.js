@@ -27,6 +27,31 @@ var dom = CORE.dom, errText = CORE.errText, api = CORE.api, t = CORE.t,
    the UI only sends the snapshot back.
    ========================================================================== */
 
+function aneHistoryDl(e) {
+    // BENCH-CMP: the entry's export spec - the same candidate columns the
+    // live card uses, so history Copy and the comparison sheet match it
+    var rows = (e.rows || []).filter(function (r) {
+        return r && (r.processing_tps != null || r.state); });
+    return {
+        name: function () {
+            return 'uplift_ane_'
+                + String(e.model_id || 'run').replace(/\s+/g, '_');
+        },
+        rows: function () {
+            return rows.map(function (r) {
+                return { split: r.split || r.name || '', state: r.state || '',
+                         processing_tps: r.processing_tps,
+                         latency_ms: r.latency_ms };
+            });
+        },
+        cols: function () {
+            return dlCols([['split', 'split'], ['state', 'state'],
+                           ['processing_tps', 'processing_tps'],
+                           ['latency_ms', 'latency_ms']]);
+        },
+    };
+}
+
 function aneHistoryBody(e) {
     var card = el('div', 'bench-result card');
     var rows = (e.rows || []).filter(function (r) {
@@ -55,7 +80,7 @@ function aneHistoryBody(e) {
              { label: 'latency_ms', numeric: true,
                get: function (r) { return String(r.latency_ms); } }],
             rows);
-    }));
+    }, 'uplift.bench.ane_candidates', 'Candidates', aneHistoryDl(e)));
     return card;
 }
 
@@ -76,7 +101,7 @@ var ANE = {
     loadHist: function () {
         var self = this;
         return loadHistory('ane', 'bench-ane-history', aneHistoryBody,
-            self.state && self.state.tuningId);
+            self.state && self.state.tuningId, aneHistoryDl);
     },
 
     form: function () {

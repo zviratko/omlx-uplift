@@ -1118,7 +1118,46 @@ function historyEmptyNote() {
     return pE;
 }
 
-function loadHistory(surface, hostId, buildBody, excludeId) {
+/* BENCH-CMP (user 2026-11-17): the History block gets its own bordered box
+   and a select-for-comparison lane. Every run with rows carries a Compare
+   checkbox; 'Copy comparison' pastes the selected runs as ONE table (the
+   shape classic's intelligence bench uses for its matrix) in the same three
+   formats as the per-card Copy menu. dlOf(e) is the entry's export column
+   spec - the same {name,rows,cols} bag the live panel hands resultsHead -
+   so the history card's Copy menu and the comparison sheet can never drift
+   from the live panel's export. */
+var _histSel = {};        // surface -> { run id: true }; session, in-memory
+
+function benchRunLabel(e) {
+    var when = e.ts ? new Date(e.ts * 1000).toLocaleString() : '';
+    return when + (when && e.model_id ? ' · ' : '') + (e.model_id || '');
+}
+
+// One merged [head,get] table from several runs. Cells are materialized per
+// entry because a dl getter closes over ITS entry (the context panel carries
+// the value inside the getter); the first entry's column heads label the
+// sheet - same surface, same column order by construction. A later entry
+// with fewer columns leaves the missing cells empty, never a wrong value.
+function mergeRunTables(items) {
+    var base = items.length ? (items[0].cols || []) : [];
+    var cols = [{ head: t('uplift.bench.history.run', 'Run'),
+                  get: function (x) { return x.run; } }];
+    base.forEach(function (c, i) {
+        cols.push({ head: c.head, get: function (x) { return x.cells[i]; } });
+    });
+    var rows = [];
+    items.forEach(function (it) {
+        (it.rows || []).forEach(function (r) {
+            rows.push({ run: it.label,
+                        cells: base.map(function (c, i) {
+                            return it.cols[i] ? it.cols[i].get(r) : '';
+                        }) });
+        });
+    });
+    return { cols: cols, rows: rows };
+}
+
+function loadHistory(surface, hostId, buildBody, excludeId, dlOf) {
     var host = gid(hostId);
     if (!host) return Promise.resolve();
     var d = dom();
@@ -1127,13 +1166,62 @@ function loadHistory(surface, hostId, buildBody, excludeId) {
             host.replaceChildren();
             var es = (p.entries || []).slice().reverse()    // newest first
                 .filter(function (e) { return !excludeId || String(e.id) !== String(excludeId); });
-            if (!es.length) return;
+            if (!es.length) { _histSel[surface] = {}; return; }
+            // keep only picks whose run is still in the list (a cleared or
+            // aged-out run must not linger in the selection)
+            var sel = _histSel[surface] || {};
+            var live = {};
+            es.forEach(function (e) { if (sel[String(e.id)]) live[String(e.id)] = true; });
+            _histSel[surface] = sel = live;
+            var box = el('div', 'bench-history-box');
             var hLab = el('div', 'bench-label acc-grid-label',
                 t('uplift.bench.history.title', 'History'));
             hLab.dataset.i18n = 'uplift.bench.history.title';
             hLab.dataset.en = hLab.textContent;      // U59: late catalog
-            host.appendChild(hLab);
+            box.appendChild(hLab);
             var head = el('div', 'bench-results-head');
+            var cmpBtn = el('button', 'btn',
+                t('uplift.bench.history.copy_comparison', 'Copy comparison'));
+            cmpBtn.type = 'button';
+            var paintCmp = function () {
+                var n = Object.keys(sel).length;
+                cmpBtn.disabled = !n;
+                cmpBtn.title = n
+                    ? t('uplift.bench.history.copy_comparison_tip',
+                        'Copy the selected runs as one table')
+                    : t('uplift.bench.history.pick_first',
+                        'Select runs to compare first');
+            };
+            var copyCompare = function (kind) {
+                var items = [];
+                es.forEach(function (e) {
+                    if (!sel[String(e.id)]) return;
+                    var dd = dlOf(e);
+                    var rr = dd.rows();
+                    items.push({ label: benchRunLabel(e), cols: dd.cols(),
+                                 rows: Array.isArray(rr) ? rr : [rr] });
+                });
+                var m = mergeRunTables(items);
+                var msg = t('bench.results.text_export.copied', 'Copied!');
+                if (kind === 'md') copyPlainText(toMarkdown(m.cols, m.rows), msg);
+                else if (kind === 'csv') copyPlainText(csvText(m.cols, m.rows), msg);
+                else copyPlainText(buildTableText(
+                    [t('uplift.bench.history.compare_title',
+                       'Benchmark Comparison'), ''],
+                    m.cols.map(function (c) {
+                        return { label: c.head, get: c.get };
+                    }), m.rows), msg);
+            };
+            if (dlOf) {
+                dropMenu(head, cmpBtn, [
+                    ['uplift.bench.copy_markdown', 'Markdown',
+                     function () { copyCompare('md'); }],
+                    ['acc_bench.results.download_csv', 'CSV',
+                     function () { copyCompare('csv'); }],
+                    ['uplift.bench.copy_table', 'Table (text)',
+                     function () { copyCompare('text'); }],
+                ]);
+            }
             var clear = el('button', 'btn', t('uplift.bench.history.clear', 'Clear history'));
             clear.dataset.i18n = 'uplift.bench.history.clear';
             clear.dataset.en = clear.textContent;    // U59: late catalog
@@ -1142,23 +1230,37 @@ function loadHistory(surface, hostId, buildBody, excludeId) {
                 d.postJson(api() + '/bench/history/clear', { surface: surface })
                     .then(function () {
                         d.toast(t('uplift.bench.history.cleared', 'History cleared'));
-                        loadHistory(surface, hostId, buildBody, excludeId);
+                        loadHistory(surface, hostId, buildBody, excludeId, dlOf);
                     })
                     .catch(function (e) { d.toast(errText(e), 'error'); });
             });
             head.appendChild(clear);
-            host.appendChild(head);
+            box.appendChild(head);
             es.forEach(function (e) {
+                var row = el('div', 'bench-history-row');
+                if (dlOf && (e.rows || []).length) {
+                    var pick = checkI18n('bench-hist-pick-' + surface + '-' + e.id,
+                        'uplift.bench.history.compare', 'Compare',
+                        !!sel[String(e.id)]);
+                    pick.input.addEventListener('change', function () {
+                        if (pick.input.checked) sel[String(e.id)] = true;
+                        else delete sel[String(e.id)];
+                        paintCmp();
+                    });
+                    row.appendChild(pick);
+                }
                 var det = el('details', 'bench-history-item');
-                var when = e.ts ? new Date(e.ts * 1000).toLocaleString() : '';
                 var sum = el('summary', null,
-                    when + ' \u00b7 ' + (e.model_id || '') +
+                    benchRunLabel(e) +
                     (e.status && e.status !== 'completed'
-                        ? ' \u00b7 ' + e.status.toUpperCase() : ''));
+                        ? ' · ' + e.status.toUpperCase() : ''));
                 det.appendChild(sum);
                 det.appendChild(buildBody(e));
-                host.appendChild(det);
+                row.appendChild(det);
+                box.appendChild(row);
             });
+            host.appendChild(box);
+            paintCmp();
         })
         .catch(function () { /* history is an affordance */ });
 }
@@ -1774,6 +1876,18 @@ function tpConcurrencyNote(e) {
     return p;
 }
 
+// BENCH-CMP: the history card's export spec - the same column list the live
+// panel hands resultsHead, so a past run's Copy offers the same three
+// formats (Markdown/CSV/Table text) and the same Download pair.
+function tpHistoryDl(e) {
+    var rows = e.rows || [];
+    return {
+        name: function () { return 'uplift_throughput_' + String(e.model_id || 'run'); },
+        rows: function () { return rows; },
+        cols: function () { return tpDlCols(rows); },
+    };
+}
+
 function tpHistoryBody(e) {
     var card = el('div', 'bench-result card');
     var ctx = { model: e.model_id || '',
@@ -1786,7 +1900,7 @@ function tpHistoryBody(e) {
     // works in every harness — 'prepend' is not in the DOM stubs)
     card.appendChild(resultsHead(function () {
         return buildThroughputText(ctx, rows);
-    }));
+    }, null, null, tpHistoryDl(e)));
     var note = tpCacheOffNote(e);
     if (note) card.appendChild(note);
     var liftNote = tpConcurrencyNote(e);
@@ -1829,6 +1943,7 @@ var BENCH_TP = PARTS.tp({
     tpTip: tpTip,
     tpDlCols: tpDlCols,
     buildTpTables: buildTpTables,
+    tpHistoryDl: tpHistoryDl,
     tpHistoryBody: tpHistoryBody,
     stopStream: stopStream,
     get _es() { return _es; }, set _es(v) { _es = v; },
@@ -2042,7 +2157,12 @@ return { mount: mount, isMounted: function () { return _mounted; },
                  advancedSection: advancedSection,
                  // TP-TABLES: the painter both the live panel and the
                  // history cards use (needs the harness DOM)
-                 buildTpTables: buildTpTables, simpleTable: simpleTable },
+                 buildTpTables: buildTpTables, simpleTable: simpleTable,
+                 // BENCH-CMP: the comparison merge + the run label it
+                 // prints in the first column (pure; DOM-free proofs)
+                 mergeRunTables: mergeRunTables,
+                 benchRunLabel: benchRunLabel,
+                 tpHistoryDl: tpHistoryDl },
          // U47 test seams (pure text-export plumbing; U49 reuses)
          _benchText: { buildThroughputText: buildThroughputText,
                        fmtNum: fmtNum, fmtMemory: fmtMemory,

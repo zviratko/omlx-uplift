@@ -30,6 +30,24 @@ var W = CORE.W, dom = CORE.dom, errText = CORE.errText, api = CORE.api,
    that auto-apply honest — the warning label is classic's own).
    ========================================================================== */
 
+function ctxHistoryDl(e) {
+    // BENCH-CMP: the entry's export spec, same field/value columns the live
+    // card uses (one row per run - the merged comparison reads runs down the
+    // sheet with the field names across the header)
+    var rows = e.rows || [];
+    var r = rows.length ? rows[rows.length - 1] : null;
+    var kv = r ? ctxResultPairs(CTX.state && CTX.state.models, r) : [];
+    return {
+        name: function () { return 'uplift_context_' + String(e.model_id || 'run'); },
+        rows: function () { return r ? [r] : []; },
+        cols: function () {
+            return kv.map(function (pr) {
+                return { head: pr[0], get: function () { return pr[1]; } };
+            });
+        },
+    };
+}
+
 function ctxHistoryBody(e) {
     var card = el('div', 'bench-result card');
     var rows = e.rows || [];
@@ -48,7 +66,7 @@ function ctxHistoryBody(e) {
         return buildTableText([t('ctx_bench.heading', 'Context Benchmark'), ''],
             [{ label: 'Field', get: function (pr) { return pr[0]; } },
              { label: 'Value', get: function (pr) { return pr[1]; } }], kv);
-    }));
+    }, 'ctx_bench.result.section_label', 'Result', ctxHistoryDl(e)));
     return card;
 }
 
@@ -358,7 +376,10 @@ var CTX = {
             }, 'ctx_bench.result.section_label', 'Result', {
                 name: function () { return 'uplift_context_'
                     + String((r && r.model_id) || 'run'); },
-                rows: function () { return r || {}; },
+                // BENCH-CMP: rows() must be an ARRAY - toMarkdown/csvText
+                // iterate it, and the old single-object return made the
+                // live Markdown/CSV Copy throw (only JSON tolerated it)
+                rows: function () { return r ? [r] : []; },
                 cols: function () {
                     return ctxResultPairs(selfC.state.models, r).map(function (kv) {
                         return { head: kv[0], get: function () { return kv[1]; } };
@@ -371,7 +392,7 @@ var CTX = {
     loadHist: function () {
         var self = this;
         return loadHistory('context', 'bench-ctx-history', ctxHistoryBody,
-            self.state && self.state.benchId);
+            self.state && self.state.benchId, ctxHistoryDl);
     },
 
     finish: function () {

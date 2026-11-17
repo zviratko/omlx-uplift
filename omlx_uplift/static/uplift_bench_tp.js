@@ -26,7 +26,8 @@ var W = CORE.W, dom = CORE.dom, errText = CORE.errText, api = CORE.api,
     simpleTable = CORE.simpleTable, loadHistory = CORE.loadHistory,
     resultsHead = CORE.resultsHead, tpTip = CORE.tpTip,
     tpDlCols = CORE.tpDlCols, buildTpTables = CORE.buildTpTables,
-    tpHistoryBody = CORE.tpHistoryBody, stopStream = CORE.stopStream;
+    tpHistoryBody = CORE.tpHistoryBody, tpHistoryDl = CORE.tpHistoryDl,
+    stopStream = CORE.stopStream;
 
 /* ==========================================================================
    PREFILL PROBE (user item 4) — 'longer or custom prefill length, custom
@@ -619,7 +620,7 @@ var TP = {
     loadHist: function () {
         var self = this;
         return loadHistory('throughput', 'bench-tp-history', tpHistoryBody,
-            self.state && self.state.benchId);
+            self.state && self.state.benchId, tpHistoryDl);
     },
 
     form: function () {

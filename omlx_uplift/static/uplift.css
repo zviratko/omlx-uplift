@@ -3230,6 +3230,22 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     font-size: 11px; padding: 2px 0; }
 .bench-history-item summary:hover { color: var(--ink); }
 .bench-history-item[open] summary { color: var(--ink); margin-bottom: 4px; }
+/* BENCH-CMP (user 2026-11-17): the history list gets a real container -
+   boxed like the result cards - and one hairline-separated row per run, so
+   the collapsed entries read as a record list instead of page noise. The
+   Compare checkbox rides beside the summary (never inside it: a control in
+   a <summary> fights the details toggle). */
+.bench-history-box { border: 1px solid var(--edge);
+  border-radius: var(--radius); background: var(--card);
+  padding: 10px 12px; margin-top: 10px; }
+.bench-history-row { display: flex; align-items: flex-start; gap: 8px;
+  padding: 5px 0; border-top: 1px solid var(--edge); }
+.bench-history-row .bench-history-item { flex: 1 1 auto; min-width: 0;
+  margin-top: 0; }
+.bench-history-row .bench-check { font-size: 11px; color: var(--dim);
+  cursor: pointer; padding-top: 2px; white-space: nowrap; flex: 0 0 auto; }
+.bench-history-row .bench-check:hover { color: var(--ink); }
+.bench-results-head .btn:disabled { opacity: .45; }
 .acc-queue { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
 .acc-queue-item { display: flex; justify-content: space-between; align-items: center;
   border: 1px solid var(--edge); padding: 3px 8px; }
