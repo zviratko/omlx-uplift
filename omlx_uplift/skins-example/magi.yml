@@ -1,0 +1,181 @@
+# Uplift skin crate — "MAGI" (Neon Genesis Evangelion // the council itself).
+# Sibling of nerv.yml: NERV wore purple and the hexagon; MAGI wears the
+# amber-phosphor triple-screen. The whole board is one deliberation:
+#   - the ground carries three faint tower beams (MELCHIOR, BALTHASAR, CASPER)
+#   - every card header is seated by a three-segment council rail
+#   - every title carries three vote lamps that deliberate (blink, coprime
+#     clocks inside the SVG) and reach consensus (all green) on hover
+#   - state triad = the vote: good approves, warn deliberates, bad dissents
+# Copy into ~/.omlx/uplift/skins/ — active on the next refresh, no restart.
+skin_version: 1
+label: "MAGI"
+classic:
+  theme: dark
+  enhanced: false
+tokens:
+  bg: "#0b0805"          # console room, tubes warm-down
+  card: "#16100a"
+  row2: "#1d150d"
+  field: "#080503"       # recessed readout, darker than bg
+  panel: "#1d150d"
+  edge: "#5c3b16"        # amber bezel
+  ink: "#f2dfb8"         # warm trace cream
+  dim: "#b3903f"         # afterglow amber
+  accent: "#ffa41f"      # full-bias amber phosphor
+  chart-1: "#ffa41f"     # series 1: the amber screen
+  chart-2: "#7fd4e8"     # series 2: AT-field flash blue-white
+  grid: "#2a1d0d"
+  heat: "#ff7a1a"        # core temperature orange
+  frame: "#7a4e1a"
+  red: "#e8382e"
+  good: "#46d97c"        # MELCHIOR concurs
+  warn: "#ffd94a"        # BALTHASAR deliberates
+  bad: "#ff4a3d"         # CASPER dissents
+  hdr-ink: "#e0b45a"
+  hdr-edge: "#3a2810"
+  hdr-hover: "#1d150d"
+  hdr-weight: "700"
+icons:
+  caret.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 8">
+    <path d="M0 0h10L5 7z" fill="#ffa41f"/>
+    </svg>
+  close.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+    <path d="M2 2l10 10M12 2L2 12" stroke="#ffa41f" stroke-width="2.6" stroke-linecap="round"/>
+    </svg>
+  # Three towers on a dark disc: the MAGI trio, one silhouette, reads at 10px.
+  logo-dot.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+    <circle cx="6" cy="6" r="6" fill="#16100a"/>
+    <rect x="2.4" y="3.2" width="1.5" height="5.6" fill="#ffa41f"/>
+    <rect x="5.25" y="2.2" width="1.5" height="6.6" fill="#ffa41f"/>
+    <rect x="8.1" y="3.2" width="1.5" height="5.6" fill="#ffa41f"/>
+    <rect x="2.1" y="9.4" width="7.8" height="0.8" fill="#7a4e1a"/>
+    </svg>
+  grip.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 10">
+      <path d="M1 2h14M1 5h14M1 8h14" stroke="#7a4e1a" stroke-width="1.4"/>
+    </svg>
+  # --- vote lamps -------------------------------------------------------
+  # Standby (motion-off state): three dim amber lamps, waiting.
+  lamps-standby.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 8">
+    <circle cx="4" cy="4" r="2.7" fill="#ffa41f" opacity="0.35"/>
+    <circle cx="10" cy="4" r="2.7" fill="#ffa41f" opacity="0.35"/>
+    <circle cx="16" cy="4" r="2.7" fill="#ffa41f" opacity="0.35"/>
+    </svg>
+  # Deliberating: each unit cycles its own vote colour on a coprime clock,
+  # so the three lamps never re-synchronise (1.9s / 2.7s / 3.4s).
+  # SMIL runs inside a background-image SVG; only <script> is blocked there.
+  lamps-deliberate.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 8">
+    <circle cx="4" cy="4" r="2.7" fill="#46d97c">
+      <animate attributeName="fill" values="#46d97c;#ffd94a;#ff4a3d;#46d97c" dur="1.9s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.25;1;0.25" dur="1.9s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="10" cy="4" r="2.7" fill="#ffd94a">
+      <animate attributeName="fill" values="#ffd94a;#ff4a3d;#46d97c;#ffd94a" dur="2.7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.25;1;0.25" dur="2.7s" begin="-0.9s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="16" cy="4" r="2.7" fill="#ff4a3d">
+      <animate attributeName="fill" values="#ff4a3d;#46d97c;#ffd94a;#ff4a3d" dur="3.4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.25;1;0.25" dur="3.4s" begin="-1.7s" repeatCount="indefinite"/>
+    </circle>
+    </svg>
+  # Consensus (hover): all three approve, linked by the bus line.
+  lamps-consensus.svg: |-
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 8">
+    <path d="M4 4h12" stroke="#46d97c" stroke-width="0.7" opacity="0.55"/>
+    <circle cx="4" cy="4" r="2.7" fill="#46d97c"/>
+    <circle cx="10" cy="4" r="2.7" fill="#46d97c"/>
+    <circle cx="16" cy="4" r="2.7" fill="#46d97c"/>
+    </svg>
+
+css: |-
+  html { color-scheme: dark; }
+  /* Console room: three tower beams from the ceiling, fine rack lines
+     (vertical, so it cannot be mistaken for phosphor's scanlines), warm
+     vignette. All static gradients - no fixed attachment, no SVG grain,
+     so the sticky header stays honest and the GPU keeps tiling. */
+  body {
+      background:
+          radial-gradient(150px 55% at 22% -4%, rgba(255,164,31,.055),
+              transparent 72%),
+          radial-gradient(150px 55% at 50% -4%, rgba(255,164,31,.075),
+              transparent 72%),
+          radial-gradient(150px 55% at 78% -4%, rgba(255,164,31,.055),
+              transparent 72%),
+          radial-gradient(120% 90% at 50% -10%, rgba(255,122,26,.05) 0%,
+              rgba(0,0,0,.5) 100%),
+          repeating-linear-gradient(90deg, transparent 0 3px,
+              rgba(255,164,31,.02) 3px 4px),
+          var(--bg);
+  }
+  /* Cards: the three MAGI units sit above every panel - green / amber /
+     red rail drawn on the h2's own top edge (the card top itself is
+     covered by the header). h2 ground re-declared with the base value. */
+  #grid .card h2 {
+      background:
+          linear-gradient(90deg,
+              rgba(70,217,124,.55) 0 33.3%,
+              rgba(255,217,74,.55) 33.3% 66.6%,
+              rgba(255,74,61,.55) 66.6% 100%) 0 0 / 100% 2px no-repeat,
+          var(--panel, var(--bg));
+  }
+  .card { border-top-color: var(--frame); }
+  .card:hover { border-color: var(--accent);
+      box-shadow: 0 0 14px rgba(255,164,31,.14); }
+  .card h2 { color: var(--dim); letter-spacing: .14em; }
+  /* Vote lamps: h2 is display:flex, so ::before is the header's first
+     flex ITEM - it sits beside the title, never over it. Standby face by
+     default (motion-off shows a still, not a blink frozen mid-cycle). */
+  #grid .card h2::before {
+      content: ""; flex: 0 0 auto; width: 20px; height: 8px;
+      opacity: .9; pointer-events: none;
+      background: url('res/icons/lamps-standby.svg') center/contain no-repeat;
+  }
+  :root:not([data-motion="off"]) #grid .card h2::before {
+      background-image: url('res/icons/lamps-deliberate.svg');
+  }
+  /* Hover = the council reaches consensus on that panel. Placed after the
+     motion rule so the equal-specificity tie resolves in its favour. */
+  :root #grid .card:hover h2::before {
+      background-image: url('res/icons/lamps-consensus.svg');
+  }
+  /* Header slots: short verdict inline (18ch, under the 24ch cap), the
+     three unit names below (34ch mono @9px ~= 208px, under the 304px cap). */
+  .logo::after {
+      content: ": 3/3 IN CONSENSUS";
+      color: var(--good); font: 400 9px/1 var(--mono); letter-spacing: .14em;
+      margin-left: 6px;
+  }
+  .logo .logo-below::after {
+      content: "MELCHIOR-1 · BALTHASAR-2 · CASPER-3";
+      color: var(--dim); font: 400 9px/1 var(--mono); letter-spacing: .08em;
+  }
+  /* LCL-amber instrument glow while motion is allowed */
+  .logo .dot { box-shadow: 0 0 4px rgba(255,164,31,.4); }
+  :root:not([data-motion="off"]) .logo .dot {
+      animation: magi-bias 3.7s ease-in-out infinite;
+  }
+  @keyframes magi-bias {
+      0%, 100% { box-shadow: 0 0 4px rgba(255,164,31,.35); }
+      50% { box-shadow: 0 0 11px rgba(255,164,31,.9); }
+  }
+  /* amber telemetry chips */
+  .rqchip { box-shadow: 0 0 6px rgba(255,164,31,.35); }
+  /* sync-rate bars: amber racks */
+  .meter > div {
+      background: repeating-linear-gradient(90deg,
+          var(--accent) 0 6px, #c47f14 6px 7px);
+  }
+  .meter.bad > div {
+      background: repeating-linear-gradient(90deg,
+          var(--bad) 0 6px, #7c241c 6px 7px);
+  }
+  ::selection { background: var(--accent); color: #16100a; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--edge); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
