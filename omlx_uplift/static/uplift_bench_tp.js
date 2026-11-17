@@ -1017,10 +1017,41 @@ var TP = {
             }
             this.finish();
         } else if (ev.type === 'upload_skipped') {
+            // SYNC-1 run 26 (upstream 9304457 #5338): the server now also
+            // skips the community upload for a non-default generation
+            // length. This lane offers generation lengths, so a checked
+            // Upload box plus a silent finish reads as a lost upload —
+            // name the reason, like classic's amber banner does.
+            // 'uplift_opt_out' is bench_engine's word for the operator
+            // leaving the Upload box off (the default), so it stays quiet.
+            if (ev.reason && ev.reason !== 'uplift_opt_out') {
+                this.renderStatus(t('bench.upload_skipped.title',
+                    'Community Upload Skipped') + ': ' + this.uploadSkippedLabel(ev.reason));
+            }
             this.finish();
         }
         // 'done' is only the tests→upload boundary in classic's stream; the
         // real terminal events are upload_done/upload_skipped/error above.
+    },
+
+    uploadSkippedLabel: function (reason) {
+        // classic's benchUploadSkippedLabel map (dashboard.js): every label
+        // is classic's own catalog key, resolved through the merged locale
+        // in all 11 classic locales — no uplift strings to maintain. The EN
+        // fallbacks exist only so the shell survives a catalog miss.
+        var keys = {
+            external_endpoint: ['bench.upload_skipped.reason_external',
+                'External endpoint results are not uploaded to omlx.ai community benchmarks because they measure remote hardware.'],
+            splash: ['bench.upload_skipped.reason_splash',
+                'Splash results are not uploaded to omlx.ai community benchmarks because they measure the Splash engine, not oMLX.'],
+            ane_aligned_prompt: ['bench.upload_skipped.reason_ane_aligned_prompt',
+                'ANE-aligned prompt results are not uploaded to omlx.ai community benchmarks because their prompt lengths do not match the standard PP buckets.'],
+            custom_generation_length: ['bench.upload_skipped.reason_custom_generation_length',
+                'Results with a generation length other than 128 tokens are not uploaded to omlx.ai community benchmarks so they stay comparable with other submissions.'],
+        };
+        var k = keys[reason] || ['bench.upload_skipped.reason_default',
+            'These results were not uploaded to omlx.ai community benchmarks.'];
+        return t(k[0], k[1]);
     },
 
     renderStatus: function (msg, isError) {
