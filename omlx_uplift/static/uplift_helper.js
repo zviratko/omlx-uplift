@@ -18,6 +18,10 @@ const API = S.API;
    (UMD); the export below keeps it visible for tests. */
 const INTEG_PREFIXED = window.UpliftGSpec.INTEG_PREFIXED;
 const MM = window.Uplift.modelmgr;
+/* Classic's splashPath machine (dashboard.js:236) must survive the panel's
+   re-renders: the path editor is open/closed/draft state, not server state.
+   A successful apply or a Cancel clears it. */
+let _splashUI = { editing: false, draft: '', error: '', saving: false };
 const HG = {
     fetchJson: D.fetchJson,
     postJson: D.postJson,
@@ -168,11 +172,14 @@ async function renderHelperModels() {
     // helper model list.
     const box = $('hm-markitdown');
     box.textContent = '';
-    let integ = {}, ccSec = {}, stats = {};
+    let integ = {}, ccSec = {}, stats = {}, eng = {};
     let modelList = [];
     try {
         const gs = await HG.fetchJson(`${API}/admin/api/global-settings`);
         integ = gs.integrations || {};
+        // the Splash launcher state rides the same GET (routes.py
+        // _splash_status): available/path/auto_detected/reason/label/version
+        eng = (gs.external_engines || {}).splash || {};
         ccSec = gs.claude_code || {};     // UP-26(2): the env-command half
     } catch (_) {}
     // UP-26(2): classic renders launch commands from stats (cli_prefix,
@@ -185,7 +192,7 @@ async function renderHelperModels() {
     // ONLY the CLI-assistant keys carry the integrations_ prefix; markitdown_*
     // and web_search_* are sent bare (real oMLX drops unknown fields with a
     // silent success:true, so a blanket prefix looked saved but did nothing).
-    async function saveIntegration(overrides) {
+    async function saveIntegrationErr(overrides) {
         Object.assign(integ, overrides || {});
         const body = {};
         for (const [k, v] of Object.entries(integ))
@@ -193,9 +200,14 @@ async function renderHelperModels() {
         try {
             const res = await HG.postJson(`${API}/admin/api/global-settings`, body);
             if (res.success === false) throw new Error(res.message || 'rejected');
-            HG.toast(C.t('uplift.toast.integration_saved'));
-            return true;
-        } catch (err) { HG.toast(C.t('uplift.toast.save_failed', {msg: D.errText(err)})); return false; }
+            return '';
+        } catch (err) { return D.errText(err); }
+    }
+    async function saveIntegration(overrides) {
+        const err = await saveIntegrationErr(overrides);
+        if (err) { HG.toast(C.t('uplift.toast.save_failed', {msg: err})); return false; }
+        HG.toast(C.t('uplift.toast.integration_saved'));
+        return true;
     }
     function integField(label, hint, control) {
         const f = document.createElement('label');
@@ -539,6 +551,184 @@ async function renderHelperModels() {
     wsGrid.append(testRow);
     wsCard.append(wsHead, wsGrid);
     box.append(wsCard);
+
+    /* ---- External engines: classic's Splash card (SYNC-1 run 27 parity).
+       Availability rides the GS GET (external_engines.splash); saves are
+       SILENT like classic's saveIntegrationSettings (inline error line, no
+       toast), and a path apply re-fetches so the detected state repaints
+       from the server truth (classic: loadGlobalSettings + loadModels).
+       Labels copy classic's EN verbatim - this panel's call-site style. ---- */
+    async function applySplashPath(path) {
+        _splashUI.saving = true; _splashUI.error = '';
+        const previous = integ.splash_path;
+        const err = await saveIntegrationErr(
+            { splash_path: (path || '').trim() || null });
+        if (err) {
+            integ.splash_path = previous;
+            _splashUI.error = err;
+        } else {
+            _splashUI.editing = false;
+        }
+        _splashUI.saving = false;
+        renderHelperModels();
+    }
+    const exCard = document.createElement('div');
+    exCard.className = 'mk-box';
+    const exHead = document.createElement('div'); exHead.className = 'mk-head';
+    const exTitle = document.createElement('div'); exTitle.className = 'mk-title';
+    exTitle.textContent = 'External engines';
+    const exChip = document.createElement('span');
+    exChip.className = 'spill ' + (eng.available ? 'on' : 'off');
+    exChip.textContent = 'Splash';
+    exHead.append(exTitle, exChip);
+    const exDesc = document.createElement('small'); exDesc.className = 'fhint dim';
+    exDesc.textContent = 'Serve a model with another inference engine running in ' +
+        'its own process. Choose the engine per model in Model Settings \u2192 Advanced.';
+    const exGrid = document.createElement('div'); exGrid.className = 'mk-fields';
+    const optErr = document.createElement('small');
+    optErr.className = 'fhint warn';
+
+    // binary row: detected state, or the path editor (classic splashPath)
+    const binField = document.createElement('div');
+    binField.className = 'field';
+    const binLab = document.createElement('span');
+    binLab.textContent = 'Splash';
+    binField.append(binLab);
+    if (eng.available && !_splashUI.editing) {
+        const p = document.createElement('small'); p.className = 'fhint dim';
+        p.textContent = eng.path || '';
+        const h = document.createElement('small'); h.className = 'fhint dim';
+        h.textContent = eng.auto_detected ? 'Found automatically.' : 'Set by path.';
+        const ctl = document.createElement('div'); ctl.className = 'row buttons';
+        const badge = document.createElement('span'); badge.className = 'spill on';
+        badge.textContent = ((eng.label || 'Splash') + ' ' + (eng.version || '')).trim();
+        const change = document.createElement('button');
+        change.type = 'button'; change.className = 'se-btn';
+        change.textContent = 'Change';
+        change.onclick = () => {
+            _splashUI.draft = integ.splash_path || eng.path || '';
+            _splashUI.error = ''; _splashUI.editing = true;
+            renderHelperModels();
+        };
+        ctl.append(badge, change);
+        binField.append(ctl, p, h);
+    } else {
+        const h = document.createElement('small'); h.className = 'fhint dim';
+        h.textContent = 'Path to the splash or splash-m1 launcher. Install it ' +
+            'with brew install incoai/tap/splash (M3 or later), or splash-m1 ' +
+            'on M1/M2 Macs.';
+        binField.append(h);
+        if (!eng.available && eng.reason) {
+            const rs = document.createElement('small'); rs.className = 'fhint warn';
+            rs.textContent = eng.reason;
+            binField.append(rs);
+        }
+        if (_splashUI.error) {
+            const er = document.createElement('small'); er.className = 'fhint warn';
+            er.textContent = _splashUI.error;
+            binField.append(er);
+        }
+        const ctl = document.createElement('div'); ctl.className = 'row buttons';
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.placeholder = '/opt/homebrew/bin/splash';
+        inp.value = _splashUI.draft;
+        inp.oninput = () => { _splashUI.draft = inp.value; };
+        const apply = document.createElement('button');
+        apply.type = 'button'; apply.className = 'se-btn';
+        apply.textContent = 'Apply';
+        apply.disabled = _splashUI.saving || !_splashUI.draft.trim();
+        apply.onclick = () => applySplashPath(inp.value);
+        ctl.append(inp, apply);
+        if (integ.splash_path) {
+            const auto = document.createElement('button');
+            auto.type = 'button'; auto.className = 'se-btn';
+            auto.textContent = 'Detect automatically';
+            auto.disabled = _splashUI.saving;
+            auto.onclick = () => applySplashPath('');
+            ctl.append(auto);
+        }
+        if (_splashUI.editing) {
+            const cancel = document.createElement('button');
+            cancel.type = 'button'; cancel.className = 'se-btn';
+            cancel.textContent = 'Cancel';
+            cancel.onclick = () => {
+                _splashUI.editing = false; _splashUI.error = '';
+                renderHelperModels();
+            };
+            ctl.append(cancel);
+        }
+        binField.append(ctl);
+    }
+    exGrid.append(binField);
+
+    exGrid.append(integField('KV cache precision',
+        'int8 holds about twice the context of bf16 in the same memory.',
+        integSelect([['int8', 'int8'], ['bf16', 'bf16']],
+            integ.splash_kv_format || 'int8',
+            async v => { optErr.textContent =
+                await saveIntegrationErr({ splash_kv_format: v }); })));
+    exGrid.append(integField('Activation precision',
+        'bf16 keeps attention in bf16 on M5 and later; auto lets Splash use ' +
+        'int8 where it is faster. Applies to Splash 1.6.1 and later.',
+        integSelect([['bf16', 'bf16'], ['auto', 'auto']],
+            integ.splash_activations || 'bf16',
+            async v => { optErr.textContent =
+                await saveIntegrationErr({ splash_activations: v }); })));
+
+    // GB size rows: empty means automatic; a rejected value rolls the field
+    // back so later saves keep working (classic saveSplashSize)
+    function splashNumber(key, minimum) {
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.min = minimum;
+        inp.value = integ[key] ?? '';
+        inp.placeholder = 'Auto';
+        inp.onchange = async () => {
+            const previous = integ[key];
+            const raw = String(inp.value).trim();
+            const value = raw === '' ? null : Number(raw);
+            let error = '';
+            if (value !== null && !(value >= minimum))
+                error = 'Enter a size in GB, or leave the field empty for automatic.';
+            else error = await saveIntegrationErr({ [key]: value });
+            if (error) { integ[key] = previous; inp.value = previous ?? ''; }
+            optErr.textContent = error;
+        };
+        const wrap = document.createElement('div'); wrap.className = 'row buttons';
+        const unit = document.createElement('small'); unit.className = 'fhint dim';
+        unit.textContent = 'GB';
+        wrap.append(inp, unit);
+        return wrap;
+    }
+    exGrid.append(integField('Memory limit',
+        'Empty gives Splash enough for the model\'s full context window. A ' +
+        'larger limit gives its prefix cache more room; on a smaller Mac ' +
+        'Splash fits a shorter context to the memory left. oMLX counts the ' +
+        'memory Splash plans against its own limit.',
+        splashNumber('splash_max_memory_gb', 1)));
+    const ssdField = integField('SSD cache',
+        'Splash\'s own prefix cache in the oMLX SSD cache folder, kept across ' +
+        'restarts. Empty uses the oMLX SSD cache size and 0 turns it off. ' +
+        'Needs the oMLX SSD cache.',
+        splashNumber('splash_ssd_cache_gb', 0));
+    const ssdWarn = document.createElement('small'); ssdWarn.className = 'fhint warn';
+    ssdWarn.textContent = 'Applies to each Splash model, and a model\'s cache ' +
+        'stays after it unloads, so the total can grow to this size times the ' +
+        'number of Splash models you use. Set a size when you use more than one.';
+    ssdField.append(ssdWarn);
+    exGrid.append(ssdField);
+
+    const aneInp = document.createElement('input'); aneInp.type = 'checkbox';
+    aneInp.checked = !!integ.splash_ane_prefill;
+    aneInp.onchange = async () => {
+        optErr.textContent =
+            await saveIntegrationErr({ splash_ane_prefill: aneInp.checked });
+    };
+    exGrid.append(integField('Neural Engine prefill',
+        'Let Splash run part of long prompts on the Neural Engine when that ' +
+        'is faster.', aneInp));
+    exGrid.append(optErr);
+    exCard.append(exHead, exDesc, exGrid);
+    box.append(exCard);
 
     $('hm-sub').textContent = `${helpers.length} helpers · integrations editable${HG.GW_LIVE ? ' (live)' : ' (shadow)'}`;
     $('hm-sub').dataset.count = helpers.length;
