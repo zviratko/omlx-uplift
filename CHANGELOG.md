@@ -13,6 +13,13 @@ users never see.
 
 ## Unreleased
 
+## [3.5] - 2026-11-18
+
+- **Batch throughput runs really run in parallel.** The scheduler cap used to queue a wider batch, so a row measured the cap instead of the parallelism you asked for. A run now raises the live cap to the widest batch and restores your setting when it ends; bench runs also start with the hot prefix cache off by default.
+- **Past benchmark runs can be compared and copied.** Every history card gets the full Copy menu (Markdown, CSV, Table, JSON), and a Compare checkbox picks runs that paste as one table.
+
+*Verified against omlx up to v0.8.0.*
+
 ## [3.4] - 2026-11-12
 
 - **Model updates.** A new Model updates page lists the downloaded models that have a newer version on the Hub, with the count in the Models and Downloader menu. Update one, update all, or ignore a model.
