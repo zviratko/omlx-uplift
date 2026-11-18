@@ -43,6 +43,14 @@ function oqMtpFamily(t) {
     if (t.startsWith('qwen3_5')) return 'qwen3_5';
     return null;
 }
+/* SYNC-1 run 27 (upstream a57ed31 #5317): oQh rotated codes. The server
+   marks each candidate row with oqh_supported and an optional level cap
+   (DeepSeek V4.1 takes oQh below oQ4 only). Mirror classic's
+   oqSelectedModelSupportsOqh exactly. */
+function oqhSupported(m, level) {
+    if (!m || !m.oqh_supported) return false;
+    return m.oqh_max_level == null || level < m.oqh_max_level;
+}
 function qzField(host, label, ctl, hint, area) {
     const row = document.createElement('label');
     row.className = 'field';
@@ -127,6 +135,13 @@ function renderQuantizer() {
         const cbEnh = rowEnh._cb;
         const rowEnhOnly = document.createElement('div');
         rowEnhOnly.className = 'qz-enh-only'; rowEnhOnly.hidden = true;
+        // classic puts the oQh switch FIRST in the enhanced block, above
+        // the imatrix rows (_models.html, x-show oqSelectedModelSupportsOqh)
+        const rowHadamard = qzCheck(rowEnhOnly, 'Rotated codes (oQh)',
+            'Same size as oQe with lower error: weights are stored in a ' +
+            'Hadamard-rotated basis with one scale per row. Needs the oQh ' +
+            'kernels to run.');
+        const cbHadamard = rowHadamard._cb;
         const cbReuse = document.createElement('input'); cbReuse.type = 'checkbox'; cbReuse.checked = true;
         qzField(rowEnhOnly, 'Reuse imatrix cache', cbReuse,
             'Use a compatible cached imatrix when available; otherwise collect a new one.');
@@ -237,6 +252,18 @@ function renderQuantizer() {
             sel.value = [...sel.options].some(o => o.value === keep) ? keep : '';
         }
 
+        function gateHadamard(m) {
+            // classic hides the row; uplift keeps the slot and dims it with
+            // the reason (the qzGate shape every model-dependent row here uses)
+            const ok = oqhSupported(m, parseFloat(selLevel.value));
+            qzGate(rowHadamard, ok, m
+                ? (m.oqh_supported
+                    ? 'oQh needs an oQ level below oQ' + m.oqh_max_level + '.'
+                    : 'This model has no oQh support.')
+                : 'Select a source model first.');
+            if (!ok) cbHadamard.checked = false;
+        }
+
         function updateConditional() {
             const m = st.models.find(x => x.path === selModel.value);
             // sensitivity candidates: quantized, same model_type, not the source
@@ -302,6 +329,9 @@ function renderQuantizer() {
                 cbText.checked = false;
                 if (selLevel.value === '4') selSens.value = '';
             }
+            // oQh availability depends on the model AND the (possibly just
+            // rebuilt) level pick, so gate AFTER the level list above
+            gateHadamard(m);
             // VLM text-only warning: hint swap in the reserved line, never
             // an inserted node (insertion is what moved everything below)
             setTextHint(!!(m && m.is_vlm && cbText.checked));
@@ -326,6 +356,7 @@ function renderQuantizer() {
             const m = st.models.find(x => x.path === selModel.value);
             if (m && m.model_type === 'deepseek_v41' && selLevel.value === '4')
                 selSens.value = '';
+            gateHadamard(m);   // oqh_max_level makes availability level-dependent
             refreshEst();
         };
         cbMtp.onchange = () => { updateConditional(); };
@@ -355,6 +386,11 @@ function renderQuantizer() {
             };
             if (cbEnh.checked) {
                 payload.enhanced = true;
+                // classic arms this via oqHadamardActive() - the flag only
+                // rides when enhanced AND the row's gate holds; the gate
+                // un-checks the box when it closes, re-check anyway
+                payload.hadamard = cbHadamard.checked &&
+                    oqhSupported(m, parseFloat(selLevel.value));
                 payload.imatrix_reuse_cache = cbReuse.checked;
                 payload.imatrix_cache_path = inpCache.value.trim();
                 payload.imatrix_strict = cbStrict.checked;
