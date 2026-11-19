@@ -280,3 +280,43 @@ async def test_history_route_sweeps_before_answering(monkeypatch):
     _patch_engines(monkeypatch, tp, ctx, ane)
     out = await br.bench_history_list("throughput", is_admin=True)
     assert [e["id"] for e in out["entries"]] == ["t-9"]
+
+
+# ---- BENCH-HIST-CLEAR (user report 2026-11-19): clearing history must
+#             stick - the live registries still hold the cleared runs ------
+
+
+def test_clear_tombstones_and_sweep_does_not_resurrect(monkeypatch):
+    from omlx_uplift.routers import bench as br
+    tp, ctx, ane = _fake_modules({"throughput": {"t-9": _TpRun()}})
+    _patch_engines(monkeypatch, tp, ctx, ane)
+    br._sweep_terminal_runs("throughput")
+    assert [e["id"] for e in bh.entries("throughput")["entries"]] == ["t-9"]
+    bh.clear("throughput")
+    assert bh.entries("throughput")["entries"] == []
+    br._sweep_terminal_runs("throughput")   # the reload right after Clear
+    assert bh.entries("throughput")["entries"] == [], \
+        "a cleared run still in the registry must not come back"
+    bh.capture_run(_TpRun())                # a late done callback either
+    assert bh.entries("throughput")["entries"] == []
+
+
+def test_clear_then_a_new_run_is_captured_normally(monkeypatch):
+    from omlx_uplift.routers import bench as br
+
+    class Fresh(_TpRun):
+        bench_id = "t-10"
+
+    tp, ctx, ane = _fake_modules({"throughput": {"t-9": _TpRun()}})
+    _patch_engines(monkeypatch, tp, ctx, ane)
+    bh.capture_run(_TpRun())
+    bh.clear("throughput")
+    tp._benchmark_runs["t-10"] = Fresh()
+    br._sweep_terminal_runs("throughput")
+    ids = [e["id"] for e in bh.entries("throughput")["entries"]]
+    assert ids == ["t-10"], "only the cleared ids are tombstoned"
+
+
+def test_clear_empty_surface_writes_no_tombstone():
+    assert bh.clear("context")["removed"] is False
+    assert not (bh.root() / "context" / "cleared.json").exists()

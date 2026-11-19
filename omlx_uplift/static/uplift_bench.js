@@ -1469,14 +1469,64 @@ function accExportTxt(r) {
 
 // Download menu (classic's per-row JSON/CSV/TXT), labels via the SAME
 // classic keys so they translate with the merged catalog
+/* BENCH-COPY-RACE (user report 2026-11-19): the menus used to mount inside
+   their host - the results head or a table cell - and BOTH are rebuilt on
+   every streamed result event, so an open menu vanished under the user's
+   cursor mid-click: 'copying of benchmarks does not work until refresh'.
+   The menu now mounts on document.body and is placed from the button rect
+   (the settled row-actions contract), so no container rebuild can reach
+   it. Dismiss = outside click (deferred, so the opening click cannot
+   close it), scroll in capture phase (a fixed menu must not strand when
+   its panel scrolls), resize, and Escape (the keyboard twin of the
+   outside click - a menu is one-shot, it does not need the modal
+   overlay's global handler). */
+function floatingMenu(btn, menu) {
+    document.body.appendChild(menu);
+    var place = function () {
+        var r = btn.getBoundingClientRect();
+        var mw = menu.offsetWidth || 64, mh = menu.offsetHeight || 0;
+        var de = document.documentElement || {};
+        var vw = de.clientWidth || 1024, vh = de.clientHeight || 768;
+        var left = Math.max(4, Math.min(r.right - mw, vw - mw - 4));
+        var top = r.top - mh - 4;              // above, like the old bottom:100%
+        if (top < 4) top = Math.min(r.bottom + 4, vh - mh - 4);
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    };
+    place();
+    var dead = false;
+    var onKey = function (ev) {
+        if (ev.key === 'Escape') { ev.stopPropagation(); dismiss(); }
+    };
+    var dismiss = function () {
+        if (dead) return;
+        dead = true;
+        menu.remove();
+        document.removeEventListener('click', dismiss);
+        document.removeEventListener('scroll', dismiss, true);
+        document.removeEventListener('keydown', onKey, true);
+        var w = W();
+        if (w && w.removeEventListener) w.removeEventListener('resize', dismiss);
+    };
+    setTimeout(function () {
+        if (dead) return;
+        document.addEventListener('click', dismiss);
+        document.addEventListener('scroll', dismiss, true);
+        document.addEventListener('keydown', onKey, true);
+        var w = W();
+        if (w && w.addEventListener) w.addEventListener('resize', dismiss);
+    }, 0);
+    return { dismiss: dismiss, place: place };
+}
+
 function dlMenu(makeName, formats) {
     var wrap = el('span', 'bench-dl');
     var btn = el('button', 'btn tiny', t('acc_bench.results.download', 'Download'));
     btn.type = 'button';
-    var open = null;
+    var open = null, dismissFn = null;
     btn.addEventListener('click', function (ev) {
         ev.stopPropagation();
-        if (open) { open.remove(); open = null; return; }
+        if (open) { open.remove(); open = null; if (dismissFn) dismissFn(); return; }
         open = el('div', 'bench-dl-menu');
         formats.forEach(function (f) {
             var b = el('button', null, t(f[1], f[2]));
@@ -1488,16 +1538,13 @@ function dlMenu(makeName, formats) {
                 // stale `open.remove()` after it threw TypeError (2026-10-13)
                 var o = open; open = null;
                 if (o) o.remove();
+                if (dismissFn) dismissFn();
                 f[0](makeName());
             });
             open.appendChild(b);
         });
-        wrap.appendChild(open);
-        var dismiss = function () {
-            if (open) { open.remove(); open = null; }
-            document.removeEventListener('click', dismiss);
-        };
-        setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
+        var fm = floatingMenu(btn, open);
+        dismissFn = fm.dismiss;
     });
     wrap.appendChild(btn);
     return wrap;
@@ -1506,10 +1553,10 @@ function dlMenu(makeName, formats) {
 // U-CPY: one dropdown pattern for the results-head buttons (classic's
 // bench-dl-menu styling). entries = [[i18nKey, fallback, onClick], ...]
 function dropMenu(host, btn, entries) {
-    var open = null;
+    var open = null, dismissFn = null;
     btn.addEventListener('click', function (ev) {
         ev.stopPropagation();
-        if (open) { open.remove(); open = null; return; }
+        if (open) { open.remove(); open = null; if (dismissFn) dismissFn(); return; }
         open = el('div', 'bench-dl-menu');
         entries.forEach(function (f) {
             var b = el('button', null, t(f[0], f[1]));
@@ -1521,16 +1568,13 @@ function dropMenu(host, btn, entries) {
                 // threw TypeError after every download, 2026-10-13)
                 var o = open; open = null;
                 if (o) o.remove();
+                if (dismissFn) dismissFn();
                 f[2]();
             });
             open.appendChild(b);
         });
-        host.appendChild(open);
-        var dismiss = function () {
-            if (open) { open.remove(); open = null; }
-            document.removeEventListener('click', dismiss);
-        };
-        setTimeout(function () { document.addEventListener('click', dismiss); }, 0);
+        var fm = floatingMenu(btn, open);
+        dismissFn = fm.dismiss;
     });
     host.appendChild(btn);
 }

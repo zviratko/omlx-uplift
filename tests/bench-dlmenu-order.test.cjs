@@ -43,12 +43,34 @@ test('U-DL: dlFile revokes the blob URL only inside a setTimeout', () => {
         'the deferred block must do both a.remove() and the revoke');
 });
 
-test('U-DL: results-head menus anchor to the head, right-aligned', () => {
-    const headRule = CSS.match(/\.bench-results-head \{[^}]*\}/);
-    assert.ok(headRule && /position:\s*relative/.test(headRule[0]),
-        '.bench-results-head must be positioned');
-    assert.ok(/\.bench-results-head \.bench-dl-menu \{[^}]*left:\s*auto;[^}]*right:\s*0/.test(CSS),
-        'menu must open under the (right-aligned) buttons, not at left:0 of the page');
+test('U-DL / BENCH-COPY-RACE: menus mount on the body, fixed, placed from the button', () => {
+    // the OLD contract (menu inside a positioned head) is dead: the head
+    // is rebuilt on every streamed result, which destroyed an open menu
+    // mid-click (user report 2026-11-19, 'copying does not work until
+    // refresh'). Negative pin: the head-anchor rule must not come back.
+    assert.ok(!/\.bench-results-head \.bench-dl-menu \{/.test(CSS),
+        'no head-anchored menu rule (the rebuild race must not return)');
+    const menuRule = CSS.match(/\.bench-dl-menu \{[^}]*\}/);
+    assert.ok(menuRule && /position:\s*fixed/.test(menuRule[0]),
+        'the menu floats over the document');
+    const m = JS.match(/function floatingMenu\(btn, menu\) \{[\s\S]*?\n\}/);
+    assert.ok(m, 'floatingMenu exists');
+    const body = m[0];
+    assert.ok(/document\.body\.appendChild\(menu\)/.test(body),
+        'mounted on the body, outside any rebuildable container');
+    assert.ok(/btn\.getBoundingClientRect\(\)/.test(body),
+        'placed from the opening button rect');
+    for (const ev of ["addEventListener('click', dismiss)",
+                      "addEventListener('scroll', dismiss, true)",
+                      "addEventListener('resize', dismiss)",
+                      "ev.key === 'Escape'"]) {
+        assert.ok(body.includes(ev), 'dismiss set carries ' + ev);
+    }
+    // both factories must go through the helper, not re-mount in-host
+    assert.ok(!/host\.appendChild\(open\)/.test(JS) && !/wrap\.appendChild\(open\)/.test(JS),
+        'no menu is appended to its (rebuildable) host again');
+    assert.equal((JS.match(/floatingMenu\(btn, open\)/g) || []).length, 2,
+        'dropMenu AND dlMenu both mount through floatingMenu');
 });
 
 /* TP-TABLES: the new throughput section caption + cache-off note rules must

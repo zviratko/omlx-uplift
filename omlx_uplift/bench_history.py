@@ -135,6 +135,11 @@ def capture_run(run: Any) -> None:
                  "meta": meta, "rows": _finite(rows)}
         if rec is not None:
             entry["recommendation"] = _finite(rec)
+        # BENCH-HIST-CLEAR: the operator cleared this run away; the registry
+        # still holds it (classic polls results from there) and the GET sweep
+        # or a late done callback must not resurrect it under a fresh ts
+        if is_cleared(surface, eid):
+            return
         upsert_run(surface, entry)
     except Exception as e:
         logger.warning(f"bench history capture failed: {e}")
@@ -155,11 +160,55 @@ def entries(surface: str) -> dict:
     return {"entries": load(surface)}
 
 
+# ---- cleared-run tombstones (BENCH-HIST-CLEAR, user report 2026-11-19) ----
+# The GET /bench/history sweep and the run task's done callback both capture
+# from the LIVE in-memory registries, which keep finished runs for their own
+# reasons (classic polls /bench/{id}/results from there). Without a record
+# of WHAT was cleared, clearing history would be undone the next reload:
+# every run still in the registry was re-captured and 'showed up until
+# refresh' - worse, forever for the sweep. clear() therefore tombstones the
+# ids it removes; capture skips tombstoned ids; new runs have new ids.
+
+
+def _cleared_file(surface: str) -> Path:
+    return root() / surface / "cleared.json"
+
+
+def _load_cleared(surface: str) -> list:
+    try:
+        data = json.loads(_cleared_file(surface).read_text())
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _mark_cleared(surface: str, ids: list) -> None:
+    ids = [str(i) for i in ids if i]
+    if not ids:
+        return
+    keep = _load_cleared(surface)
+    for i in ids:
+        if i not in keep:
+            keep.append(i)
+    keep = keep[-200:]              # bounded: ids are per-run uuids, never reused
+    f = _cleared_file(surface)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(keep, indent=1))
+    tmp.replace(f)
+
+
+def is_cleared(surface: str, eid: str) -> bool:
+    """True if this exact run was cleared away and must not be re-captured."""
+    return bool(eid) and str(eid) in set(_load_cleared(surface))
+
+
 def clear(surface: str) -> dict:
     with _lock:
         f = _file(surface)
         existed = f.exists()
         if existed:
+            _mark_cleared(surface, [e.get("id") for e in load(surface)])
             f.unlink()
     return {"status": "cleared", "surface": surface, "removed": existed}
 

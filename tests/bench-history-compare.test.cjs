@@ -82,6 +82,13 @@ function makeHarness() {
             querySelector() { return makeEl('div'); },
             querySelectorAll() { return []; },
             focus() {}, blur() {},
+            // BENCH-COPY-RACE: floatingMenu places from the button rect and
+            // the menu's own box; the stub gives every element a fixed
+            // geometry (the assertions never measure, they just must not
+            // crash the placement path)
+            getBoundingClientRect() { return { top: 100, left: 100, right: 200, bottom: 120,
+                                               width: 100, height: 20 }; },
+            offsetWidth: 64, offsetHeight: 48,
             classList: (() => {
                 const set = new Set();
                 return { _set: set,
@@ -101,12 +108,15 @@ function makeHarness() {
         return el;
     }
     const docLis = {};
+    const body = makeEl('body');      // BENCH-COPY-RACE: menus mount here
     const document = {
+        body,
         getElementById(id) { return byId[id] || (byId[id] = makeEl('div')); },
         createElement(tag) { return makeEl(tag); },
         createTextNode(s) { return { textContent: String(s), children: [] }; },
         querySelectorAll() { return []; },
-        documentElement: { dataset: { nativeSurfaces: 'all' } },
+        documentElement: { dataset: { nativeSurfaces: 'all' },
+                           clientWidth: 1200, clientHeight: 900 },
         addEventListener(ty, fn) { (docLis[ty] = docLis[ty] || []).push(fn); },
         removeEventListener(ty, fn) {
             const a = docLis[ty] || [];
@@ -156,6 +166,16 @@ function mount(history) {
         setInterval: () => 1, clearInterval: () => {},
         setTimeout: (fn, ms) => setTimeout(fn, ms),
         clearTimeout: (h) => clearTimeout(h),
+        // BENCH-COPY-RACE: floatingMenu arms a window resize dismiss; the
+        // win stub must carry the listener pair (skill rule: mirror the
+        // doc pair onto win in the same commit that adds the listener)
+        _lis: {},
+        addEventListener(ty, fn) { (win._lis[ty] = win._lis[ty] || []).push(fn); },
+        removeEventListener(ty, fn) {
+            const a = win._lis[ty] || [];
+            const i = a.indexOf(fn);
+            if (i >= 0) a.splice(i, 1);
+        },
     };
     win.window = win; win.self = win;
     win.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
@@ -175,8 +195,10 @@ const allText = (el) => {
     for (const k of el.children || []) s += ' ' + allText(k);
     return s;
 };
-const menuButtons = (host) => {
-    const menus = findCls(host, 'bench-dl-menu');
+// BENCH-COPY-RACE: menus mount on document.body (outside any rebuildable
+// container), so the open-menu probe walks the body, not the card head.
+const menuButtons = (doc) => {
+    const menus = findCls(doc.body, 'bench-dl-menu');
     return menus.map(m => ({ menu: m, items: (m.children || []).map(b => b.textContent) }));
 };
 const clickMenu = (btn) => btn.fire('click', { stopPropagation() {} });
@@ -208,7 +230,7 @@ const HIST = {
 // ---- 1. the bug: every history card's Copy is the 3-format menu ----
 
 test('BENCH-CMP: a history card Copy opens Markdown/CSV/Table and copies the card table', async () => {
-    const { win, byId, clip } = mount(HIST);
+    const { win, byId, clip, document } = mount(HIST);
     win.UpliftNativeBench.mount();
     await tick();
     const host = byId['bench-tp-history'];
@@ -224,7 +246,7 @@ test('BENCH-CMP: a history card Copy opens Markdown/CSV/Table and copies the car
     const copyBtn = heads[0].children.find(b => b.textContent === 'Copy');
     assert.ok(copyBtn, 'Copy button present');
     clickMenu(copyBtn);
-    const opened = menuButtons(heads[0]);
+    const opened = menuButtons(document);
     assert.equal(opened.length, 1, 'one menu open');
     assert.deepEqual(opened[0].items, ['Markdown', 'CSV', 'Table (text)'],
         'the SAME three formats the live panel offers (was: bare Copy)');
@@ -279,7 +301,7 @@ test('BENCH-CMP: bordered box, one row per run, checkbox only where rows exist',
 // ---- 3. the comparison copy: one merged table, three formats ----
 
 test('BENCH-CMP: Copy comparison pastes the selected runs as ONE table', async () => {
-    const { win, byId, clip } = mount(HIST);
+    const { win, byId, clip, document } = mount(HIST);
     win.UpliftNativeBench.mount();
     await tick();
     const host = byId['bench-tp-history'];
@@ -294,7 +316,7 @@ test('BENCH-CMP: Copy comparison pastes the selected runs as ONE table', async (
     assert.equal(cmp.disabled, false, 'picking arms the button');
     assert.equal(cmp.title, 'Copy the selected runs as one table');
     clickMenu(cmp);
-    const opened = menuButtons(head);
+    const opened = menuButtons(document);
     assert.deepEqual(opened[0].items, ['Markdown', 'CSV', 'Table (text)'],
         'the same format menu as every other Copy');
     const [hA, hB] = HIST.throughput;
@@ -324,7 +346,7 @@ test('BENCH-CMP: Copy comparison pastes the selected runs as ONE table', async (
 });
 
 test('BENCH-CMP: one selected run still copies (and un-picking disarms again)', async () => {
-    const { win, byId, clip } = mount(HIST);
+    const { win, byId, clip, document } = mount(HIST);
     win.UpliftNativeBench.mount();
     await tick();
     const host = byId['bench-tp-history'];
@@ -370,7 +392,7 @@ const CTX_HIST = {
     ],
 };
 test('BENCH-CMP: context history cards carry the menu; comparison reads runs across the field columns', async () => {
-    const { win, byId, clip } = mount(CTX_HIST);
+    const { win, byId, clip, document } = mount(CTX_HIST);
     const CTX = win.UpliftNativeBench._panels.ctx;
     CTX.state = { running: false, benchId: null, result: null, models: [] };
     await CTX.loadHist();
@@ -380,15 +402,17 @@ test('BENCH-CMP: context history cards carry the menu; comparison reads runs acr
     const cardHead = heads.find(h => h.children.some(b => b.textContent === 'Copy'));
     assert.ok(cardHead, 'the card head (the history head has no bare Copy)');
     clickMenu(cardHead.children.find(b => b.textContent === 'Copy'));
-    assert.deepEqual(menuButtons(cardHead)[0].items,
+    assert.deepEqual(menuButtons(document)[0].items,
         ['Markdown', 'CSV', 'Table (text)']);
+    menuButtons(document)[0].menu.remove();   // close before the next open:
+                                              // both menus now share the body
     const cbs = findCls(host, 'bench-check').map(l => l.children[0]);
     assert.equal(cbs.length, 2);
     cbs.forEach(cb => { cb.checked = true; cb.fire('change', { target: cb }); });
     const head = findCls(host, 'bench-results-head')[0];
     const cmp = head.children.find(b => b.textContent === 'Copy comparison');
     clickMenu(cmp);
-    menuButtons(head)[0].menu.children[0].fire('click', { stopPropagation() {} });
+    menuButtons(document)[0].menu.children[0].fire('click', { stopPropagation() {} });
     await tick();
     const md = clip[clip.length - 1].split('\n');
     assert.ok(md[0].includes('| Run | Model | Target |'), md[0]);
@@ -404,7 +428,7 @@ const ANE_HIST = {
     ],
 };
 test('BENCH-CMP: ANE history card carries the menu too', async () => {
-    const { win, byId } = mount(ANE_HIST);
+    const { win, byId, document } = mount(ANE_HIST);
     const ANE = win.UpliftNativeBench._panels.ane;
     ANE.state = { running: false, tuningId: null, snapshot: null };
     await ANE.loadHist();
@@ -414,7 +438,7 @@ test('BENCH-CMP: ANE history card carries the menu too', async () => {
     const cardHead = heads.find(h => h.children.some(b => b.textContent === 'Copy'));
     assert.ok(cardHead, 'the card head');
     clickMenu(cardHead.children.find(b => b.textContent === 'Copy'));
-    assert.deepEqual(menuButtons(cardHead)[0].items,
+    assert.deepEqual(menuButtons(document)[0].items,
         ['Markdown', 'CSV', 'Table (text)']);
 });
 
@@ -536,4 +560,50 @@ test('BENCH-HIST-RACE: source pins - exclusion gone, error arms poll, 404 settle
         assert.ok(/e && e\.status === 404\) self\.finish\(\)/.test(src),
             'a vanished run settles the panel instead of polling forever');
     }
+});
+
+// ---- 10. BENCH-COPY-RACE (user report 2026-11-19): an open menu must
+//             survive the result events that rebuild the results head ----
+
+test('BENCH-COPY-RACE: an open live-panel menu survives the rebuild and still copies', async () => {
+    const { win, byId, clip, document } = mount(HIST);
+    win.UpliftNativeBench.mount();
+    await tick();
+    const B = win.UpliftNativeBench;
+    B.tp.state = { active: null, results: ROW_A.slice(), total: 1, current: 1,
+                   phase: '', running: true, benchId: 'live-1',
+                   ctx: { model: 'M1', profile: 'code_python',
+                          forceLm: false, external: null } };
+    B.tp.renderTable();
+    const head = findCls(byId['bench-tp-results'], 'bench-results-head')[0];
+    const copyBtn = head.children.find(b => b.textContent === 'Copy');
+    assert.ok(copyBtn, 'live Copy present');
+    clickMenu(copyBtn);
+    await tick();
+    assert.equal(menuButtons(document).length, 1, 'menu open');
+    // the next result event rebuilds the whole results container - this is
+    // what used to destroy the open menu (and the user's click) mid-flight
+    B.tp.state.results = ROW_A.concat(ROW_B);
+    B.tp.renderTable();
+    const open = menuButtons(document);
+    assert.equal(open.length, 1, 'menu survived the rebuild (body-mounted)');
+    open[0].menu.children[0].fire('click', { stopPropagation() {} });   // Markdown
+    await tick();
+    assert.ok(clip.length >= 1
+        && clip[clip.length - 1].startsWith('| Test | TTFT (ms)'),
+        'the click landed: Markdown copied');
+    assert.equal(menuButtons(document).length, 0, 'menu closed after the action');
+});
+
+test('BENCH-COPY-RACE: Escape closes an open menu (keyboard twin of outside-click)', async () => {
+    const { win, byId, document } = mount(HIST);
+    win.UpliftNativeBench.mount();
+    await tick();
+    const items = findCls(byId['bench-tp-history'], 'bench-results-head');
+    const cardHead = items.find(h => h.children.some(b => b.textContent === 'Copy'));
+    clickMenu(cardHead.children.find(b => b.textContent === 'Copy'));
+    await tick();
+    assert.equal(menuButtons(document).length, 1, 'menu open');
+    document.fire('keydown', { key: 'Escape', stopPropagation() {} });
+    assert.equal(menuButtons(document).length, 0, 'Escape dismissed it');
 });
