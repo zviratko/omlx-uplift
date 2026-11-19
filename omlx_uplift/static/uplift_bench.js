@@ -1157,15 +1157,20 @@ function mergeRunTables(items) {
     return { cols: cols, rows: rows };
 }
 
-function loadHistory(surface, hostId, buildBody, excludeId, dlOf) {
+/* BENCH-HIST-RACE (user report 2026-11-19): this used to take an extra
+   exclusion id and hide the panel's own finished run from the list, so a
+   run appeared in History only after a page refresh. The live table above
+   and a collapsed history card for the same run are not a defect - the
+   list is the record ("every run kept until cleared"), and the server now
+   captures terminal runs into it on this very fetch. */
+function loadHistory(surface, hostId, buildBody, dlOf) {
     var host = gid(hostId);
     if (!host) return Promise.resolve();
     var d = dom();
     return d.fetchJson(api() + '/bench/history?surface=' + encodeURIComponent(surface))
         .then(function (p) {
             host.replaceChildren();
-            var es = (p.entries || []).slice().reverse()    // newest first
-                .filter(function (e) { return !excludeId || String(e.id) !== String(excludeId); });
+            var es = (p.entries || []).slice().reverse();    // newest first
             if (!es.length) { _histSel[surface] = {}; return; }
             // keep only picks whose run is still in the list (a cleared or
             // aged-out run must not linger in the selection)
@@ -1230,7 +1235,7 @@ function loadHistory(surface, hostId, buildBody, excludeId, dlOf) {
                 d.postJson(api() + '/bench/history/clear', { surface: surface })
                     .then(function () {
                         d.toast(t('uplift.bench.history.cleared', 'History cleared'));
-                        loadHistory(surface, hostId, buildBody, excludeId, dlOf);
+                        loadHistory(surface, hostId, buildBody, dlOf);
                     })
                     .catch(function (e) { d.toast(errText(e), 'error'); });
             });

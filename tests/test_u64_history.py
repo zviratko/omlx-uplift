@@ -148,3 +148,135 @@ def test_accuracy_persist_restore_roundtrip(monkeypatch):
     ae.results_reset()
     assert ab2._accum == []
     assert bh.entries("accuracy")["entries"] == []
+
+
+# ---- BENCH-HIST-RACE (user report 2026-11-19): the history GET must not
+# race the run task's done callback. Panels reload the list the moment the
+# terminal SSE event arrives; the file was only written after engine unload
+# and the cache/concurrency restores - seconds later. The route now sweeps
+# terminal runs from the live registries before answering.
+
+
+class _TpReq:
+    model_id = "m1"
+    external = None
+
+    class context_profile:
+        value = "code_python"
+
+
+class _TpRun:
+    bench_id = "t-9"
+    status = "completed"
+    request = _TpReq()
+    results = [{"test_type": "single", "pp": 1024}]
+
+
+class _RunReq:
+    model_id = "m1"
+    target_tokens = 65536
+    sequence_length = 2048
+
+
+class _CtxRun2:
+    bench_id = "c-9"
+    status = "completed"
+    request = _RunReq()
+    result = {"measured_tokens": 60000}
+
+
+class _AneRun2:
+    tuning_id = "a-9"
+    status = "completed"
+    request = _RunReq()
+    results = [{"split": "gate", "state": "ANE"}]
+
+
+def _fake_modules(runs_by_surface):
+    """(bench_engine._engine, context_engine._ctx, context_engine._ane)
+    stand-ins exposing only the registries the sweep reads."""
+    import types
+    tp = types.SimpleNamespace(_benchmark_runs=runs_by_surface.get("throughput", {}))
+    ctx = types.SimpleNamespace(_context_runs=runs_by_surface.get("context", {}))
+    ane = types.SimpleNamespace(_runs=runs_by_surface.get("ane", {}))
+    return tp, ctx, ane
+
+
+def _patch_engines(monkeypatch, tp, ctx, ane):
+    from omlx_uplift import bench_engine, context_engine
+    monkeypatch.setattr(bench_engine, "_engine", lambda: tp)
+    monkeypatch.setattr(context_engine, "_ctx", lambda: ctx)
+    monkeypatch.setattr(context_engine, "_ane", lambda: ane)
+
+
+def _bench_routes():
+    # facade FIRST: omlx_uplift/router.py fixes the domain import (route
+    # registration) order - importing routers.bench cold would move the
+    # /bench block and break test_nat3_scaffold's last-block pin
+    # (same convention as test_about_route.py).
+    from omlx_uplift import router as _up  # noqa: F401
+    from omlx_uplift.routers import bench as br
+    return br
+
+
+def test_sweep_captures_terminal_runs_all_surfaces(monkeypatch):
+    br = _bench_routes()
+    tp, ctx, ane = _fake_modules({
+        "throughput": {"t-9": _TpRun()},
+        "context": {"c-9": _CtxRun2()},
+        "ane": {"a-9": _AneRun2()},
+    })
+    _patch_engines(monkeypatch, tp, ctx, ane)
+    br._sweep_terminal_runs("throughput")
+    br._sweep_terminal_runs("context")
+    br._sweep_terminal_runs("ane")
+    assert bh.entries("throughput")["entries"][0]["id"] == "t-9"
+    assert bh.entries("context")["entries"][0]["id"] == "c-9"
+    assert bh.entries("ane")["entries"][0]["id"] == "a-9"
+
+
+def test_sweep_skips_running_and_already_captured(monkeypatch):
+    br = _bench_routes()
+
+    class Running(_TpRun):
+        bench_id = "t-live"
+        status = "running"
+
+    tp, ctx, ane = _fake_modules({"throughput": {"t-9": _TpRun(),
+                                                 "t-live": Running()}})
+    _patch_engines(monkeypatch, tp, ctx, ane)
+    br._sweep_terminal_runs("throughput")
+    ids = [e["id"] for e in bh.entries("throughput")["entries"]]
+    assert ids == ["t-9"], "a still-running run must not enter history"
+    calls = []
+    import omlx_uplift.bench_history as bhmod
+    real = bhmod.capture_run
+    monkeypatch.setattr(bhmod, "capture_run",
+                        lambda run: (calls.append(run), real(run))[1])
+    br._sweep_terminal_runs("throughput")   # second GET after the same run
+    br._sweep_terminal_runs("unknown")      # unknown surface: no-op
+    assert calls == [], "captured runs are not re-upserted (ts must not churn)"
+
+
+def test_sweep_never_raises_without_engine(monkeypatch):
+    # CI shape: no omlx keg, _engine() explodes - the list must still answer
+    br = _bench_routes()
+    from omlx_uplift import bench_engine
+
+    def boom():
+        raise RuntimeError("omlx not found")
+
+    monkeypatch.setattr(bench_engine, "_engine", boom)
+    br._sweep_terminal_runs("throughput")
+    assert bh.entries("throughput")["entries"] == []
+
+
+@pytest.mark.asyncio
+async def test_history_route_sweeps_before_answering(monkeypatch):
+    # the route-level contract: the GET that a finishing panel fires already
+    # lists that run - no page refresh needed
+    br = _bench_routes()
+    tp, ctx, ane = _fake_modules({"throughput": {"t-9": _TpRun()}})
+    _patch_engines(monkeypatch, tp, ctx, ane)
+    out = await br.bench_history_list("throughput", is_admin=True)
+    assert [e["id"] for e in out["entries"]] == ["t-9"]

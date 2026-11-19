@@ -21,12 +21,16 @@ and the golden order proves it).
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .base import api_router, engine_pool, require_admin
 from .. import (accuracy_engine, bench_engine, bench_history, bench_prefill,
                 bench_queue, context_engine, decision_engine, embed_engine)
+
+logger = logging.getLogger("omlx_uplift.routers.bench")
 
 
 async def _queued_start(kind: str, body: dict, label: str = "") -> dict:
@@ -48,12 +52,50 @@ async def _queued_start(kind: str, body: dict, label: str = "") -> dict:
 # the route-order discipline of this file). Accuracy does not need these:
 # its accumulated rows already ride /bench/accuracy/results restored.
 
+
+def _sweep_terminal_runs(surface: str) -> None:
+    """BENCH-HIST-RACE (user report 2026-11-19): a finished run only reached
+    history when its task's done callback fired - after engine unload and
+    the cache/concurrency restores, which can trail the terminal SSE event
+    that makes every open panel reload this list by seconds. The reload then
+    listed a history without the run that just ended - it appeared only
+    after a page refresh. Capture any terminal run the file does not hold
+    yet, right here: the done callback's re-capture is an idempotent upsert,
+    and runs started from the classic dashboard land too (history is about
+    runs, not about which UI launched them). Never raises: the list must
+    not fail because a sweep could not reach the engine (CI has no omlx).
+    """
+    try:
+        if surface == "throughput":
+            mod, attr = bench_engine._engine(), "_benchmark_runs"
+        elif surface == "context":
+            mod, attr = context_engine._ctx(), "_context_runs"
+        elif surface == "ane":
+            mod, attr = context_engine._ane(), "_runs"
+        else:
+            return
+        runs = list(getattr(mod, attr, {}).values())
+        have = {str(e.get("id")) for e in bench_history.load(surface)}
+        for run in runs:
+            if getattr(run, "status", "running") == "running":
+                continue
+            rid = str(getattr(run, "tuning_id",
+                              None) or getattr(run, "bench_id", "") or "")
+            if rid and rid not in have:
+                bench_history.capture_run(run)
+    except Exception as e:
+        # never fail the list on a sweep: CI has no omlx, and the registries
+        # are vanilla internals (bench_history.capture_run's own rule)
+        logger.debug("bench history sweep skipped: %s", e)
+
+
 @api_router.get("/bench/history")
 async def bench_history_list(surface: str,
                              is_admin: bool = Depends(require_admin)):
     if surface not in bench_history.RUN_SURFACES:
         raise HTTPException(status_code=400,
                             detail=f"unknown surface: {surface}")
+    _sweep_terminal_runs(surface)
     return bench_history.entries(surface)
 
 

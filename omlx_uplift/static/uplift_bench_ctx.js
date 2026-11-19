@@ -292,9 +292,20 @@ var CTX = {
             CORE._es = new EventSource(api() + '/bench/context/' + encodeURIComponent(benchId) + '/stream');
             CORE._es.onmessage = function (ev) {
                 var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+                // a live event means the stream recovered: retire the
+                // emergency poll the error handler may have armed
+                if (CORE._poll) { clearInterval(CORE._poll); CORE._poll = null; }
                 self.onEvent(data);
             };
-            CORE._es.onerror = function () { streamInterrupted('bench-ctx-status'); };
+            // BENCH-HIST-RACE doctrine (PF/ACC pattern): a dropped SSE must
+            // ARM the REST poll, never just mark 'interrupted' - otherwise
+            // finish() never runs and the panel shows nothing new until a
+            // manual refresh. EventSource retries by itself; the first live
+            // event above retires the poll again.
+            CORE._es.onerror = function () {
+                streamInterrupted('bench-ctx-status');
+                self.poll(benchId);
+            };
         } catch (e) { this.poll(benchId); }
     },
 
@@ -310,7 +321,11 @@ var CTX = {
                     Math.round(r.progress || 0) + '%');  // classic: 0-100 scale
                 if (r.result) { self.state.result = r.result; self.renderResult(r.result); }
                 if (r.status !== 'running') self.finish();
-            } catch (e) { /* keep polling */ }
+            } catch (e) {
+                // a vanished run (board restarted mid-probe) will never
+                // answer again: settle the panel instead of polling forever
+                if (e && e.status === 404) self.finish();
+            }
         }, 3000);
     },
 
@@ -325,8 +340,14 @@ var CTX = {
         } else if (ev.type === 'error') {
             this.renderStatus(String(ev.message || 'error'), true);
             this.finish();
+        } else if (ev.type === 'done') {
+            // BENCH-HIST-RACE: 'done' IS this lane's success terminal
+            // (classic _CTX_TERMINAL_TYPES = done + error). It used to be
+            // ignored, so finish() never ran on a good probe: the history
+            // list kept its stale set, the Run button stayed stuck, and
+            // the closing stream left the panel painting 'reconnecting'.
+            this.finish();
         }
-        // context bench terminal events are done + error (classic code)
     },
 
     renderStatus: function (msg, isError) {
@@ -390,9 +411,8 @@ var CTX = {
     },
 
     loadHist: function () {
-        var self = this;
         return loadHistory('context', 'bench-ctx-history', ctxHistoryBody,
-            self.state && self.state.benchId, ctxHistoryDl);
+            ctxHistoryDl);
     },
 
     finish: function () {

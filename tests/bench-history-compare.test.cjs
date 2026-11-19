@@ -483,3 +483,57 @@ test('BENCH-CMP: the six new keys ship in all 10 locales', () => {
         }
     }
 });
+
+// ---- 9. BENCH-HIST-RACE (user report 2026-11-19): a finished run belongs
+//             to the History list immediately, not after a page refresh ----
+
+test('BENCH-HIST-RACE: the panel just finished with is NOT hidden from History', async () => {
+    const { win, byId, B } = mount(HIST);
+    win.UpliftNativeBench.mount();
+    await tick();
+    // Reproduce the finish() moment: the run's table is live in the panel,
+    // state.benchId is set, and finish() reloads the history. The old
+    // excludeId filter dropped exactly this run from the list, so the user
+    // saw it appear only after a refresh.
+    B.tp.state = { active: null, results: [], total: 0, current: 0,
+                   phase: '', running: false, benchId: 'hB',
+                   ctx: { model: 'M2', profile: 'code_python',
+                          forceLm: false, external: null } };
+    await B.tp.loadHist();
+    await tick();
+    const host = byId['bench-tp-history'];
+    const items = findCls(host, 'bench-history-item');
+    assert.equal(items.length, 3, 'all three runs listed - the current one included');
+    assert.ok(allText(host).includes(label(HIST.throughput[1])),
+        'the just-finished run (hB/M2) is in the list');
+});
+
+test('BENCH-HIST-RACE: the context lane treats done as terminal (finish + reload)', async () => {
+    const { win, byId } = mount(CTX_HIST);
+    const CTX = win.UpliftNativeBench._panels.ctx;
+    CTX.state = { running: true, benchId: 'cB', result: null, models: [] };
+    CTX.onEvent({ type: 'done' });
+    await tick();
+    assert.equal(CTX.state.running, false,
+        "done ran finish() (old code ignored it: button stuck, history never reloaded)");
+    const host = byId['bench-ctx-history'];
+    assert.equal(findCls(host, 'bench-history-item').length, 2,
+        'the reload a done event triggers lists both context runs');
+});
+
+const TP_SRC = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench_tp.js'), 'utf8');
+const CTX_SRC = fs.readFileSync(path.join(STATIC_DIR, 'uplift_bench_ctx.js'), 'utf8');
+
+test('BENCH-HIST-RACE: source pins - exclusion gone, error arms poll, 404 settles', () => {
+    assert.ok(!SRC.includes('excludeId'),
+        'loadHistory never re-grows an exclusion filter (negative pin)');
+    for (const [src, poll] of [[TP_SRC, 'fallbackPoll'], [CTX_SRC, 'poll']]) {
+        assert.ok(new RegExp('onerror = function \\(\\) \\{[\\s\\S]{0,200}?self\\.' +
+            poll + '\\(benchId\\)').test(src),
+            'SSE onerror ARMS the REST poll (doctrine: never just mark interrupted)');
+        assert.ok(src.includes('clearInterval(CORE._poll); CORE._poll = null;'),
+            'a live event retires the armed poll (PF pattern)');
+        assert.ok(/e && e\.status === 404\) self\.finish\(\)/.test(src),
+            'a vanished run settles the panel instead of polling forever');
+    }
+});

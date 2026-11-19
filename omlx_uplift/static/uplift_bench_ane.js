@@ -99,9 +99,8 @@ var ANE = {
     },
 
     loadHist: function () {
-        var self = this;
         return loadHistory('ane', 'bench-ane-history', aneHistoryBody,
-            self.state && self.state.tuningId, aneHistoryDl);
+            aneHistoryDl);
     },
 
     form: function () {

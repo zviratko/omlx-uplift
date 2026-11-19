@@ -618,9 +618,8 @@ var TP = {
     },
 
     loadHist: function () {
-        var self = this;
         return loadHistory('throughput', 'bench-tp-history', tpHistoryBody,
-            self.state && self.state.benchId, tpHistoryDl);
+            tpHistoryDl);
     },
 
     form: function () {
@@ -966,11 +965,22 @@ var TP = {
         try {
             CORE._es = new EventSource(api() + '/bench/' + encodeURIComponent(benchId) + '/stream');
             CORE._es.onmessage = function (ev) {
-                var data;
-                try { data = JSON.parse(ev.data); } catch (_) { return; }
+                var data; try { data = JSON.parse(ev.data); } catch (_) { return; }
+                // a live event means the stream recovered: retire the
+                // emergency poll the error handler may have armed
+                if (CORE._poll) { clearInterval(CORE._poll); CORE._poll = null; }
                 self.onEvent(data);
             };
-            CORE._es.onerror = function () { streamInterrupted('bench-tp-status'); };
+            // BENCH-HIST-RACE doctrine (PF/ACC pattern): a dropped SSE must
+            // ARM the REST poll, never just mark 'interrupted' - a stream
+            // that died with the run (board restart, laptop sleep) used to
+            // leave finish() uncalled, so the history list only updated on
+            // a manual refresh. EventSource retries by itself; the first
+            // live event above retires the poll again.
+            CORE._es.onerror = function () {
+                streamInterrupted('bench-tp-status');
+                self.fallbackPoll(benchId);
+            };
         } catch (e) { this.fallbackPoll(benchId); }
     },
 
@@ -984,7 +994,11 @@ var TP = {
                 self.state.results = r.results || [];
                 self.renderTable();
                 if (r.status !== 'running') self.finish();
-            } catch (e) { /* keep polling */ }
+            } catch (e) {
+                // a vanished run (board restarted mid-run) will never
+                // answer again: settle the panel instead of polling forever
+                if (e && e.status === 404) self.finish();
+            }
         }, 3000);
     },
 
