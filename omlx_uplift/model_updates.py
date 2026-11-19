@@ -207,15 +207,38 @@ def set_ignore(repo_id: str, mode: str | None) -> dict:
         return st
 
 
+# engine DownloadStatus values that mean 'a download is still in flight';
+# compared against the lowercased enum value (the task carries the enum)
+_ACTIVE_DL = ("pending", "downloading")
+
+
+def _downloading(dl, repo_id: str) -> bool:
+    """True while the repo's newest download task is still in flight.
+
+    The engine's ``has_unfinished_download()`` also counts failed and
+    cancelled tasks, which pinned the row on 'Downloading' forever after a
+    run ended without success (user report 2026-11-19). A terminal task is
+    not a download in progress; the row goes back to 'Update available'.
+    """
+    try:
+        wanted = repo_id.lower()
+        tasks = [t for t in (getattr(dl, "_tasks", None) or {}).values()
+                 if str(getattr(t, "repo_id", "")).lower() == wanted]
+        if not tasks:
+            return False
+        latest = max(tasks, key=lambda t: getattr(t, "created_at", 0) or 0)
+        status = getattr(latest, "status", None)
+        return str(getattr(status, "value", status) or "").lower() in _ACTIVE_DL
+    except Exception:
+        _log.debug("download-state probe failed for %s", repo_id, exc_info=True)
+        return False
+
+
 def view(st: dict) -> dict:
     dl = _downloader()
     rows = []
     for repo, u in sorted((st.get("updates") or {}).items()):
-        busy = False
-        try:
-            busy = bool(dl and dl.has_unfinished_download(repo))
-        except Exception:
-            _log.debug("unfinished-download probe failed for %s", repo, exc_info=True)
+        busy = bool(dl) and _downloading(dl, repo)
         rows.append({"repo_id": repo, "files": u.get("files", 0), "size": u.get("size", 0),
                      "sha": u.get("sha"), "ignored": is_ignored(st, repo, u.get("sha")),
                      "downloading": busy})

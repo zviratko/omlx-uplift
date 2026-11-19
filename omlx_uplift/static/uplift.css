@@ -3704,10 +3704,13 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
 /* ---- UP-22: the HF | ModelScope source pair --------------------------
    Injected by uplift_downloader.js (ensureDlChrome) ahead of the tab strip;
    it is a segmented control, so it inherits the .se-btn.seg joining rules
-   and only needs to stop the tab strip's -10px overlap leaking in from the
-   left and to keep a gutter before the tabs it switches. */
+   and only needs to keep a gutter before the tabs it switches.
+   Joining geometry (user fix 2026-11-19): the house -10px sibling margin
+   cancels the .filterbar's own 10px gap, but the buttons inside this span
+   have NO gap between them - so the negative margin made ModelScope
+   overlap HuggingFace by 10px. Zero the pull inside .dl-src instead. */
 .filterbar .dl-src { display: inline-flex; margin-right: 10px; }
-.filterbar .dl-src .se-btn.seg:first-child { margin-left: 0; }
+.filterbar .dl-src .se-btn.seg + .se-btn.seg { margin-left: 0; }
 /* the ModelScope token field rides the existing entry row (.tok-w240 gives
    the width); hidden per source by JS, so give it the row's own gap */
 #dl-ms-token[hidden], #dl-ms-token[style*="display: none"] { display: none; }

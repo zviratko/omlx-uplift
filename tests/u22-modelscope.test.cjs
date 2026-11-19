@@ -495,3 +495,21 @@ test('wire shape + classic parity pins (source)', () => {
     for (const dead of ['ms/model-info', 'msModelDetail', 'dl-flash'])
         assert.ok(!SRC.includes(dead), 'MS offers no file-pick/detail upstream: ' + dead);
 });
+
+/* CSS join geometry (user fix 2026-11-19): the house segment rule
+   '.se-btn.seg + .se-btn.seg { margin-left: -10px }' cancels the
+   .filterbar's 10px gap between the tab-strip buttons. The HF|ModelScope
+   pair sits inside a gap-less .dl-src span, so the same pull made
+   ModelScope OVERLAP HuggingFace by 10px (live rect measure on the board:
+   hf.right 992.8 vs ms.left 982.8). The join must be zeroed inside
+   .dl-src; the old ':first-child' rule was a no-op (the first button has
+   no preceding sibling inside the span) and must not come back. Node
+   stubs see no geometry - this shape pin plus a live rect check is the
+   proof available. */
+test('U22-CSS: the HF|ModelScope pair joins flush, never overlapping', () => {
+    const css = fs.readFileSync(path.join(STATIC, 'uplift.css'), 'utf8');
+    assert.match(css,
+        /\.filterbar \.dl-src \.se-btn\.seg \+ \.se-btn\.seg \{ margin-left: 0; \}/);
+    assert.ok(!css.includes('.filterbar .dl-src .se-btn.seg:first-child'),
+        'the no-op first-child join rule must stay dead');
+});

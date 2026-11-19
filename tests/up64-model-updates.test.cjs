@@ -15,9 +15,19 @@ const SRC = fs.readFileSync(path.join(STATIC, 'uplift_downloader.js'), 'utf8');
 const J = v => JSON.stringify(v);
 
 function makeEl(tag, reg) {
+    const cls = new Set();
     const el = {
         tagName: tag, children: [], dataset: {}, style: {}, attrs: {}, parentNode: null,
         className: '', _text: '', title: '', disabled: false, type: '', onclick: null, _id: '',
+        classList: {
+            add: c => cls.add(c), remove: c => cls.delete(c), contains: c => cls.has(c),
+            toggle: (c, on) => {
+                const want = on === undefined ? !cls.has(c) : !!on;
+                if (want) cls.add(c); else cls.delete(c);
+                return want;
+            },
+        },
+        get childNodes() { return this.children; },
         get id() { return this._id; },
         set id(v) { this._id = v; if (reg) reg[v] = this; },
         get textContent() { return this._text; },
@@ -45,7 +55,8 @@ function makeEl(tag, reg) {
     return el;
 }
 
-function load(view, info) {
+function load(view, info, taskBox) {
+    const tasks = taskBox || { tasks: [] };
     const byId = {};
     const doc = {
         body: makeEl('body', byId),
@@ -54,7 +65,7 @@ function load(view, info) {
         addEventListener() {}, querySelectorAll: () => [],
         documentElement: { dataset: {} },
     };
-    const gets = [], posts = [], toasts = [];
+    const gets = [], posts = [], toasts = [], refreshes = { n: 0 };
     const win = { Uplift: {}, confirm: () => true };
     win.UpliftCore = {
         t: k => k, tf: (k, en, vars) => String(en === undefined ? k : en)
@@ -67,7 +78,8 @@ function load(view, info) {
             gets.push(String(url));
             const repo = new URL('http://x' + url).searchParams.get('repo_id');
             if (repo && info[repo]) return info[repo];
-            if (String(url).includes('/hf/tasks')) return { tasks: [] };
+            if (String(url).includes('/hf/tasks')) return { tasks: tasks.tasks };
+            if (String(url).includes('/tasks')) return { tasks: [] };
             throw new Error('unexpected fetch ' + url);
         },
         postJson: async (url, body) => { posts.push([String(url), body]); return view; },
@@ -79,7 +91,8 @@ function load(view, info) {
     win.Uplift.state = { API: '' };
     let current = view;
     win.Uplift.modelUpdates = { get view() { return current; },
-        set(v) { current = v; }, refresh() { return Promise.resolve(current); } };
+        set(v) { current = v; },
+        refresh() { refreshes.n++; return Promise.resolve(current); } };
     vm.runInNewContext(SRC, { window: win, document: doc, URL, URLSearchParams, console,
         localStorage: { getItem: () => null, setItem() {} },
         setTimeout: () => 0, clearTimeout() {} });
@@ -87,7 +100,10 @@ function load(view, info) {
     const body = makeEl('div', byId);
     const results = makeEl('div', byId); results.id = 'dl-results';
     body.append(results);
-    return { S: win.Uplift.downloader._up64, byId, gets, posts, toasts };
+    const tasksHost = makeEl('div', byId); tasksHost.id = 'dl-tasks';
+    body.append(tasksHost);
+    return { S: win.Uplift.downloader._up64, byId, gets, posts, toasts,
+        refreshes, tasks: tasks, renderTasks: win.Uplift.downloader.renderTasks };
 }
 
 const VIEW = {
@@ -154,4 +170,62 @@ test('UP-64: ignore buttons post the repo and the mode', async () => {
     assert.strictEqual(J(h.posts.map(p => [p[0], p[1]])), J([
         ['/uplift/api/model-updates/ignore', { repo_id: 'org/z', mode: 'version' }],
         ['/uplift/api/model-updates/ignore', { repo_id: 'org/never', mode: 'none' }]]));
+});
+
+/* ---- UP-64 follow-up (user 2026-11-19): the row stuck on 'Downloading'
+   and the Models menu badge that never cleared. Root cause: nothing
+   re-read /model-updates when a download finished - the board below moved
+   (2 s task poll) while the updates panel and the badge waited for the
+   30 min poll. Three edges are pinned here: the task-board active->quiet
+   edge re-reads, the queue click re-reads (row flips to 'Downloading' and
+   the poll arms), and uplift.js keeps a 10 s arm while any row downloads. */
+
+function sliceFn(src, anchor) {
+    const i = src.indexOf(anchor);
+    assert.ok(i >= 0, 'anchor missing: ' + anchor);
+    let depth = 0;
+    for (let k = src.indexOf('{', i); k < src.length; k++) {
+        if (src[k] === '{') depth++;
+        else if (src[k] === '}') { depth--; if (!depth) return src.slice(i, k + 1); }
+    }
+    throw new Error('unbalanced braces after ' + anchor);
+}
+
+test('UP-64: the updates state re-reads when the task board goes quiet', async () => {
+    const box = { tasks: [{ task_id: 'x', repo_id: 'org/z', status: 'downloading', progress: 40 }] };
+    const h = load(VIEW, {}, box);
+    await h.renderTasks('dl-tasks');
+    assert.strictEqual(h.refreshes.n, 0, 'an in-flight board does not re-read');
+    // a shared helper renders the quantizer board too - its quiet edge
+    // must NOT re-read the model-update state
+    const qz = makeEl('div', h.byId); qz.id = 'qz-tasks';
+    await h.renderTasks('qz-tasks', 'qz');
+    assert.strictEqual(h.refreshes.n, 0, 'only the downloader board drives the hook');
+    box.tasks = [{ task_id: 'x', repo_id: 'org/z', status: 'completed', progress: 100 }];
+    await h.renderTasks('dl-tasks');
+    assert.strictEqual(h.refreshes.n, 1, 'the active->quiet edge re-reads once');
+    await h.renderTasks('dl-tasks');
+    assert.strictEqual(h.refreshes.n, 1, 'a quiet board stays quiet');
+    box.tasks = [];
+    await h.renderTasks('dl-tasks');
+    assert.strictEqual(h.refreshes.n, 1, 'an emptied quiet board is not an edge');
+});
+
+test('UP-64: a queued single-model update re-reads the shared state', () => {
+    // the file dialog's Update/Download POST: the row must flip to
+    // 'Downloading' at once (and the 10 s arm below then keeps it honest)
+    const body = sliceFn(SRC, 'function submit(files) {');
+    assert.match(body, /renderTasks\('dl-tasks', 'hf'\);/);
+    assert.match(body, /window\.Uplift\.modelUpdates[\s\S]{0,120}M\.refresh\(\)/);
+});
+
+test('UP-64: the badge poll arms while a row is downloading', () => {
+    // uplift.js is the app monolith and cannot be vm-mounted - source shape
+    // is the available proof (uplift.js cannot boot headless; believe load1)
+    const UJS = fs.readFileSync(path.join(STATIC, 'uplift.js'), 'utf8');
+    const arm = UJS.slice(UJS.indexOf('function refreshModelUpdates'),
+        UJS.indexOf('window.Uplift.modelUpdates ='));
+    assert.ok(arm.length > 0, 'both anchors exist');
+    assert.match(arm, /some\(u => u\.downloading\)/);
+    assert.match(arm, /setTimeout\(refreshModelUpdates, 10000\)/);
 });

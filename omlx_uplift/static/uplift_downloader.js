@@ -40,6 +40,19 @@ function taskRow(t) {
                DG.cell(t.error || sizeTxt));
     return row;
 }
+// UP-64 follow-up (user 2026-11-19): the updates rows and the Models menu
+// badge only re-read the shared state on their own poll - after a download
+// finished, the row still said 'Downloading' while the board below showed
+// done. Re-read once on the active->quiet edge of the downloader board; the
+// 10 s arm in uplift.js (and the read at queue time) cover a hidden tab.
+function noteDlActive(hostId, active) {
+    if (hostId !== 'dl-tasks') return;
+    if (DL.tasksActive && !active) {
+        const M = window.Uplift.modelUpdates;
+        if (M) M.refresh();
+    }
+    DL.tasksActive = active;
+}
 function renderTasks(hostId, kind) {
     // UP-22: the downloader board is ONE host with TWO sources. uplift_boot's
     // visibility kick still passes the hardcoded ['dl-tasks','hf'] pair, and a
@@ -63,7 +76,10 @@ function renderTasks(hostId, kind) {
             if (AC) AC.announceTasks(kind, tasks);
         } catch (_) { /* verdicts never block the board */ }
 
-        if (!tasks.length) { D.emptyMsg(host, C.t('uplift.dl.no_tasks')); return; }
+        if (!tasks.length) {
+            noteDlActive(hostId, false);
+            D.emptyMsg(host, C.t('uplift.dl.no_tasks')); return;
+        }
         let active = false;
         for (const t of tasks) {
             const r = taskRow(t);
@@ -116,6 +132,7 @@ function renderTasks(hostId, kind) {
             }
             host.append(r);
         }
+        noteDlActive(hostId, active);
         if (active) {   // gentle live progress while an entry is still running
             setTimeout(() => {
                 const card = host.closest('section');
@@ -130,6 +147,7 @@ let dlInit = false;
 const DL = {
     tab: 'trending',                 // recos | trending | popular | search
     provider: 'hf',                  // UP-22: hf | ms (classic downloaderSource)
+    tasksActive: false,              // UP-64: last dl-tasks board activity edge
     rec: { trending: null, popular: null },   // cached suggested lists
     search: [],
     page: { trending: 1, popular: 1, search: 1 },
@@ -616,6 +634,11 @@ function openModelFiles(repoId) {
                     + (tid ? ` #${String(tid).slice(0, 8)}` : ''));
                 overlay.remove();
                 renderTasks('dl-tasks', 'hf');
+                // UP-64 follow-up: re-read the updates state NOW so the row
+                // flips to 'Downloading' and the 10 s arm in uplift.js keeps
+                // it honest until the finish clears the badge
+                const M = window.Uplift.modelUpdates;
+                if (M) M.refresh();
             })
             .catch(e => {
                 sending = false; refresh();

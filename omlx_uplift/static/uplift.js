@@ -865,6 +865,13 @@ function refreshModelUpdates() {
         setModelUpdates(v);
         // a check started by this read lands in about a second
         if (v && v.running) MUP.timer = setTimeout(refreshModelUpdates, 4000);
+        // UP-64 follow-up (user 2026-11-19): while an update download runs,
+        // keep reading so the row and the menu badge clear when it ends -
+        // the read after the finish starts the server's re-check, and the
+        // 4 s arm above then lands the cleared list. The 30 min poll alone
+        // left the badge up long after the task board showed done.
+        else if (v && (v.updates || []).some(u => u.downloading))
+            MUP.timer = setTimeout(refreshModelUpdates, 10000);
         return v;
     }).catch(() => MUP.view);
 }

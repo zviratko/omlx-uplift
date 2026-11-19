@@ -108,6 +108,35 @@ def test_stale_after_interval_or_finished_update(env):
     assert MU._stale(st, dl)
 
 
+def test_downloading_flag_is_the_in_flight_state(env):
+    # user report 2026-11-19: the engine's has_unfinished_download() also
+    # counts failed/cancelled, so the row sat on 'Downloading' after the
+    # task board showed the run finished. view() must badge only a live
+    # download (pending/downloading), never a terminal one.
+    dl, _ = env
+    st = asyncio.run(MU.run_check())
+
+    class T:
+        repo_id = "org/a"
+        created_at = 1.0
+        status = "downloading"
+    dl._tasks = {"t": T()}
+    assert MU.view(st)["updates"][0]["downloading"] is True
+
+    class ES:                       # the engine carries a str-enum member
+        value = "pending"
+    T.status = ES()
+    assert MU.view(st)["updates"][0]["downloading"] is True
+
+    for fin in ("completed", "failed", "cancelled"):
+        T.status = fin
+        assert MU.view(st)["updates"][0]["downloading"] is False, fin
+
+    T.status = "downloading"
+    T.repo_id = "org/zz"            # another repo's run does not badge this row
+    assert MU.view(st)["updates"][0]["downloading"] is False
+
+
 def test_failed_check_keeps_the_last_good_result(env, monkeypatch):
     dl, _ = env
     asyncio.run(MU.run_check())
