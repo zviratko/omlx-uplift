@@ -953,7 +953,11 @@ function gsCopySectionLink(btn, slug) {
         window.UpliftGSpec.gsSectionAnchor(slug);
     const flash = () => {
         btn.textContent = '\u2713';
-        btn.title = C.tf('cluster.v2.common.copied', 'Copied!');
+        // SYNC-1 run 29 (upstream d4f95b4b #5453): the cluster i18n namespace
+        // lost its v2 tier when the dead v1 console was removed, so this lookup
+        // hit nothing and the flash stayed English on a non-EN board (classic
+        // dashboard.js:1125 reads the same key).
+        btn.title = C.tf('cluster.common.copied', 'Copied!');
         setTimeout(() => {
             btn.textContent = '\u29C9';
             btn.title = C.tf('settings.sections.copy_link',

@@ -51,6 +51,10 @@
         'dflash_block_size', 'dflash_verify_mode', 'mtp_enabled', 'mtp_adaptive_max_depth',
         'mtp_fixed_depth', 'qwen35_ane_prefill_shared_fraction',
         'vlm_mtp_enabled', 'vlm_mtp_draft_model', 'vlm_mtp_draft_block_size',
+        // SYNC-1 run 29 (upstream f50cd819 #5449): classic lists the adapter
+        // with the rest of the diffusion-unsupported family (dashboard.js:73)
+        // and the server nulls it in _sanitize_diffusion_settings_dict.
+        'lora_adapter',
     ]);
     const DIFFUSION_UNSUPPORTED_CT_KWARGS = new Set([
         'enable_thinking', 'reasoning_effort', 'preserve_thinking',
@@ -426,6 +430,10 @@
             mtp_adaptive_max_depth: mtpDepthOf(s),
             mtp_fixed_depth: s.mtp_fixed_depth ? String(s.mtp_fixed_depth) : '',
             trust_remote_code: s.trust_remote_code || false,
+            // SYNC-1 run 29 (upstream f50cd819 #5449): the adapter folder path
+            // applied on top of these weights. '' = none (classic:2358 clears
+            // it for a diffusion model, where the row never renders).
+            lora_adapter: diffusion ? '' : (s.lora_adapter || ''),
             ctKwargEntries: buildCtKwargEntries(s.chat_template_kwargs, s.forced_ct_kwargs, diffusion),
             is_diffusion_model: diffusion,
         };
@@ -540,6 +548,23 @@
         if (ms.specprefill_enabled) {
             const keep = num(ms.specprefill_keep_pct);
             if (!(keep >= 0.1 && keep <= 0.5)) errors.push('SpecPrefill keep percentage must be between 0.1 and 0.5.');
+        }
+        // SYNC-1 run 29 (upstream f50cd819 #5449): the adapter runs the
+        // targeted projections from the checkpoint weights, so every setting
+        // that bypasses that forward is refused server-side
+        // (model_settings._LORA_CONFLICTS + routes._validate_model_settings,
+        // HTTP 400). The server names the FIRST conflict in its own order and
+        // the adapter always wins on a profile merge, so mirror the order too.
+        if (ms.lora_adapter) {
+            const conflict = [['DFlash', ms.dflash_enabled],
+                              ['VLM MTP', ms.vlm_mtp_enabled],
+                              ['ANE prefill', ms.qwen35_ane_prefill_enabled],
+                              ['MoE expert offload', ms.moe_expert_offload_enabled],
+                              ['a Prefill Accelerator', !!ms.prefill_helper_node_id],
+                              ['an external engine', !!ms.external_engine]]
+                .find(pair => pair[1]);
+            if (conflict)
+                errors.push('A LoRA adapter cannot be combined with ' + conflict[0] + '.');
         }
         return errors;
     }
@@ -687,6 +712,10 @@
             vlm_mtp_draft_model: ms.vlm_mtp_enabled ? (ms.vlm_mtp_draft_model || null) : null,
             vlm_mtp_draft_block_size: ms.vlm_mtp_enabled && ms.vlm_mtp_draft_block_size
                 ? parseInt(ms.vlm_mtp_draft_block_size) : null,
+            // SYNC-1 run 29 (upstream f50cd819 #5449): classic sends the
+            // adapter in the always-sent base (dashboard.js:3734), so an
+            // empty pick is an explicit null that CLEARS a stored adapter.
+            lora_adapter: ms.lora_adapter || null,
             trust_remote_code: !!ms.trust_remote_code,
         };
         // MT-1: classic sends the embedding-audio pair ONLY for models the
@@ -754,6 +783,10 @@
                 dflash_enabled: false, mtp_enabled: false,
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
                 vlm_mtp_enabled: false, vlm_mtp_draft_model: null,
+                // SYNC-1 run 29 (upstream f50cd819 #5449): classic nulls the
+                // adapter for a diffusion model (dashboard.js:3799); the
+                // server does the same in _sanitize_diffusion_settings_dict.
+                lora_adapter: null,
                 moe_expert_offload_enabled: false,
                 // SYNC-1 fire 18: a8_prefill_enabled is NO LONGER zeroed here.
                 // It left the always-sent base and is written only when
@@ -913,6 +946,11 @@
             add('vlm_mtp_draft_model', d.vlm_mtp_draft_model);
             add('vlm_mtp_draft_block_size', d.vlm_mtp_draft_block_size ?? null);
         }
+        // SYNC-1 run 29 (upstream f50cd819 #5449): engine_pool adds the adapter
+        // path UNCONDITIONALLY after the VLM-MTP block (engine_pool.py:1495), so
+        // picking or clearing one rebuilds the engine - the row is RELOAD
+        // material, exactly like its hint says.
+        add('lora_adapter', d.lora_adapter || null);
         return sig;
     }
     /* Keys that feed the runtime signature (drives the per-field RELOAD
@@ -955,6 +993,10 @@
         'dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode',
         'mtp_enabled', 'vlm_mtp_enabled', 'vlm_mtp_draft_model',
         'vlm_mtp_draft_block_size',
+        // SYNC-1 run 29 (upstream f50cd819 #5449): the adapter is baked in at
+        // engine load, so it rides the deferred store + RESTART MODEL like the
+        // rest of the signature material instead of reloading on a plain SAVE.
+        'lora_adapter',
         // NOT listed here on purpose: max_context_window. It is signature
         // material only where the window passes the native one (YaRN), so the
         // editor classifies it per model + per queued value through

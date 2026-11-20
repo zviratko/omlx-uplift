@@ -67,6 +67,10 @@ test('s26: every classic reason maps to its catalog key, unknown falls back to d
         'bench.upload_skipped.reason_ane_aligned_prompt');
     assert.strictEqual(TP.uploadSkippedLabel('custom_generation_length'),
         'bench.upload_skipped.reason_custom_generation_length');
+    // SYNC-1 run 29 (upstream f50cd819 #5449): a model carrying a LoRA adapter
+    // is listed under its base model, so the server skips the upload.
+    assert.strictEqual(TP.uploadSkippedLabel('lora_adapter'),
+        'bench.upload_skipped.reason_lora_adapter');
     assert.strictEqual(TP.uploadSkippedLabel('anything-else'),
         'bench.upload_skipped.reason_default');
     // catalog miss: EN fallbacks keep the shell honest
@@ -100,6 +104,7 @@ test('s26: the classic catalog at the mirror tip carries every key used', () => 
         'bench.upload_skipped.reason_external', 'bench.upload_skipped.reason_splash',
         'bench.upload_skipped.reason_ane_aligned_prompt',
         'bench.upload_skipped.reason_custom_generation_length',
+        'bench.upload_skipped.reason_lora_adapter',
         'bench.upload_skipped.reason_default']) {
         assert.ok(typeof en[k] === 'string' && en[k].length > 0, k + ' present in classic en.json');
     }

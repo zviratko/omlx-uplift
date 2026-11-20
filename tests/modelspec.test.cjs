@@ -911,3 +911,78 @@ test('f18: a diffusion save never writes a8_prefill_enabled false', () => {
     assert.ok(!('a8_prefill_enabled' in p),
         'the old zeroing line would save an OFF the server keeps unset');
 });
+
+/* ---- SYNC-1 run 29 (upstream f50cd819 #5449): lora_adapter mirror.
+   The field is a plain Optional[str] path (model_settings.py:606) that
+   classic sends in the always-sent payload base, clears for a diffusion
+   model, and refuses in combination with six settings
+   (model_settings._LORA_CONFLICTS). engine_pool adds it to the runtime
+   signature UNCONDITIONALLY (engine_pool.py:1495). ---- */
+test('lora: buildState reads the stored adapter path', () => {
+    assert.strictEqual(S.buildState(base(), {}).lora_adapter, '');
+    const st = S.buildState(base(), { lora_adapter: '/models/MyRepo/adapter' });
+    assert.strictEqual(st.lora_adapter, '/models/MyRepo/adapter');
+});
+test('lora: a diffusion model reads and saves no adapter', () => {
+    const d = base({ config_model_type: 'diffusion_gemma' });
+    // classic:2358 forces '' for diffusion even when a value is stored
+    assert.strictEqual(S.buildState(d, { lora_adapter: '/a/b' }).lora_adapter, '');
+    const p = S.buildPayload(S.buildState(d, { lora_adapter: '/a/b' }), d);
+    assert.strictEqual(p.lora_adapter, null);
+});
+test('lora: buildPayload sends the path and an empty pick clears it', () => {
+    const on = S.buildPayload(S.buildState(base(), { lora_adapter: '/a/b' }), base());
+    assert.strictEqual(on.lora_adapter, '/a/b');
+    const off = S.buildPayload(S.buildState(base(), {}), base());
+    assert.strictEqual(off.lora_adapter, null,
+        'classic puts the key in the always-sent base, so None must clear a stored adapter');
+});
+test('lora: validate mirrors the six server conflicts in server order', () => {
+    const conflicts = [
+        ['dflash_enabled', 'DFlash'],
+        ['vlm_mtp_enabled', 'VLM MTP'],
+        ['qwen35_ane_prefill_enabled', 'ANE prefill'],
+        ['moe_expert_offload_enabled', 'MoE expert offload'],
+        ['prefill_helper_node_id', 'a Prefill Accelerator'],
+        ['external_engine', 'an external engine'],
+    ];
+    for (const [key, label] of conflicts) {
+        // buildState only carries an ON switch the server DTO vouches for
+        // (modelspec.js:366), so the MoE case needs the support flag.
+        const m = base(key === 'moe_expert_offload_enabled'
+            ? { moe_expert_offload_supported: true } : {});
+        const st = S.buildState(m, { lora_adapter: '/a/b', [key]: key === 'prefill_helper_node_id' ? 'node' : true });
+        const errs = S.validate(st, m);
+        assert.strictEqual(errs.length, 1, key + ' -> ' + errs.join('|'));
+        assert.strictEqual(errs[0], 'A LoRA adapter cannot be combined with ' + label + '.');
+    }
+    // the server names the FIRST conflict only; no adapter, no conflict
+    const both = S.buildState(base(), { lora_adapter: '/a/b',
+        dflash_enabled: true, vlm_mtp_enabled: true });
+    assert.deepStrictEqual(
+        ok(both).filter(e => /LoRA adapter cannot be combined/.test(e)),
+        ['A LoRA adapter cannot be combined with DFlash.'],
+        'DFlash comes first in _LORA_CONFLICTS, so it is the one named, once');
+    const clean = S.buildState(base(), { dflash_enabled: true });
+    assert.deepStrictEqual(ok(clean), [], 'a conflicting feature alone stays legal');
+});
+test('lora: the adapter is engine-load (RELOAD) material, not a live knob', () => {
+    assert.ok(S.RUNTIME_SETTING_KEYS.has('lora_adapter'));
+    const a = S.runtimeSignature(S.buildPayload(S.buildState(base(), {}), base()), base());
+    const b = S.runtimeSignature(
+        S.buildPayload(S.buildState(base(), { lora_adapter: '/a/b' }), base()), base());
+    assert.notStrictEqual(a.lora_adapter, b.lora_adapter,
+        'picking an adapter changes the server runtime signature');
+    assert.deepStrictEqual(S.runtimeDiff(b, a, base()).map(r => r.key),
+        ['lora_adapter'], 'the CHANGES rail names the adapter row');
+});
+test('lora: classic hides the row for diffusion only, so a type flip keeps it', () => {
+    assert.ok(S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has('lora_adapter'));
+    assert.ok(!S.TYPE_ONLY_KEYS.has('lora_adapter'),
+        'classic renders the row outside the llm/vlm gate (x-show is !is_diffusion_model)');
+    const emb = base({ model_type: 'embedding' });
+    const p = S.buildPayload(Object.assign(S.buildState(emb, { lora_adapter: '/a/b' }),
+        { model_type_override: 'embedding' }), emb);
+    assert.strictEqual(p.lora_adapter, '/a/b');
+});
+

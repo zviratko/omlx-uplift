@@ -261,9 +261,14 @@ test('wire shape: header, POST body and dialog-first entries (source pins)', () 
         'models.detail.file_downloaded', 'models.detail.required_file',
         'models.browse.tight_fit', 'models.browse.high_oom_risk',
         'models.detail.download_all', 'models.detail.download_selected',
-        'models.detail.lora_warning', 'models.recommend.not_enough_space',
+        // SYNC-1 run 29 (upstream f50cd819 #5449): classic renamed the key -
+        // an adapter folder is a choice now, not an unsupported repo.
+        'models.detail.lora_info', 'models.recommend.not_enough_space',
         'models.detail.view_on_hf', 'models.browse.downloaded'])
-        assert.ok(SRC.includes(`'${key}'`), 'classic key used: ' + key);
+        // the EN fallback for this one carries an apostrophe, so the call
+        // site uses double quotes; accept either quote style
+        assert.ok(SRC.includes(`'${key}'`) || SRC.includes(`"${key}"`),
+            'classic key used: ' + key);
     // Escape is the GLOBAL modal-overlay handler's business (uplift_state.js)
     assert.ok(!/addEventListener\(\s*['"]keydown/.test(SRC.slice(
         SRC.indexOf('function openModelFiles'), SRC.indexOf('function initDownloader'))),
@@ -338,7 +343,11 @@ test('update lane: changed files pre-pick; showsUpdate/updateSize gate classic-s
     assert.ok(!H.showsUpdate(detail, false), 'not downloaded: plain download buttons');
     assert.ok(!H.showsUpdate({ ...detail, layout: 'gguf' }, true), 'GGUF never updates (classic gate)');
     assert.ok(!H.showsUpdate({ ...detail, update_files: [] }, true), 'up to date: DOWNLOADED badge');
-    assert.ok(!H.showsUpdate({ ...detail, is_adapter: true }, true));
+    // SYNC-1 run 29 (upstream f50cd819 #5449): classic DROPPED the is_adapter
+    // term from hfShowsUpdate (dashboard.js:9274) - an adapter is an ordinary
+    // download now, so a changed adapter folder offers Update like any repo.
+    assert.ok(H.showsUpdate({ ...detail, is_adapter: true }, true),
+        'an adapter with Hub changes updates (classic dropped the exclusion)');
     assert.ok(!H.showsUpdate({ ...detail, unsupported_reason: 'x' }, true));
 });
 test('update lane: footer sends the update_files list through the download wire', () => {
@@ -347,7 +356,14 @@ test('update lane: footer sends the update_files list through the download wire'
     assert.match(SRC, /const updating = HFS\.showsUpdate\(detail, dlDownloaded\(detail\.repo_id \|\| repoId\)\);/);
     assert.match(SRC, /const spaceBytes = updating \? HFS\.updateSize\(detail\) : bytes;/,
         'classic parity: the disk warning sizes the UPDATE, not the selection');
-    assert.match(SRC, /!detail\.is_adapter && !HFS\.fits\(detail, spaceBytes\)/);
+    // SYNC-1 run 29 (upstream f50cd819 #5449): the free-space warning no longer
+    // skips adapters (classic dropped the term), and the neutral LoRA line is
+    // its own statement so it must NOT short-circuit the download chain.
+    assert.ok(!/!detail\.is_adapter && !HFS\.fits/.test(SRC),
+        'negative pin: the old adapter exemption is gone');
+    assert.match(SRC, /if \(!HFS\.fits\(detail, spaceBytes\)\) \{/);
+    assert.match(SRC, /if \(detail\.is_adapter\) \{[\s\S]{0,220}?\}\s*\n\s*if \(detail\.unsupported_reason\) \{/,
+        'the LoRA info badge no longer replaces the download controls');
     assert.match(SRC, /\} else if \(updating\) \{[\s\S]*?submit\(detail\.update_files\)[\s\S]*?\} else if \(detail\.layout === 'gguf'/,
         'UPDATE button sits where classic replaces the download pair');
     assert.match(SRC, /'models\.detail\.update', 'Update'/, 'classic catalog key, EN fallback');

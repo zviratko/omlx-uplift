@@ -2485,6 +2485,10 @@ label.se-row.pending-restart > .se-ctl > select {
 .modal.editor .se-box-body textarea { min-height: 200px;
     font: 400 12px/1.5 var(--mono); }
 .row-editor .se-hint { color: var(--dim); font-size: 10px; grid-column: 1 / -1; }
+/* SYNC-1 run 29 (upstream f50cd819 #5449): the LoRA row's reason line - classic
+   paints it amber (text-amber-700) because the adapter is stored but cannot be
+   applied. Own class, so the base .se-hint rule stays single-declared. */
+.row-editor .se-hint.se-hint-warn { color: var(--warn); }
 .row-editor .se-kwarg { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
 /* round 6 item 3: in the editor MODAL the kwargs rows inherited .se-row's
    3-column grid (1fr + 110px + fixed 220px) — with only key+value+× the

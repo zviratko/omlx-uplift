@@ -1062,6 +1062,13 @@ var TP = {
                 'ANE-aligned prompt results are not uploaded to omlx.ai community benchmarks because their prompt lengths do not match the standard PP buckets.'],
             custom_generation_length: ['bench.upload_skipped.reason_custom_generation_length',
                 'Results with a generation length other than 128 tokens are not uploaded to omlx.ai community benchmarks so they stay comparable with other submissions.'],
+            // SYNC-1 run 29 (upstream f50cd819 #5449): a model that carries a
+            // LoRA adapter is measured under its base model on the leaderboard,
+            // so the server skips the upload. Without this row the lane fell
+            // through to the generic 'These results were not uploaded' line and
+            // hid the cause.
+            lora_adapter: ['bench.upload_skipped.reason_lora_adapter',
+                'Results with a LoRA adapter are not uploaded to omlx.ai community benchmarks because the leaderboard lists them under the base model.'],
         };
         var k = keys[reason] || ['bench.upload_skipped.reason_default',
             'These results were not uploaded to omlx.ai community benchmarks.'];

@@ -62,6 +62,26 @@ async function loadGrammarParsers() {
         if (Array.isArray(d)) GRAMMAR_PARSERS = d;
     } catch (_) { /* offline/upstream missing: fall back to model-reported list */ }
 }
+/* SYNC-1 run 29 (upstream f50cd819 #5449): LoRA adapters live inside the model
+   folders, so the picker is per model: classic fills it from
+   GET /admin/api/models/{id}/lora-adapters when the settings modal opens
+   (dashboard.js loadLoraAdapters, called from its open Promise.all). Each row
+   carries why it does not fit THIS model, which is what the option's disabled
+   state and the amber line show. Cached per editor open and keyed by model id,
+   because a stale list for another model would offer an unusable path. */
+let LORA_ADAPTERS = null;            // { model, adapters } | null
+async function loadLoraAdapters(model) {
+    LORA_ADAPTERS = { model: model, adapters: [] };
+    try {
+        const d = await MM_GLUE.fetchJson(
+            `${API}/admin/api/models/${encodeURIComponent(model)}/lora-adapters`);
+        if (d && Array.isArray(d.adapters)) LORA_ADAPTERS.adapters = d.adapters;
+    } catch (_) { /* older keg / offline: the row still shows the stored path */ }
+}
+function seLoraAdapters() {
+    return (LORA_ADAPTERS && LORA_ADAPTERS.model === seModel)
+        ? LORA_ADAPTERS.adapters : [];
+}
 let seOrig = {};                     // baseline snapshot for dirty tracking
 /* U41 two-phase save (user design): phase 1 SAVE persists EVERYTHING —
    live keys go through the classic sparse PUT, engine-rebuild keys cannot
@@ -1845,6 +1865,69 @@ function renderEditorFields(container) {
         kwh.className = 'se-subhead'; kwh.textContent = 'Chat Template Kwargs';
         sect.__body.append(kwh);
         renderCtKwargs(sect.__body);
+
+        /* ---- SYNC-1 run 29 (upstream f50cd819 #5449): LoRA adapter picker,
+           rendered directly after the kwargs block and hidden only for
+           diffusion models, exactly where classic puts it
+           (_modal_model_settings.html:1365). The adapter is applied at engine
+           load and never served on its own, so the row is RELOAD material
+           (modelspec RUNTIME_SETTING_KEYS). An option the server cannot apply
+           stays visible but disabled, and the saved pick keeps its reason line
+           so the user can always see and clear what is stored. ---- */
+        {
+            const adapters = seLoraAdapters();
+            const cur = seValues.lora_adapter || '';
+            // classic loraAdapterOptions: a saved path outside the model
+            // folders still shows as selected.
+            const listed = cur && !adapters.some(a => a.path === cur)
+                ? [{ id: cur, path: cur, problem: null }] : [];
+            const opts = listed.concat(adapters);
+            // classic loraAdapterLabel: name · r<rank> · <size>
+            const loraLabel = a => [a.id]
+                .concat(a.rank ? ['r' + a.rank] : [])
+                .concat(a.size_formatted ? [a.size_formatted] : []).join(' · ');
+            const loraGrid = grid();
+            const loraRow = seBind('select', 'lora_adapter', {
+                label: C.tf('modal.model_settings.lora_adapter', 'LoRA Adapter'),
+                hint: C.tf('modal.model_settings.lora_adapter_hint',
+                    'Apply a LoRA adapter from the model folders on top of these weights. Applies after the model reloads.'),
+                options: [{ value: '',
+                    label: C.tf('modal.model_settings.lora_adapter_none', 'None') }]
+                    .concat(opts.map(a => ({ value: a.path, label: loraLabel(a) }))),
+            });
+            loraGrid.append(loraRow);
+            const loraSel = loraRow.querySelector('select');
+            if (loraSel) for (const el of [...loraSel.options]) {
+                const a = opts.find(z => String(z.path) === el.value);
+                if (a && a.problem && a.path !== cur) el.disabled = true;
+            }
+            // classic reads the info/problem lines from the LOADED list only,
+            // so a path that is not on disk stays a bare selected option.
+            const chosen = cur ? (adapters.find(a => a.path === cur) || null) : null;
+            if (chosen && chosen.base_model) {
+                const info = document.createElement('div');
+                info.className = 'se-hint';
+                info.textContent = C.tf('modal.model_settings.lora_adapter_info',
+                    'Trained on {base} · {targets}')
+                    .replace('{base}', chosen.base_model || '')
+                    .replace('{targets}', (chosen.targets || []).join(', '));
+                loraGrid.append(info);
+            }
+            if (chosen && chosen.problem) {
+                const bad = document.createElement('div');
+                bad.className = 'se-hint se-hint-warn';
+                bad.textContent = String(chosen.problem);
+                loraGrid.append(bad);
+            }
+            if (!adapters.length && !cur) {
+                const none = document.createElement('div');
+                none.className = 'se-hint';
+                none.textContent = C.tf('modal.model_settings.lora_adapter_empty',
+                    'No LoRA adapters found. Put an adapter folder (with adapter_config.json) in a model folder.');
+                loraGrid.append(none);
+            }
+            sect.__body.append(loraGrid);
+        }
     }
 
     /* ---- experimental (classic ms-experimental): ANE + index cache + SpecPrefill ---- */
@@ -2425,6 +2508,9 @@ async function openEditor(model, profileName, templateName) {
     seModel = model;
     seWantProfile = profileName || null;   // alias/profile EDIT lands on that tab
     await loadGrammarParsers().catch(() => {});   // R10-7: fill the reasoning-parser list (classic does the same)
+    // SYNC-1 run 29 (upstream f50cd819 #5449): the LoRA picker is per model, so
+    // classic also fetches it as part of opening the modal (dashboard.js:3122).
+    await loadLoraAdapters(model).catch(() => {});
     let row = [...document.querySelectorAll('#model-admin .urow:not(.head)')]
         .find(r => r.dataset.mid === model);
     if (!row) { await renderModelAdmin(true);

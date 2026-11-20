@@ -276,8 +276,10 @@ const HFS = {
     // UP-64 dialog lane (classic hfShowsUpdate, 78f00e4 #4949): a downloaded
     // non-GGUF checkpoint with Hub changes offers UPDATE instead of the
     // download buttons; the server lists the replacing files in update_files.
+    // SYNC-1 run 29 (upstream f50cd819 #5449): classic dropped the is_adapter
+    // exclusion: an adapter folder is now an ordinary download.
     showsUpdate(detail, downloaded) {
-        return !!(detail && !detail.is_adapter && !detail.unsupported_reason
+        return !!(detail && !detail.unsupported_reason
             && detail.layout !== 'gguf'
             && ((detail.update_files || []).length) && downloaded);
     },
@@ -588,15 +590,23 @@ function openModelFiles(repoId) {
         const bytes = HFS.selSize(detail, picked);
         const updating = HFS.showsUpdate(detail, dlDownloaded(detail.repo_id || repoId));
         const spaceBytes = updating ? HFS.updateSize(detail) : bytes;
-        if (!detail.is_adapter && !HFS.fits(detail, spaceBytes)) {
+        if (!HFS.fits(detail, spaceBytes)) {
             const w = document.createElement('span'); w.className = 'dl-space';
             w.textContent = C.tf('models.recommend.not_enough_space', 'Not enough free space in the model folder');
             foot.append(w);
         }
         foot.append(mkBtn('btn', 'models.detail.cancel', 'Cancel', () => overlay.remove()));
+        // SYNC-1 run 29 (upstream f50cd819 #5449): an adapter folder is no
+        // longer unsupported. Classic shows a neutral info line beside the
+        // ordinary download controls and renamed the catalog key
+        // models.detail.lora_warning -> lora_info; the old key is gone, so the
+        // previous literal fallback kept printing 'not supported' for a model
+        // the user can now download and pick in Advanced Settings.
         if (detail.is_adapter) {
-            foot.append(dlBadge('warn', C.tf('models.detail.lora_warning', 'LoRA adapter — not supported')));
-        } else if (detail.unsupported_reason) {
+            foot.append(dlBadge('info', C.tf("models.detail.lora_info",
+                "LoRA adapter: choose it in a model's Advanced Settings")));
+        }
+        if (detail.unsupported_reason) {
             foot.append(dlBadge('warn', String(detail.unsupported_reason)));
         } else if (updating) {
             const upSz = HFS.updateSize(detail);
