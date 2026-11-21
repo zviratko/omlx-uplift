@@ -8,26 +8,30 @@ which behaviour the server actually showed.
 
 Scenario "ssd"  - a waiting request whose cached prefix lives only on the
                   SSD used to stall every running request for the whole
-                  disk read (synchronous restore). The probe streams a
-                  decode on one request and fires the SSD-hit request
-                  mid-stream, then measures the inter-token gaps of the
-                  stream. Patched: the gaps stay small and the log shows
-                  "SSD prefetch for <id> started/done".
+                  disk read (synchronous restore). The probe streams
+                  --parallel decodes, then fires 1+--queued requests that
+                  all share one SSD-only prefix, and measures the
+                  inter-token gaps of the streams. Patched: the gaps stay
+                  small and the log shows "SSD prefetch for <id>
+                  started/done".
 
 Scenario "pool" - MLX keeps freed Metal buffers for reuse; phys_footprint
                   charges them, so the memory guard used to read soft/hard
                   pressure from a pool that is not working memory: it
-                  paused admission and evicted idle models. The probe
-                  hammers unique long prefills, then idles, and records
-                  the pressure time series from /admin/api/stats plus the
-                  guard's transitions from the server log. Patched: the
-                  transition lines carry "reclaimable_pool=..." and the
-                  level stays ok while only the pool is high.
+                  paused admission and evicted idle models. The pressure
+                  needs CONCURRENCY to build (sequential requests hand the
+                  pool back at every step boundary): the probe runs
+                  --parallel + --queued overlapping long prefills+decodes
+                  for --iters rounds while recording the pressure time
+                  series from /admin/api/stats and the guard's transitions
+                  from the server log. Patched: the transition lines carry
+                  "reclaimable_pool=..." and the level stays ok while only
+                  the pool is high.
 
 Usage examples:
-  python3 uplift_ssd_pool_probe.py                    # auto-detect, both scenarios
-  python3 uplift_ssd_pool_probe.py --scenario ssd --iters 5
-  python3 uplift_ssd_pool_probe.py --base-url http://127.0.0.1:8001 \
+  python3 probe-ssd-pool.py                    # auto-detect, both scenarios
+  python3 probe-ssd-pool.py --scenario ssd --iters 2 --parallel 3 --purge
+  python3 probe-ssd-pool.py --base-url http://127.0.0.1:8001 \
       --api-key KEY --model Qwen3-32B-4bit --log ~/.omlx-dev/omlx.log
 """
 
@@ -256,45 +260,103 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
     time.sleep(3)
 
     def one_pass(label: str) -> dict:
+        """--parallel decode streams, then 1+--queued SSD-hit requests.
+
+        All hit requests share the same primed prefix (the shape of
+        several chats on one long system prompt): the first restore is
+        cold, the rest queue behind it.
+        """
         res: dict = {"label": label}
         pass_t0 = time.monotonic()
         stop = threading.Event()
-        box: dict = {}
-        prog: dict = {}
+        streams: list[tuple[threading.Thread, dict, dict]] = []
 
-        def stream_bg():
-            box["b"] = http.chat_stream_timed(model, filler, 400,
-                                              stop_after=stop, prog=prog)
+        for _s in range(max(1, args.parallel)):
+            box: dict = {}
+            prog: dict = {}
 
-        th = threading.Thread(target=stream_bg, daemon=True)
-        th.start()
-        # wait until the stream is really decoding (a few tokens in)
+            def stream_bg(box=box, prog=prog):
+                box["b"] = http.chat_stream_timed(model, filler, 400,
+                                                  stop_after=stop, prog=prog)
+
+            t = threading.Thread(target=stream_bg, daemon=True)
+            t.start()
+            streams.append((t, box, prog))
+            time.sleep(0.3)
+
+        # wait until every stream is really decoding
         deadline = time.monotonic() + 180
-        while time.monotonic() < deadline and prog.get("tokens", 0) < 8:
-            if "b" in box:      # stream already ended - model is too terse
+        while time.monotonic() < deadline:
+            ready = all(p.get("tokens", 0) >= 8 or "b" in bx
+                        for _t, bx, p in streams)
+            if ready:
                 break
             time.sleep(0.1)
         time.sleep(args.stream_lead_s)
+
         t_fire = time.monotonic()
-        a_lat, a_usage = http.chat(model, prefix, 8)
-        res["a_latency_s"] = round(a_lat, 2)
-        res["a_prompt_tokens"] = a_usage.get("prompt_tokens", 0)
-        res["a_cached_tokens"] = (
-            (a_usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0))
-        res["a_fire_offset_s"] = round(t_fire - pass_t0, 1)
+        hits: list[dict] = []
+        hit_threads = []
+        for h in range(1 + max(0, args.queued)):
+            rec: dict = {"n": h + 1}
+            hits.append(rec)
+
+            def hit(rec=rec):
+                try:
+                    lat, usage = http.chat(model, prefix, 8)
+                    rec["latency_s"] = round(lat, 2)
+                    rec["prompt_tokens"] = usage.get("prompt_tokens", 0)
+                    rec["cached_tokens"] = (
+                        (usage.get("prompt_tokens_details") or {})
+                        .get("cached_tokens", 0))
+                except Exception as exc:  # noqa: BLE001
+                    rec["error"] = str(exc)[:120]
+
+            t = threading.Thread(target=hit, daemon=True)
+            t.start()
+            hit_threads.append(t)
+            time.sleep(0.05)     # near-simultaneous, ordered
+        for t in hit_threads:
+            t.join(timeout=900)
         stop.set()
-        th.join(timeout=300)
-        b = box.get("b", {})
-        gaps = b.get("gaps", [])
-        res["b_tokens"] = b.get("tokens", 0)
-        res["b_ttft_s"] = round(b.get("ttft_s") or 0, 2)
-        res["b_max_gap_s"] = round(max(gaps), 2) if gaps else None
-        res["b_median_gap_s"] = round(statistics.median(gaps), 3) if gaps else None
-        res["b_slow_gaps"] = sum(1 for g in gaps if g > GAP_SLOW_S)
-        print(f"  [{label}] stream B: {res['b_tokens']} tok, "
+        for t, _bx, _p in streams:
+            t.join(timeout=300)
+
+        res["a_fire_offset_s"] = round(t_fire - pass_t0, 1)
+        res["hits"] = hits
+        ok_hits = [h for h in hits if "latency_s" in h]
+        res["a_max_latency_s"] = max((h["latency_s"] for h in ok_hits),
+                                     default=None)
+        res["a_cached_tokens"] = max((h.get("cached_tokens", 0)
+                                      for h in ok_hits), default=0)
+        res["a_prompt_tokens"] = max((h.get("prompt_tokens", 0)
+                                      for h in ok_hits), default=0)
+        per_stream = []
+        all_gaps: list[float] = []
+        for _t, bx, _p in streams:
+            b = bx.get("b", {})
+            gaps = b.get("gaps", [])
+            all_gaps += gaps
+            per_stream.append({
+                "tokens": b.get("tokens", 0),
+                "ttft_s": round(b.get("ttft_s") or 0, 2),
+                "max_gap_s": round(max(gaps), 2) if gaps else None,
+                "slow_gaps": sum(1 for g in gaps if g > GAP_SLOW_S),
+            })
+        res["streams"] = per_stream
+        res["b_tokens"] = sum(s["tokens"] for s in per_stream)
+        res["b_max_gap_s"] = round(max(all_gaps), 2) if all_gaps else None
+        res["b_median_gap_s"] = (round(statistics.median(all_gaps), 3)
+                                 if all_gaps else None)
+        res["b_slow_gaps"] = sum(1 for g in all_gaps if g > GAP_SLOW_S)
+        print(f"  [{label}] {len(streams)} streams: {res['b_tokens']} tok, "
               f"max gap {res['b_max_gap_s']}s, slow gaps {res['b_slow_gaps']}; "
-              f"request A: {res['a_latency_s']}s, cache hit "
-              f"{res['a_cached_tokens']}/{res['a_prompt_tokens']} tok")
+              f"{len(hits)} hit requests: max {res['a_max_latency_s']}s, best "
+              f"cache hit {res['a_cached_tokens']}/{res['a_prompt_tokens']} tok")
+        for h in hits:
+            print(f"      hit {h['n']}: " + (f"{h.get('latency_s')}s, cached "
+                  f"{h.get('cached_tokens')}" if "latency_s" in h
+                  else f"FAILED {h.get('error')}"))
         return res
 
     passes = []
@@ -410,20 +472,37 @@ def run_pool(http: Http, model: str, args, logw: LogWindow, report: dict) -> Non
     th = threading.Thread(target=poller)
     th.start()
 
-    print(f"[1] {args.iters} unique long prefills (~{args.prefix_tokens} tok "
-          "each) to grow the MLX reuse pool ...")
-    for i in range(args.iters):
-        try:
-            dt, _ = http.chat(model, long_prompt(args.prefix_tokens, f"pool{i}"), 4)
-        except urllib.error.HTTPError as exc:
-            hint = (" - admission refused at this pressure; that is itself "
-                    "a symptom, see the series below" if exc.code == 507 else "")
-            print(f"    prefill {i + 1} refused: HTTP {exc}{hint}")
-            report.setdefault("pool_refusals", []).append(
-                {"iter": i + 1, "http": exc.code})
-            break
+    print(f"[1] {args.iters} rounds x {max(1, args.parallel) + max(0, args.queued)} "
+          f"concurrent requests (~{args.prefix_tokens} tok prefill + "
+          f"{args.decode_tokens} tok decode; {args.parallel} overlap, "
+          f"{args.queued} pile up in the queue) ...")
+    for r in range(args.iters):
+        threads = []
+        boxes: list[dict] = []
+        n = max(1, args.parallel) + max(0, args.queued)
+        for c in range(n):
+            box: dict = {}
+            boxes.append(box)
+
+            def worker(prompt=long_prompt(args.prefix_tokens, f"pool{r}c{c}"),
+                       box=box):
+                box.update(http.chat_stream_timed(model, prompt,
+                                                  args.decode_tokens))
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            threads.append(t)
+            time.sleep(args.stagger_s)   # staggered starts -> overlap + queue
+        for t in threads:
+            t.join(timeout=1800)
+        errs = [b.get("error") for b in boxes if b.get("error")]
+        for e in errs:
+            print(f"    request refused: {e} (507 here is itself a symptom; "
+                  "see the series below)")
+            report.setdefault("pool_refusals", []).append({"round": r + 1,
+                                                           "error": e})
         p = series[-1] if series else {}
-        print(f"    prefill {i + 1}/{args.iters}: {dt:5.1f}s "
+        print(f"    round {r + 1}/{args.iters} done "
               f"(guard sees {p.get('current_gb', '?')}GB, "
               f"level {p.get('level', '?')})")
 
@@ -443,8 +522,9 @@ def run_pool(http: Http, model: str, args, logw: LogWindow, report: dict) -> Non
 
     if not trans:
         verdict = (f"guard never left 'ok' (peak footprint {peak}GB, "
-                   f"soft {gb(base.get('soft_bytes'))}) - the box may need "
-                   "bigger --prefix-tokens or --iters to reach the soft level")
+                   f"soft {gb(base.get('soft_bytes'))}) - raise "
+                   "--parallel/--queued/--prefix-tokens until the peak "
+                   "approaches the soft level")
     elif patched_fmt:
         verdict = ("patched format: transitions carry reclaimable_pool=; "
                    f"levels seen {levels_seen}")
@@ -542,6 +622,17 @@ def main() -> int:
     ap.add_argument("--stream-lead-s", type=float, default=2.0,
                     help="let the decode stream run this long before firing "
                          "the SSD-hit request (default 2)")
+    ap.add_argument("--parallel", type=int, default=2,
+                    help="requests decoding concurrently (both scenarios; "
+                         "default 2)")
+    ap.add_argument("--queued", type=int, default=2,
+                    help="extra requests piled onto the queue (default 2)")
+    ap.add_argument("--decode-tokens", type=int, default=256,
+                    help="decode length per pool-scenario request "
+                         "(default 256)")
+    ap.add_argument("--stagger-s", type=float, default=0.75,
+                    help="delay between starting concurrent requests "
+                         "(default 0.75)")
     ap.add_argument("--purge", action="store_true",
                     help="run 'purge' (needs root) before each SSD pass so "
                          "the block files are really cold in the OS cache")
