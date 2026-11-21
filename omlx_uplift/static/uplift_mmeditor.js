@@ -1224,8 +1224,10 @@ function renderEditorFields(container) {
         g.append(seBind('number', k, { label: lab, min: mn, max: mx, step: st,
             effHint: seEffHint(k) }));
     }
-    g.append(seBind('bool', 'force_sampling', { label: 'Force Sampling',
-        hint: 'Override request sampling parameters with configured values' }));
+    g.append(seBind('bool', 'force_sampling',
+        { label: C.tf('modal.model_settings.force_sampling', 'Force Sampling'),
+          hint: C.tf('modal.model_settings.force_sampling_hint',
+              'Uses these Temperature, Top P and Top K values even when a client or agent requests different ones.') }));
 
     /* ---- acceleration: the whole speculative-decode stack + prefill
        engines (classic ms-acceleration; absorbs the old Speculative
@@ -1311,8 +1313,8 @@ function renderEditorFields(container) {
                 }
                 seFam(g, 'mtp_enabled', mtpRow,
                     [seBind('select', 'mtp_adaptive_max_depth', {
-                        label: C.tf('uplift.se.mtp_depth', 'Adaptive max depth'),
-                        hint: C.tf('uplift.se.mtp_depth.hint',
+                        label: C.tf('modal.model_settings.mtp_depth', 'Adaptive max depth'),
+                        hint: C.tf('modal.model_settings.mtp_depth_hint',
                             'Automatically adjusts the draft depth up to the selected maximum.'),
                         options: [{ value: '3', label: '3 tokens (Default)' },
                                   ...[4, 5, 6].map(n => ({ value: String(n),
@@ -1350,8 +1352,15 @@ function renderEditorFields(container) {
                 // UX-2: the whole knob family is always rendered and greyed
                 // while DFlash is off (old reflow popped it into existence,
                 // and on a profile tab the toggle snapped back — stale workVals)
-                g.append(seBind('bool', 'dflash_enabled', { label: 'DFlash',
-                    hint: m.dflash_compatible === false ? (m.dflash_compatibility_reason || 'not compatible') : '' }));
+                g.append(seBind('bool', 'dflash_enabled',
+                    { label: C.tf('modal.model_settings.dflash', 'DFlash'),
+                      // classic shows its dflash_hint always and the
+                      // incompatibility reason as an extra line; one hint
+                      // slot here, so join them
+                      hint: C.tf('modal.model_settings.dflash_hint',
+                          'Block diffusion speculative decoding with compatible DFlash and DFlash2 checkpoints.')
+                          + (m.dflash_compatible === false && m.dflash_compatibility_reason
+                             ? ' — ' + m.dflash_compatibility_reason : '') }));
                 const sb = seGate(sub(g), 'dflash_enabled');
                 const pool = S_.dflashCandidates(models, m.id).map(x => ({ value: x.id }));
                 sb.append(seBind('select', 'dflash_draft_model',
@@ -1377,20 +1386,25 @@ function renderEditorFields(container) {
     }
     if (seValues.deepseek_v41_ced_prefill_supported)
         g.append(seBind('bool', 'deepseek_v41_ced_prefill_enabled',
-            { label: C.tf('uplift.ui.ced_prefill_acceleration_deepseek_v4_1', 'CED Prefill Acceleration (DeepSeek V4.1)'),
-              hint: 'Improves prefill speed by approximately 74-79% in tested configuration.' }));
+            { label: C.tf('modal.model_settings.deepseek_v41_ced_prefill', 'CED Prefill Acceleration (DeepSeek V4.1)'),
+              hint: C.tf('modal.model_settings.deepseek_v41_ced_prefill_hint',
+                  'Improves prefill speed by approximately 74–79% in tested configurations. Uses the model’s Causal Encoder–Decoder architecture to reduce decoder prefill computation.') }));
     // SYNC-1 (upstream 3c39990): qwen4_gdn_decode_wide_proj moved from the
     // SERVER settings to per-model settings — the row left the global page and
     // lives here now, classic's model-level capability gate (dashboard.js:2152:
     // config_model_type === 'qwen4_exp'; the server clamps it the same way at
     // routes.py:2833). A model row without the input (an older keg) leaves the
     // row hidden AND buildPayload omits the key, so a pre-move server never
-    // sees it. Labels reuse the keys the global row already ships.
+    // sees it. SYNC-1 2026-11-21: labels now reuse classic's own
+    // modal.model_settings keys (translated through the mounted catalog) —
+    // the old uplift.gs.adv.wide_proj copy kept a stale pre-rename name
+    // ('Wide-Proj', '(experimental)') after classic had become 'Qwen4
+    // Extended Fused Decode' with a rewritten hint.
     if (seValues.qwen4_gdn_decode_wide_proj_supported)
         g.append(seBind('bool', 'qwen4_gdn_decode_wide_proj',
-            { label: C.tf('uplift.gs.adv.wide_proj', 'Qwen4 Wide-Proj GDN Decode'),
-              hint: C.tf('uplift.gs.adv.wide_proj_hint',
-                  'Wider projection in fused Qwen4 GDN decode (experimental).') }));
+            { label: C.tf('modal.model_settings.qwen4_gdn_decode_wide_proj', 'Qwen4 Extended Fused Decode'),
+              hint: C.tf('modal.model_settings.qwen4_gdn_decode_wide_proj_hint',
+                  'Speeds up decode on Qwen4 oQ8e and other GDN layouts, such as some older oQ downloads and community models (up to 1.5 GiB more memory). No effect on current oQ2.5e to oQ6e or fp16 builds, and little effect with Lightning MTP on.') }));
     if (S.showsA8Prefill(m, seValues)) {
         // SYNC-1 fire 13 (upstream 18fe1c3 #4946): field family renamed to
         // a8_prefill_* and widened to DeepSeek V4.1 — labels now reuse
@@ -1437,10 +1451,10 @@ function renderEditorFields(container) {
         const k = isQwen ? 'qwen4_ple_ssd_offload' : 'deepseek_v41_engram_ssd_offload';
         const forced = isQwen ? m.qwen4_ple_ssd_offload_forced
                               : m.deepseek_v41_engram_ssd_offload_forced;
-        g.append(seBind('bool', k, { label: 'SSD N-gram Offload',
+        g.append(seBind('bool', k, { label: C.tf('modal.model_settings.ssd_ngram_offload', 'SSD N-gram Offload'),
             hint: forced
-                ? 'Required because resident loading exceeds the configured model-memory limit.'
-                : 'Keeps the large N-gram table (Qwen4 PLE or DeepSeek V4.1 Engram) on SSD and reads only the rows it needs. Saves memory, but speed depends on SSD reads. Changing this setting reloads the model.',
+                ? C.tf('modal.model_settings.ssd_ngram_offload_forced', 'Required because resident loading exceeds the configured model-memory limit.')
+                : C.tf('modal.model_settings.ssd_ngram_offload_hint', 'Keeps the large N-gram table (Qwen4 PLE or DeepSeek V4.1 Engram) on SSD and reads only the rows it needs. Saves memory, but speed depends on SSD reads. Changing this setting reloads the model.'),
             disabled: !!forced }));
     }
     if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
@@ -1557,12 +1571,13 @@ function renderEditorFields(container) {
         const tqBitsRow = seBind('select', 'turboquant_kv_bits',
             { label: C.tf('uplift.ui.bits_per_channel', 'Bits per channel'),
               options: [2, 2.5, 3, 3.5, 4, 6, 8].map(v => ({ value: String(v), label: v + '-bit' })) });
-        const tqBoolRow = seBind('bool', 'turboquant_kv_enabled', { label: 'KV cache compression',
+        const tqBoolRow = seBind('bool', 'turboquant_kv_enabled', { label: C.tf('modal.model_settings.turboquant_kv', 'TurboQuant KV Cache'),
             // UP-18 (2): classic MO:881-886 — a PAROQUANT checkpoint
             // cannot carry a quantized KV cache (reason tooltip); VLM
             // MTP also owns the memory/spec slot.
             disabled: !!seValues.is_paroquant || !!seValues.vlm_mtp_enabled,
-            hint: 'Reduce KV cache memory using the selected format. TurboQuant supports 2 to 8 bits; Affine4 and Affine8 use 4-bit and 8-bit affine quantization.' });
+            hint: C.tf('modal.model_settings.turboquant_kv_hint',
+                'Compress KV cache using vector quantization. Lower bits = more compression, higher bits = better quality. Supports 2 to 8 bits.') });
         if (seValues.is_paroquant || seValues.vlm_mtp_enabled)
             tqBoolRow.title = seValues.is_paroquant
                 ? (seValues.paroquant_reason || 'Paroquant checkpoint')
@@ -1598,8 +1613,8 @@ function renderEditorFields(container) {
     section('Advanced Settings');
     if (extEngActive()) sect.__body.append(eeNote());   // UP-18 (3), classic MO:1230
     g = grid();
-    g.append(seBind('bool', 'trust_remote_code', { label: 'Trust Remote Code',
-        hint: 'Lets the model repo run arbitrary Python at load. Only enable for trusted repos.' }));
+    g.append(seBind('bool', 'trust_remote_code', { label: C.tf('modal.model_settings.trust_remote_code', 'Trust Remote Code'),
+        hint: C.tf('modal.model_settings.trust_remote_code_hint', 'Lets the model repo run arbitrary Python at load. Only enable for trusted publishers.') }));
     // SYNC-1 2026-10-13 (upstream external_engine, splash): serve the model
     // from another engine's process. Classic renders it inside the Advanced
     // block, hidden for diffusion and when the model has no candidate
@@ -1614,13 +1629,13 @@ function renderEditorFields(container) {
                 .map(e => ({ value: e.id,
                     label: e.compatible ? e.label : (e.label + ' — unavailable') })));
         g.append(seBind('select', 'external_engine', {
-            label: 'External Engine',
+            label: C.tf('modal.model_settings.external_engine_select', 'Engine'),
             // UP-18 (3): a GGUF carries no native engine — an empty pick
             // still runs externally (classic effectiveExternalEngine +
             // external_engine_gguf hint, MO:938)
             hint: gguf
                 ? C.tf('modal.model_settings.external_engine_gguf',
-                    'GGUF models always run through an external engine.')
+                    'GGUF models run on an external engine only.')
                 : (eeList.some(e => e.compatible)
                 ? 'Run this model inside another installed engine (takes effect on model reload).'
                 : (eeList[0].reason || 'No external engine available.')),
@@ -1631,8 +1646,9 @@ function renderEditorFields(container) {
         // only appears in the diffusion unsupported-field lists) — parity:
         // none here.
             seFam(g, 'enableThinkingBudget',
-                seBind('bool', 'enableThinkingBudget', { label: 'Thinking Budget',
-                    hint: 'Limit thinking tokens for reasoning models.' }),
+                seBind('bool', 'enableThinkingBudget', { label: C.tf('modal.model_settings.thinking_budget', 'Thinking Budget'),
+                    hint: C.tf('modal.model_settings.thinking_budget_hint',
+                        'Limit thinking tokens for reasoning models. Forces end of thinking when exceeded.') }),
                 [seBind('number', 'thinking_budget_tokens',
                     { label: C.tf('uplift.ui.thinking_budget_tokens', 'Thinking budget (tokens)'), min: 1, step: 1 })]);
 
@@ -1760,8 +1776,8 @@ function renderEditorFields(container) {
     }
     if (!S.isDiffusion(m)) {
         seFam(g, 'enableToolResultLimit',
-            seBind('bool', 'enableToolResultLimit', { label: 'Limit Tool Result Tokens',
-                hint: 'Truncate large tool results (e.g. file reads) to a token limit.' }),
+            seBind('bool', 'enableToolResultLimit', { label: C.tf('modal.model_settings.limit_tool_result', 'Limit Tool Result Tokens'),
+                hint: C.tf('modal.model_settings.limit_tool_result_hint', 'Truncate large tool results (e.g. file reads) to a token limit') }),
             [seBind('number', 'max_tool_result_tokens',
                 { label: C.tf('uplift.ui.tool_result_token_limit', 'Tool result token limit'), min: 1, step: 1 })]);
     }
@@ -1771,7 +1787,7 @@ function renderEditorFields(container) {
             // the banner string 'GUIDED GRAMMAR — ' built for the expand
             // head (:1014); as a field label it hung the em-dash off every
             // non-EN locale.
-            label: C.tf('uplift.se.guided_grammar', 'Guided Grammar'),
+            label: C.tf('modal.model_settings.guided_grammar', 'Guided Grammar'),
             hint: 'EBNF / regex / JSON-schema grammar applied to generation when enabled.' });
         ggWrap.classList.add('se-wide');
         const ggInp = ggWrap.querySelector('textarea');
@@ -1819,8 +1835,10 @@ function renderEditorFields(container) {
         // framed unit; the box is always present, visibly disabled when off
         const gsb = sub(g);
         gsb.classList.add('se-sub-keep');
-        gsb.append(seBind('bool', 'guided_grammar_enabled', { label: 'Guided Grammar',
-            hint: 'Apply an EBNF grammar by default for this model.'
+        gsb.append(seBind('bool', 'guided_grammar_enabled',
+            { label: C.tf('modal.model_settings.guided_grammar', 'Guided Grammar'),
+              hint: C.tf('modal.model_settings.guided_grammar_hint',
+                  'Apply an EBNF grammar by default for this model.')
             // UX-5: no manual enable dance anymore — the well below is a
             // gated box and the default seRefreshGates() path handles it
             }));
@@ -1948,7 +1966,7 @@ function renderEditorFields(container) {
                     return icBool;
                 })(),
                 [seBind('number', 'index_cache_freq',
-                    { label: C.tf('uplift.ui.frequency_every_nth_layer_keeps_indexer', 'Frequency (every Nth layer keeps indexer)'), min: 2, max: 16, step: 1 })]);
+                    { label: C.tf('modal.model_settings.index_cache_freq', 'Frequency (every Nth layer keeps indexer)'), min: 2, max: 16, step: 1 })]);
     // ANE prompt processing lives in the same section as classic
     const gAne = document.createElement('div');
     gAne.className = 'pair'; sect.__body.append(gAne);
@@ -1987,7 +2005,7 @@ function renderEditorFields(container) {
                     { value: '0.4', label: '40% — Mild (~1.8x)' },
                     { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true });
                 const spThr = seBind('number', 'specprefill_threshold',
-                    { label: C.tf('uplift.ui.threshold_tokens', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 });
+                    { label: C.tf('modal.model_settings.specprefill_threshold', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 });
                 // SPEC-1 v3: the master switch and drafter ride the model load
                 // (excluded from profile settings server-side); keep rate and
                 // threshold ARE alias-tunable — they left the engine signature
@@ -2044,8 +2062,9 @@ function renderAne(container, g) {
             { label: C.tf('uplift.ui.gdn_layer_limit', 'GDN layer limit'), min: 0, step: 1 }));
     sbA.append(gdnBox);
     sbA.append(seBind('bool', 'qwen35_ane_prefill_cpu_enabled',
-        { label: C.tf('uplift.ui.share_mlp_work_with_cpu', 'Share MLP work with CPU'),
-          hint: 'Requires a separate Qwen q4 checkpoint clone with floating tensors converted.' }));
+        { label: C.tf('modal.model_settings.qwen_ane_cpu', 'Share MLP work with CPU'),
+          hint: C.tf('modal.model_settings.qwen_ane_cpu_hint',
+              'Requires a separate Qwen q4 checkpoint clone with floating tensors converted to FP16. Retune the MLP ANE share when enabled.') }));
     const sbC = seGate(seGatedDiv('se-sub'), 'qwen35_ane_prefill_cpu_enabled');
     sbC.append(seBind('number', 'qwen35_ane_prefill_cpu_fraction',
         { label: C.tf('uplift.ui.mlp_on_cpu_fraction', 'MLP on CPU (fraction)'), min: 0, max: 1, step: 0.001 }));

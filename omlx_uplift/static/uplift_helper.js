@@ -301,8 +301,11 @@ async function renderHelperModels() {
     if (integ.markitdown_pdf_processing_engine === 'markitdown') {
         const warn = document.createElement('small');
         warn.className = 'fhint warn';
-        warn.textContent = C.tf('uplift.ui.scanned_or_image_only_pdfs_will_fail_when_markit', 'Scanned or image-only PDFs will fail when MarkItDown is selected, ')
-            + 'and PDFs with tables may not be processed correctly.';
+        // classic ships this as ONE catalog sentence; do not split it into
+        // an uplift copy + hardcoded tail (a later classic extension then
+        // truncates our mirror).
+        warn.textContent = C.tf('settings.integrations.markitdown.pdf_processing_markitdown_warning',
+            'Scanned or image-only PDFs will fail when MarkItDown is selected, and PDFs with tables may not be processed correctly.');
         pdfField.append(warn);
     }
     mkGrid.append(pdfField);

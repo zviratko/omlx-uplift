@@ -192,12 +192,11 @@ const GS_LABELS = {
         sse_opts: [['chunk','Chunk'],['comment','Comment'],['off','Off']],
         mid_sys: 'Preserve Mid-System Cache',
         mid_sys_hint: 'Keep cached KV for system prompts placed mid-conversation.',
-        // SYNC-1 (3c39990): no global row uses these two anymore — the toggle
-        // moved to the per-model editor, which reuses the SAME locale keys
-        // (uplift.gs.adv.wide_proj[_hint]) via C.tf. Kept as the English
-        // fallback pair; the locale files are owned elsewhere.
-        wide_proj: 'Qwen4 Wide-Proj GDN Decode',
-        wide_proj_hint: 'Wider projection in fused Qwen4 GDN decode (experimental).',
+        // SYNC-1 (3c39990): no global row uses the wide_proj pair anymore —
+        // the toggle moved to the per-model editor, which since 2026-11-21
+        // reuses classic's own modal.model_settings.qwen4_gdn_decode_wide_proj
+        // keys. The stale uplift.gs.adv.wide_proj[_hint] copies (pre-rename
+        // 'Wide-Proj' / '(experimental)') are deleted from all locales.
         keep_warm: 'GPU Keep-Warm Interval (s)',
         keep_warm_hint: 'Seconds between trivial GPU kernels while a model is loaded but idle, keeping the GPU out of its idle power state (the first command buffer after an idle stall can take seconds on large models). Ticks stop when the Keep GPU Awake After Requests time runs out; 0 disables.',
         // SYNC-1 run 23 (upstream b85f8db #5085 + 75e5f58): classic
@@ -430,9 +429,9 @@ async function gsCommit() {
     const key = next('api_key');
     if (key) {
         if (String(key).length < 4) errs.push(C.tf('js.error.api_key_min_length',
-            'API key must be at least 4 characters.'));
+            'API key must be at least 4 characters'));
         if (/\s/.test(String(key))) errs.push(C.tf('js.error.api_key_no_whitespace',
-            'API key must not contain whitespace.'));
+            'API key must not contain whitespace'));
     }
     if (errs.length) {
         errs.forEach(e => GLUE.toast(e, 'error'));
@@ -1977,8 +1976,8 @@ const GS_SPEC = [
             'settings.auth.sub_keys_key_placeholder': 'API key value',
             'settings.auth.sub_keys_generate_tooltip': 'Generate random key',
             'uplift.gs.sub_keys_generate': 'Generate',
-            'js.error.api_key_min_length': 'API key must be at least 4 characters.',
-            'js.error.api_key_no_whitespace': 'API key must not contain whitespace.',
+            'js.error.api_key_min_length': 'API key must be at least 4 characters',
+            'js.error.api_key_no_whitespace': 'API key must not contain whitespace',
         };
         const t = k => C.tf(k, EN[k] || k);
         // register a node for late catalog/locale re-resolution
