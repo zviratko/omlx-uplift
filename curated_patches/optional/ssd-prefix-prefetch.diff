@@ -1,0 +1,457 @@
+diff --git a/omlx/cache/paged_ssd_cache.py b/omlx/cache/paged_ssd_cache.py
+index a15b1fd3..b5322852 100644
+--- a/omlx/cache/paged_ssd_cache.py
++++ b/omlx/cache/paged_ssd_cache.py
+@@ -4591,6 +4591,63 @@ class PagedSSDCacheManager(CacheManager):
+                 )
+             return None, None
+ 
++    def prefetch_candidates(
++        self, block_hashes: list[bytes]
++    ) -> list[tuple[Path, int]]:
++        """Return (file, size) for the leading blocks that only the SSD holds.
++
++        Blocks in the hot cache or in the pending-write buffer need no disk
++        read and are skipped. The walk stops at the first block the index does
++        not know: reconstruction stops there too. No LRU state is touched.
++        """
++        if self._hot_cache_only or not self._cache_dir:
++            return []
++        out: list[tuple[Path, int]] = []
++        for block_hash in block_hashes:
++            if block_hash is None:
++                break
++            with self._hot_cache_lock:
++                if block_hash in self._hot_cache:
++                    continue
++            with self._pending_write_hashes_lock:
++                if block_hash in self._pending_write_buffers:
++                    continue
++            metadata = self._index.get(block_hash)
++            if metadata is None:
++                break
++            size = int(getattr(metadata, "file_size", 0) or 0)
++            out.append((metadata.file_path, max(0, size)))
++        return out
++
++    @staticmethod
++    def warm_files(
++        files: list[tuple[Path, int]],
++        chunk_bytes: int = 8 * 1024 * 1024,
++    ) -> tuple[int, int]:
++        """Read files once so that the OS page cache holds them.
++
++        Pure file I/O, no MLX/Metal calls: safe on any thread, and the read
++        releases the GIL, so inference continues. The later mx.load() on the
++        inference thread then reads from RAM. A file the OS evicts again in
++        between is simply read from disk as before. Returns (files, bytes).
++        """
++        buf = bytearray(chunk_bytes)
++        view = memoryview(buf)
++        n_files = 0
++        n_bytes = 0
++        for path, _size in files:
++            try:
++                with open(path, "rb", buffering=0) as f:
++                    while True:
++                        got = f.readinto(view)
++                        if not got:
++                            break
++                        n_bytes += got
++                n_files += 1
++            except OSError as exc:
++                logger.debug("SSD prefetch skipped %s: %s", path, exc)
++        return n_files, n_bytes
++
+     def get_block_metadata(self, block_hash: bytes) -> PagedSSDBlockMetadata | None:
+         """
+         Get metadata for a block without loading the data.
+diff --git a/omlx/cache/prefix_cache.py b/omlx/cache/prefix_cache.py
+index 95c092f9..6a9c7e17 100644
+--- a/omlx/cache/prefix_cache.py
++++ b/omlx/cache/prefix_cache.py
+@@ -933,6 +933,37 @@ class BlockAwarePrefixCache(CacheManager):
+         logger.debug(f"Cache miss for {request_id}")
+         return None, tokens
+ 
++    def ssd_prefetch_candidates(
++        self,
++        tokens: list[int],
++        extra_keys: tuple[Any, ...] | None = None,
++        extra_key_token_start: int | None = None,
++        extra_key_ranges: list[tuple[int, tuple[Any, ...]]] | None = None,
++    ) -> list[tuple[Any, int]]:
++        """Return SSD files that a fetch_cache() for ``tokens`` would read.
++
++        Uses the same two lookups as fetch_cache() but acquires nothing and
++        creates no block table, so the request can still be admitted later
++        through the normal path.
++        """
++        ssd = self.paged_ssd_cache
++        if ssd is None or not tokens:
++            return []
++        _ids, hashes, _ = self.paged_cache.find_shared_prefix(
++            tokens,
++            extra_keys=extra_keys,
++            extra_key_token_start=extra_key_token_start,
++            extra_key_ranges=extra_key_ranges,
++        )
++        if not hashes:
++            best_match = self._find_best_prefix_match(tokens, extra_keys=extra_keys)
++            if best_match:
++                _prefix_len, _block_ids, num_blocks, chain_hashes = best_match
++                hashes = list(chain_hashes[:num_blocks])
++        if not hashes:
++            return []
++        return ssd.prefetch_candidates(list(hashes))
++
+     def record_cache_result(self, num_tokens: int, cached_tokens: int) -> None:
+         """Record one lookup using the tokens the caller can actually reuse."""
+         if not num_tokens:
+diff --git a/omlx/scheduler.py b/omlx/scheduler.py
+index 6cc878f9..4371b9f6 100644
+--- a/omlx/scheduler.py
++++ b/omlx/scheduler.py
+@@ -11125,6 +11125,136 @@ class Scheduler:
+ 
+         return best_rid, best_future, best_common
+ 
++    # SSD prefix prefetch: read a waiting request's SSD-only prefix blocks on
++    # a background thread (plain file reads, no MLX) while running requests
++    # keep decoding, then admit it; the restore then reads from page cache.
++    # OMLX_SSD_PREFETCH=0 restores the old synchronous restore.
++    _SSD_PREFETCH_MIN_BYTES = 256 * 1024 * 1024
++    _SSD_PREFETCH_TIMEOUT_S = 600.0
++
++    @staticmethod
++    def _ssd_prefetch_enabled() -> bool:
++        import os
++
++        return os.environ.get("OMLX_SSD_PREFETCH", "1").strip().lower() not in (
++            "0",
++            "false",
++            "no",
++            "off",
++        )
++
++    def _should_defer_for_ssd_prefetch(self, request: Request) -> bool:
++        """Hold the waiting head until its SSD prefix sits in page cache.
++
++        Same contract as _should_defer_for_cache_freshness: never blocks,
++        the step returns and running decode rows continue. Any failure
++        falls back to the normal synchronous restore.
++        """
++        try:
++            return Scheduler._ssd_prefetch_gate(self, request)
++        except Exception as exc:  # noqa: BLE001 - never break admission
++            logger.warning(
++                "SSD prefetch for %s failed, restoring synchronously: %s",
++                getattr(request, "request_id", "?"),
++                exc,
++            )
++            return False
++
++    def _ssd_prefetch_gate(self, request: Request) -> bool:
++        if not Scheduler._ssd_prefetch_enabled():
++            return False
++        if self.block_aware_cache is None:
++            return False
++        manager = getattr(self, "paged_ssd_cache_manager", None)
++        if manager is None or not hasattr(manager, "prefetch_candidates"):
++            return False
++        rid = request.request_id
++        if rid in self._prefix_cache_prepared:
++            return False
++        jobs = self.__dict__.setdefault("_ssd_prefetch_jobs", {})
++        done = self.__dict__.setdefault("_ssd_prefetch_done", set())
++        for stale in [r for r in jobs if r not in self.requests]:
++            jobs.pop(stale, None)
++        done.intersection_update(self.requests.keys())
++
++        job = jobs.get(rid)
++        if job is not None:
++            future, started, deadline, n_files, n_bytes = job
++            now = time.monotonic()
++            if not future.done() and now < deadline:
++                return True
++            jobs.pop(rid, None)
++            done.add(rid)
++            elapsed = max(1e-6, now - started)
++            if future.done() and future.exception() is None:
++                read_files, read_bytes = future.result()
++                logger.info(
++                    "SSD prefetch for %s done: %d/%d blocks, %.2f GB in %.1fs "
++                    "(%.0f MB/s); other requests kept running",
++                    rid,
++                    read_files,
++                    n_files,
++                    read_bytes / 1024**3,
++                    elapsed,
++                    read_bytes / 1024**2 / elapsed,
++                )
++            elif future.done():
++                logger.warning(
++                    "SSD prefetch for %s failed after %.1fs: %s; "
++                    "restoring synchronously",
++                    rid,
++                    elapsed,
++                    future.exception(),
++                )
++            else:
++                logger.warning(
++                    "SSD prefetch for %s still running after %.0fs; "
++                    "restoring synchronously",
++                    rid,
++                    elapsed,
++                )
++            return False
++        if rid in done:
++            return False
++        if self._model_has_unreconstructible_cache():
++            done.add(rid)
++            return False
++
++        files = self.block_aware_cache.ssd_prefetch_candidates(
++            request.prompt_token_ids,
++            extra_keys=request.vlm_extra_keys_for_cache,
++            extra_key_token_start=request.vlm_extra_key_token_start_for_cache,
++            extra_key_ranges=request.vlm_extra_key_ranges_for_cache,
++        )
++        n_bytes = sum(size for _path, size in files)
++        if not files or n_bytes < Scheduler._SSD_PREFETCH_MIN_BYTES:
++            done.add(rid)
++            return False
++
++        executor = self.__dict__.get("_ssd_prefetch_executor")
++        if executor is None:
++            executor = concurrent.futures.ThreadPoolExecutor(
++                max_workers=1, thread_name_prefix="omlx-ssd-prefetch"
++            )
++            self._ssd_prefetch_executor = executor
++        started = time.monotonic()
++        future = executor.submit(type(manager).warm_files, files)
++        jobs[rid] = (
++            future,
++            started,
++            started + Scheduler._SSD_PREFETCH_TIMEOUT_S,
++            len(files),
++            n_bytes,
++        )
++        logger.info(
++            "SSD prefetch for %s started: %d blocks, %.2f GB; the request "
++            "waits, running requests continue",
++            rid,
++            len(files),
++            n_bytes / 1024**3,
++        )
++        return True
++
+     def _should_defer_for_cache_freshness(self, request: Request) -> bool:
+         """Defer only this waiting request until a relevant store is visible.
+ 
+@@ -13607,6 +13737,8 @@ class Scheduler:
+             self._clear_store_cache_admission_blocker(request.request_id)
+             if self._should_defer_for_cache_freshness(request):
+                 break
++            if Scheduler._should_defer_for_ssd_prefetch(self, request):
++                break
+ 
+             request = self.waiting.popleft()
+             self._cache_freshness_waits.pop(request.request_id, None)
+diff --git a/tests/test_ssd_prefetch.py b/tests/test_ssd_prefetch.py
+new file mode 100644
+index 00000000..549e9707
+--- /dev/null
++++ b/tests/test_ssd_prefetch.py
+@@ -0,0 +1,191 @@
++"""SSD prefix prefetch: read SSD-only prefix blocks off the inference thread."""
++
++from __future__ import annotations
++
++import concurrent.futures
++import logging
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++
++from omlx.cache.paged_ssd_cache import PagedSSDCacheManager
++from omlx.scheduler import Scheduler
++
++
++def _manager(tmp_path: Path, hot_cache_bytes: int = 0) -> PagedSSDCacheManager:
++    return PagedSSDCacheManager(
++        cache_dir=tmp_path / "ssd_cache",
++        max_size_bytes=1024**3,
++        hot_cache_max_bytes=hot_cache_bytes,
++    )
++
++
++def _save(manager, mx, block_hash: bytes) -> None:
++    cache_data = [(mx.zeros((1, 2, 16, 8)), mx.zeros((1, 2, 16, 8))) for _ in range(2)]
++    assert manager.save_block(
++        block_hash=block_hash,
++        cache_data=cache_data,
++        token_count=16,
++        model_name="test-model",
++        layer_cache_types=["KVCache"] * 2,
++    )
++    assert manager.wait_for_pending_writes(10.0)
++
++
++class TestPrefetchCandidates:
++    @pytest.fixture
++    def mock_mlx(self):
++        return pytest.importorskip("mlx.core")
++
++    def test_lists_disk_only_blocks_and_warms_them(self, tmp_path, mock_mlx):
++        manager = _manager(tmp_path)
++        try:
++            hashes = [bytes([i]) * 32 for i in (1, 2)]
++            for h in hashes:
++                _save(manager, mock_mlx, h)
++            files = manager.prefetch_candidates(hashes)
++            assert [p for p, _ in files] == [
++                manager.get_block_metadata(h).file_path for h in hashes
++            ]
++            n_files, n_bytes = PagedSSDCacheManager.warm_files(files, chunk_bytes=1024)
++            assert n_files == 2
++            assert n_bytes == sum(p.stat().st_size for p, _ in files)
++        finally:
++            manager.close()
++
++    def test_stops_at_unknown_block(self, tmp_path, mock_mlx):
++        manager = _manager(tmp_path)
++        try:
++            known = b"\x01" * 32
++            _save(manager, mock_mlx, known)
++            files = manager.prefetch_candidates([known, b"\x09" * 32, known])
++            assert len(files) == 1
++        finally:
++            manager.close()
++
++    def test_skips_hot_cache_blocks(self, tmp_path, mock_mlx):
++        manager = _manager(tmp_path, hot_cache_bytes=64 * 1024**2)
++        try:
++            h = b"\x03" * 32
++            _save(manager, mock_mlx, h)
++            assert manager.prefetch_candidates([h]) == []
++        finally:
++            manager.close()
++
++    def test_warm_files_survives_missing_file(self, tmp_path):
++        good = tmp_path / "a.bin"
++        good.write_bytes(b"x" * 5000)
++        files = [(tmp_path / "missing.bin", 10), (good, 5000)]
++        assert PagedSSDCacheManager.warm_files(files, chunk_bytes=1024) == (1, 5000)
++
++
++class _FakePrefixCache:
++    def __init__(self, files):
++        self.files = files
++        self.calls = 0
++
++    def ssd_prefetch_candidates(self, tokens, **_kwargs):
++        self.calls += 1
++        return self.files
++
++
++class _FakeManager:
++    started = None
++
++    @staticmethod
++    def prefetch_candidates(_hashes):
++        return []
++
++    @staticmethod
++    def warm_files(files):
++        if _FakeManager.started is not None:
++            _FakeManager.started.wait(5)
++        return len(files), sum(size for _p, size in files)
++
++
++def _stub(files):
++    request = SimpleNamespace(
++        request_id="r1",
++        prompt_token_ids=[1, 2, 3],
++        vlm_extra_keys_for_cache=None,
++        vlm_extra_key_token_start_for_cache=None,
++        vlm_extra_key_ranges_for_cache=None,
++    )
++    sched = SimpleNamespace(
++        block_aware_cache=_FakePrefixCache(files),
++        paged_ssd_cache_manager=_FakeManager(),
++        _prefix_cache_prepared=set(),
++        requests={"r1": request},
++        _model_has_unreconstructible_cache=lambda: False,
++    )
++    return sched, request
++
++
++GB = 1024**3
++
++
++class TestPrefetchGate:
++    def test_defers_until_read_done_then_admits(self, monkeypatch, caplog):
++        import threading
++
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        gate = threading.Event()
++        _FakeManager.started = gate
++        try:
++            sched, request = _stub([(Path("/x/a"), GB), (Path("/x/b"), GB)])
++            assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is True
++            assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is True
++            assert sched.block_aware_cache.calls == 1
++            gate.set()
++            sched._ssd_prefetch_executor.shutdown(wait=True)
++            with caplog.at_level(logging.INFO, logger="omlx.scheduler"):
++                assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++            assert "SSD prefetch for r1 done: 2/2 blocks" in caplog.text
++            # Done once: later steps admit without a second lookup.
++            assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++            assert sched.block_aware_cache.calls == 1
++        finally:
++            _FakeManager.started = None
++
++    def test_small_prefix_is_not_deferred(self, monkeypatch):
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        sched, request = _stub([(Path("/x/a"), 1024)])
++        assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++
++    def test_disabled_by_env(self, monkeypatch):
++        monkeypatch.setenv("OMLX_SSD_PREFETCH", "0")
++        sched, request = _stub([(Path("/x/a"), GB)])
++        assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++        assert sched.block_aware_cache.calls == 0
++
++    def test_prepared_request_is_not_deferred(self, monkeypatch):
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        sched, request = _stub([(Path("/x/a"), GB)])
++        sched._prefix_cache_prepared.add("r1")
++        assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++
++    def test_lookup_error_falls_back_to_sync_restore(self, monkeypatch):
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        sched, request = _stub([])
++
++        def boom(*_a, **_k):
++            raise RuntimeError("lookup broke")
++
++        sched.block_aware_cache.ssd_prefetch_candidates = boom
++        assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++
++    def test_timeout_admits_request(self, monkeypatch):
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        sched, request = _stub([(Path("/x/a"), GB)])
++        never = concurrent.futures.Future()
++        sched._ssd_prefetch_jobs = {"r1": (never, 0.0, 0.0, 1, GB)}
++        assert Scheduler._should_defer_for_ssd_prefetch(sched, request) is False
++
++    def test_jobs_of_gone_requests_are_dropped(self, monkeypatch):
++        monkeypatch.delenv("OMLX_SSD_PREFETCH", raising=False)
++        sched, request = _stub([])
++        never = concurrent.futures.Future()
++        sched._ssd_prefetch_jobs = {"gone": (never, 0.0, 1e18, 1, GB)}
++        Scheduler._should_defer_for_ssd_prefetch(sched, request)
++        assert "gone" not in sched._ssd_prefetch_jobs

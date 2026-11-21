@@ -1,0 +1,319 @@
+diff --git a/omlx/process_memory_enforcer.py b/omlx/process_memory_enforcer.py
+index 34d44bc7..1a6950ae 100644
+--- a/omlx/process_memory_enforcer.py
++++ b/omlx/process_memory_enforcer.py
+@@ -482,6 +482,8 @@ class ProcessMemoryEnforcer:
+         # admission control. Updated on every poll iteration.
+         self._pressure_level: str = "ok"
+         self._over_ceiling_polls: int = 0
++        self._pool_only_reclaim_at: float = 0.0
++        self._last_usage_parts: tuple | None = None
+         # Consecutive hard-pressure polls we have deferred destructive
+         # enforcement while a fat Metal buffer pool drains at the next
+         # prefill chunk / step boundary. See the grace check in
+@@ -1021,7 +1023,11 @@ class ProcessMemoryEnforcer:
+             mlx_bytes = active + mx.get_cache_memory()
+             fresh = True
+         own = max(active, phys - unreleased_graphics_bytes(mlx_bytes, fresh=fresh))
+-        return own + self._external_process_bytes()
++        current = own + self._external_process_bytes()
++        # Remember the MLX counters behind this reading for the pool-aware
++        # pressure level (_reclaimable_pool_bytes).
++        self._last_usage_parts = (current, active, mlx_bytes, fresh)
++        return current
+ 
+     def _external_process_bytes(self) -> int:
+         """Memory of models served from their own processes (Splash)."""
+@@ -1358,6 +1364,69 @@ class ProcessMemoryEnforcer:
+         except (TypeError, ValueError):
+             return 0
+ 
++    # An executor pool sample older than this does not lower the pressure
++    # level: the pool may already be cleared and its bytes reused.
++    _POOL_SAMPLE_MAX_AGE_S = 2.0
++    # Shortest interval between two pool-only reclaim requests.
++    _POOL_ONLY_RECLAIM_INTERVAL_S = 5.0
++
++    def _reclaimable_pool_bytes(self, current: int) -> tuple[int, int]:
++        """Return (MLX active bytes, MLX pool bytes) behind ``current``.
++
++        MLX keeps freed buffers for reuse (cache limit = all of RAM, the #300
++        guard). phys_footprint charges them, but they are not working memory:
++        the pressure reclaim gives them back at the next step boundary.
++        _current_usage_bytes() records the MLX counters it used; they apply
++        only to that same reading, and an executor sample (requests running,
++        the enforcer must not call MLX) only when it is fresh. Returns (0, 0)
++        when unsure, which keeps the old behavior.
++        """
++        parts = getattr(self, "_last_usage_parts", None)
++        if not parts or parts[0] != current:
++            return 0, 0
++        _current, active, mlx_bytes, fresh = parts
++        if not all(isinstance(v, int) for v in (active, mlx_bytes)):
++            return 0, 0
++        if not fresh:
++            now = time.monotonic()
++            newest_at = 0.0
++            for entry in self._engine_pool._entries.values():
++                scheduler = self._resolve_scheduler(entry)
++                at = getattr(scheduler, "_last_mlx_active_memory_at", 0.0)
++                if isinstance(at, (int, float)):
++                    newest_at = max(newest_at, float(at))
++            if now - newest_at > self._POOL_SAMPLE_MAX_AGE_S:
++                return 0, 0
++        return max(0, active), max(0, mlx_bytes - active)
++
++    def _pressure_usage(self, current: int) -> tuple[int, int]:
++        """Return (usage that sets the pressure level, reclaimable pool).
++
++        ``current`` is max(MLX active, phys_footprint - unreleased). Active
++        never contains the pool, so only the phys side is reduced by it.
++        """
++        active, pool = self._reclaimable_pool_bytes(current)
++        if pool <= 0:
++            return current, 0
++        level_usage = max(min(active, current), current - pool)
++        return level_usage, current - level_usage
++
++    def _maybe_request_pool_only_reclaim(self, current: int, hard: int) -> None:
++        """Clear a large pool before it pushes the process past ``hard``.
++
++        Used when the level is ok only because the pool was discounted. The
++        request is non-destructive (no admission pause, no eviction) and
++        rate-limited, because every clear makes MLX allocate fresh buffers.
++        """
++        if current < hard:
++            return
++        now = time.monotonic()
++        last = getattr(self, "_pool_only_reclaim_at", 0.0)
++        if now - last < self._POOL_ONLY_RECLAIM_INTERVAL_S:
++            return
++        if self._request_scheduler_cache_reclaim(0):
++            self._pool_only_reclaim_at = now
++
+     def _request_scheduler_cache_reclaim(self, freed_hot: int) -> int:
+         """Ask each scheduler to run its step-boundary Metal cache clear.
+ 
+@@ -1775,11 +1844,16 @@ class ProcessMemoryEnforcer:
+         # use the stable physical cap, as the prefill guard already does.
+         abort_limit = self._get_abort_limit_bytes()
+         emergency_limit = abort_limit if abort_limit > 0 else ceiling
++        # Emergency keeps the TOTAL footprint: pooled buffers are real RAM
++        # until the clear actually runs.
+         emergency = self._is_emergency_pressure(current, emergency_limit)
++        # The pressure level ignores the reclaimable MLX pool, so freed
++        # buffers kept for reuse do not pause admission or evict models.
++        level_usage, pool = self._pressure_usage(current)
+ 
+-        if current < soft:
++        if level_usage < soft:
+             new_level = "ok"
+-        elif current < hard:
++        elif level_usage < hard:
+             new_level = "soft"
+         else:
+             new_level = "hard"
+@@ -1796,6 +1870,7 @@ class ProcessMemoryEnforcer:
+             logger.info(
+                 f"Memory pressure level: {prev_level} -> {new_level} "
+                 f"(current={_format_gb(current)}, "
++                f"reclaimable_pool={_format_gb(pool)}, "
+                 f"soft={_format_gb(soft)}, hard={_format_gb(hard)}, "
+                 f"ceiling={_format_gb(ceiling)})"
+             )
+@@ -1844,9 +1919,10 @@ class ProcessMemoryEnforcer:
+             if freed_hot > 0:
+                 current = self._current_usage_bytes()
+                 emergency = self._is_emergency_pressure(current, emergency_limit)
+-                if current < soft:
++                level_usage, pool = self._pressure_usage(current)
++                if level_usage < soft:
+                     recovered_level = "ok"
+-                elif current < hard:
++                elif level_usage < hard:
+                     recovered_level = "soft"
+                 else:
+                     recovered_level = "hard"
+@@ -1864,6 +1940,9 @@ class ProcessMemoryEnforcer:
+                     self._propagate_memory_limit()
+ 
+         if new_level == "ok":
++            # The level is ok, but the total (with the pool) may still be
++            # high: clear the pool before it reaches the real ceiling.
++            self._maybe_request_pool_only_reclaim(current, hard)
+             # Still walk the store-cache cap so it can recover toward
+             # max_num_seqs while pressure stays low (#1383).
+             self._walk_store_cache_caps()
+@@ -1874,7 +1953,7 @@ class ProcessMemoryEnforcer:
+         target = soft
+ 
+         async with self._engine_pool._lock:
+-            while self._current_usage_bytes() > target:
++            while self._pressure_usage(self._current_usage_bytes())[0] > target:
+                 pending = self._engine_pool._find_pending_unload_ready_locked()
+                 if pending is not None:
+                     await self._engine_pool._unload_pending_if_idle_locked(pending)
+@@ -2041,9 +2120,10 @@ class ProcessMemoryEnforcer:
+         post_ceiling = self._get_hard_limit_bytes()
+         post_soft = int(post_ceiling * self._soft_threshold) if post_ceiling > 0 else 0
+         post_hard = int(post_ceiling * self._hard_threshold) if post_ceiling > 0 else 0
+-        if post_ceiling <= 0 or post_current < post_soft:
++        post_level_usage = self._pressure_usage(post_current)[0]
++        if post_ceiling <= 0 or post_level_usage < post_soft:
+             post_level = "ok"
+-        elif post_current < post_hard:
++        elif post_level_usage < post_hard:
+             post_level = "soft"
+         else:
+             post_level = "hard"
+diff --git a/omlx/scheduler.py b/omlx/scheduler.py
+index 6cc878f9..73ba9241 100644
+--- a/omlx/scheduler.py
++++ b/omlx/scheduler.py
+@@ -5758,6 +5758,30 @@ class Scheduler:
+             self, "_last_mlx_cache_memory_bytes", 0
+         )
+ 
++    # Shortest interval between two step-boundary MLX counter reads.
++    _MLX_POOL_SAMPLE_INTERVAL_S = 0.5
++
++    def _refresh_mlx_pool_sample(self) -> None:
++        """Re-read MLX active and pool counters on the executor thread.
++
++        Rate-limited to one read per _MLX_POOL_SAMPLE_INTERVAL_S. Both reads
++        are plain allocator counters, so the cost is negligible.
++        """
++        now = time.monotonic()
++        last = getattr(self, "_last_mlx_active_memory_at", 0.0)
++        if not isinstance(last, (int, float)):
++            last = 0.0
++        if now - last < Scheduler._MLX_POOL_SAMPLE_INTERVAL_S:
++            return
++        try:
++            active = int(mx.get_active_memory())
++            cache = int(mx.get_cache_memory())
++        except Exception:
++            return
++        self._last_mlx_active_memory_bytes = max(0, active)
++        self._last_mlx_cache_memory_bytes = max(0, cache)
++        self._last_mlx_active_memory_at = now
++
+     def _hot_cache_cpu_bytes(self) -> int:
+         """Return serialized hot-cache bytes safe to exclude from phys guard."""
+         config = getattr(self, "config", None)
+@@ -16030,6 +16054,12 @@ class Scheduler:
+         # enforcer (only acts when the scheduler is idle).
+         self._process_pending_reclaim()
+ 
++        # Keep the executor-owned MLX active + pool sample fresh. The memory
++        # enforcer reads it to tell pooled (reclaimable) Metal buffers from
++        # working memory; without this it is refreshed only every 1024
++        # decoded tokens and goes stale during long decodes.
++        Scheduler._refresh_mlx_pool_sample(self)
++
+         # Drain async store_cache completions from prior steps. Each completed
+         # entry triggers the deferred batch_generator.remove(uid) on the
+         # inference thread. Inflight entries are left for a later step.
+diff --git a/tests/test_process_memory_enforcer.py b/tests/test_process_memory_enforcer.py
+index 2984bd8d..018bc75e 100644
+--- a/tests/test_process_memory_enforcer.py
++++ b/tests/test_process_memory_enforcer.py
+@@ -3302,8 +3302,11 @@ class TestPressureReclaimGrace:
+             mock_mx.get_cache_memory.return_value = 20 * gb
+             await enforcer._check_and_enforce()
+ 
+-        assert enforcer._pressure_level == "soft"
+-        engine.scheduler.request_pressure_reclaim.assert_called_once()
++        # Pool-aware pressure: 90GB total, but 20GB is pooled buffers, so the
++        # working set (70GB) is under soft. No admission pause, no eviction,
++        # and no reclaim either while the total stays under hard.
++        assert enforcer._pressure_level == "ok"
++        engine.scheduler.request_pressure_reclaim.assert_not_called()
+         mock_engine_pool._unload_engine.assert_not_awaited()
+ 
+     @pytest.mark.asyncio
+@@ -3412,3 +3415,84 @@ async def test_image_cache_reclaim_remeasures_retained_request_memory(mock_engin
+         assert active_image.getpixel((0, 0)) == (0, 0, 255)
+     finally:
+         images.clear_image_decode_cache()
++
++
++class TestPoolAwarePressureLevel:
++    """Pooled MLX buffers do not set the pressure level (uplift patch)."""
++
++    @staticmethod
++    def _setup(pool, gb, active_requests=False):
++        enforcer = _make_enforcer(
++            pool, ceiling=100 * gb, soft_threshold=0.85, hard_threshold=0.95
++        )
++        engine = MagicMock()
++        engine.has_active_requests.return_value = active_requests
++        pool._entries = {
++            "model-a": _make_entry("model-a", engine=engine),
++            "model-b": _make_entry("model-b", engine=MagicMock()),
++        }
++        return enforcer, engine
++
++    @pytest.mark.asyncio
++    async def test_pool_pushing_total_over_hard_requests_reclaim_only(
++        self, mock_engine_pool
++    ):
++        gb = 1024**3
++        enforcer, engine = self._setup(mock_engine_pool, gb)
++        with (
++            patch("omlx.process_memory_enforcer.mx") as mock_mx,
++            patch(
++                "omlx.process_memory_enforcer.get_phys_footprint",
++                return_value=97 * gb,
++            ),
++        ):
++            mock_mx.get_active_memory.return_value = 60 * gb
++            mock_mx.get_cache_memory.return_value = 30 * gb
++            await enforcer._check_and_enforce()
++            assert enforcer._pressure_level == "ok"
++            engine.scheduler.request_pressure_reclaim.assert_called_once()
++            mock_engine_pool._unload_engine.assert_not_awaited()
++            # Rate-limited: the next poll does not ask again.
++            await enforcer._check_and_enforce()
++            engine.scheduler.request_pressure_reclaim.assert_called_once()
++
++    @pytest.mark.asyncio
++    async def test_working_memory_over_soft_still_soft(self, mock_engine_pool):
++        gb = 1024**3
++        enforcer, engine = self._setup(mock_engine_pool, gb)
++        with (
++            patch("omlx.process_memory_enforcer.mx") as mock_mx,
++            patch(
++                "omlx.process_memory_enforcer.get_phys_footprint",
++                return_value=92 * gb,
++            ),
++        ):
++            mock_mx.get_active_memory.return_value = 88 * gb
++            mock_mx.get_cache_memory.return_value = 3 * gb
++            await enforcer._check_and_enforce()
++        assert enforcer._pressure_level == "soft"
++
++    def test_stale_executor_sample_keeps_total(self, mock_engine_pool):
++        import time
++
++        gb = 1024**3
++        enforcer, engine = self._setup(mock_engine_pool, gb, active_requests=True)
++        sched = engine.scheduler
++        sched._last_mlx_active_memory_at = time.monotonic() - 60.0
++        enforcer._last_usage_parts = (90 * gb, 60 * gb, 80 * gb, False)
++        assert enforcer._pressure_usage(90 * gb) == (90 * gb, 0)
++        sched._last_mlx_active_memory_at = time.monotonic()
++        assert enforcer._pressure_usage(90 * gb) == (70 * gb, 20 * gb)
++
++    def test_parts_from_another_reading_are_ignored(self, mock_engine_pool):
++        gb = 1024**3
++        enforcer, _engine = self._setup(mock_engine_pool, gb)
++        enforcer._last_usage_parts = (90 * gb, 60 * gb, 80 * gb, True)
++        assert enforcer._pressure_usage(91 * gb) == (91 * gb, 0)
++
++    def test_active_never_reduced_by_pool(self, mock_engine_pool):
++        gb = 1024**3
++        enforcer, _engine = self._setup(mock_engine_pool, gb)
++        # current comes from MLX active (phys smaller): the pool is not in it.
++        enforcer._last_usage_parts = (80 * gb, 80 * gb, 100 * gb, True)
++        assert enforcer._pressure_usage(80 * gb) == (80 * gb, 0)

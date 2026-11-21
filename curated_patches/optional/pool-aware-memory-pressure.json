@@ -1,0 +1,7 @@
+{
+  "description": "Freed GPU buffers no longer cause memory-pressure stalls. MLX keeps freed Metal buffers for reuse, and the memory guard counted them as used memory: a pool of 6-9 GB pushed the process over the soft mark, which paused new requests, evicted idle models and shrank the hot cache although the memory was free in practice. The soft and hard levels now use the footprint minus that reclaimable pool (from a fresh MLX sample only; a stale sample keeps the old behavior). When the pool alone pushes the total over the hard mark, the guard only asks the scheduler to clear it (at most every 5 s). The emergency abort still uses the full total. The scheduler refreshes its MLX active/pool sample at most every 0.5 s per step so the guard sees the pool during long decodes. Experimental: unit-tested (enforcer + scheduler suites), not yet verified under real memory pressure. Built against upstream ade9f20a.",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "both"
+}

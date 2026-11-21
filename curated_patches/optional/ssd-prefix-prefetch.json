@@ -1,0 +1,7 @@
+{
+  "description": "A slow SSD cache no longer stalls all running requests during a prefix restore. Before, a request whose cached prefix lived only on the SSD read every block with mx.load() on the inference thread, so every other request stopped decoding for the whole read (20-60 s on a throttling drive). Now, when the SSD-only part is 256 MB or more, a background thread reads those files once with plain file I/O (no MLX, so no Metal deadlock risk) into the macOS file cache; the request waits like a cache-freshness deferral while running requests keep decoding, then the normal restore reads from RAM. The log shows 'SSD prefetch for <id> done: N blocks, X GB in Ys (Z MB/s)' with the drive's real speed. Limits: if macOS evicts the file cache before the restore, the old slow read happens; GDN sidecar and boundary snapshot files are not prefetched; the final restore from RAM still briefly pauses other requests. OMLX_SSD_PREFETCH=0 turns it off. Experimental: unit-tested and smoke-tested on a dev box, not yet measured on a throttling drive. Built against upstream ade9f20a.",
+  "source": {
+    "kind": "file"
+  },
+  "scope": "both"
+}
