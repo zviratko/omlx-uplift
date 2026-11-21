@@ -13,7 +13,7 @@ Extended Fused Decode' with a rewritten hint.
 
 Two complementary sweeps against the CURRENT classic EN catalog (range
 INDEPENDENT — drift can predate the last reviewed range, as wide_proj's
-did; run it on every fire):
+did; run it on every sync run):
 
   CHECK 1 (text): every English literal uplift paints (its en.json values +
     static JS literals). Exact match with a classic value = verbatim
@@ -27,10 +27,10 @@ did; run it on every fire):
     classic key and its text differs from classic's CURRENT value, the
     copy is stale. A row referencing any classic key inside a ternary
     passes. Equal text passes (untranslated but parity — converting it to
-    the classic key is recommended, not a fire blocker).
+    the classic key is recommended, not a run blocker).
 
-Exit 0 = clean. Exit 1 = suspects printed; each one is fixed on the fire by
-moving the row onto classic's own key via C.tf (fire-13 doctrine: translated
+Exit 0 = clean. Exit 1 = suspects printed; each one is fixed in the run by
+moving the row onto classic's own key via C.tf (run-13 doctrine: translated
 in every locale through the mounted catalog, self-healing on reword) and
 deleting the uplift copy from all locale files — or justified in ALLOW /
 ALLOW_ROW below with a real reason.
