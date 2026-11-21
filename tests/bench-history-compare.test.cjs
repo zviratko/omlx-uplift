@@ -487,7 +487,7 @@ test('BENCH-CMP: the history box CSS exists with house tokens', () => {
 // ---- 8. locale self-pin: t(key, fb) call sites are invisible to the
 //             pytest gate, so this file owns the whole family ----
 
-test('BENCH-CMP: the six new keys ship in all 10 locales', () => {
+test('BENCH-CMP: the six new keys ship in all 11 locales', () => {
     const keys = ['uplift.bench.history.compare',
                   'uplift.bench.history.copy_comparison',
                   'uplift.bench.history.copy_comparison_tip',

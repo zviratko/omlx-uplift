@@ -716,7 +716,7 @@ def _phs(value):
     return sorted(_PH_RE.findall(value))
 
 
-@pytest.mark.parametrize("loc", ["en", "cs", "es", "fr", "ja", "ko",
+@pytest.mark.parametrize("loc", ["en", "cs", "es", "fr", "it", "ja", "ko",
                                  "pt-BR", "ru", "zh", "zh-TW"])
 def test_say2_locale_keys(loc):
     import json as _json

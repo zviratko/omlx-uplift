@@ -2,7 +2,7 @@
 voice-defaults block assemble labels through tf(key, EN fallback) —
 invisible to the C.t literal gate, so they self-pin here
 (uplift-static-ui-gate doctrine; owner file for the tts_* family).
-Pins: every new key exists non-empty in all 10 locales, placeholder
+Pins: every new key exists non-empty in all 11 locales, placeholder
 multisets equal EN, values are translated (not EN-identical), the tf()
 fallback literals in the statics match en.json byte-for-byte (a drifted
 literal flickers the other wording pre-catalog; ternary key sites pair
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-LOCALES = ["en", "cs", "es", "fr", "ja", "ko", "pt-BR", "ru", "zh", "zh-TW"]
+LOCALES = ["en", "cs", "es", "fr", "it", "ja", "ko", "pt-BR", "ru", "zh", "zh-TW"]
 TTS1_KEYS = (
     "uplift.voices.tab_tts", "uplift.voices.tts_title",
     "uplift.voices.tts_hint", "uplift.voices.tts_none",

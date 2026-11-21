@@ -1161,7 +1161,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'history rail never wraps sideways');
     assert.ok(/\.chat-native-side\.chat-native-bar \{[^}]*flex-wrap: nowrap/.test(css),
         'control rail never wraps sideways');
-    // CHAT-3R preset keys: ten locales, real translations, matching
+    // CHAT-3R preset keys: eleven locales, real translations, matching
     // {name} placeholder multisets (dynamic t() usage is gate-invisible,
     // so this file is the self-pin per the doctrine)
     const PRESET_KEYS = ['preset_title', 'preset_save', 'preset_delete',
@@ -1169,7 +1169,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         'preset_delete_confirm', 'preset_discard_confirm', 'preset_created'];
     const en = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/en.json`, 'utf8'));
     const marks = (s) => (String(s).match(/\{name\}/g) || []).length;
-    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    for (const loc of ['en', 'cs', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
         for (const name of PRESET_KEYS) {
             const key = `uplift.chat.${name}`;
@@ -1188,8 +1188,8 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
         tools: 'Tools', sampling: 'Sampling', speak_header: 'Speak',
         auto: 'Auto' };
     // words that legitimately stay EN in some locales (terminology policy)
-    const SAME_EN = { sampling: ['cs'], auto: ['cs', 'es', 'fr', 'pt-BR'] };
-    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    const SAME_EN = { sampling: ['cs', 'it'], auto: ['cs', 'es', 'fr', 'it', 'pt-BR'] };
+    for (const loc of ['en', 'cs', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(`${LOCALES_DIR}/${loc}.json`, 'utf8'));
         for (const [k, enV] of Object.entries(R13_KEYS)) {
             const v = d[`uplift.chat.${k}`];

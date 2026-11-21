@@ -824,7 +824,7 @@ test('ACC-2b: the engine hint points at the section instead of at the grid',
             'and keeps the per-subtask math that justifies the fold');
     });
 
-test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder set',
+test('ACC-2a: every extras key exists in all 11 locales with the EN placeholder set',
     () => {
         const src = benchSource();
         const used = [...src.matchAll(/t\('(uplift\.bench\.extras_[a-z_]+)'/g)]
@@ -846,7 +846,7 @@ test('ACC-2a: every extras key exists in all 10 locales with the EN placeholder 
             assert.ok(keys.includes(k), 'the gate must cover the new key ' + k);
         const langs = fs.readdirSync(LOCALES).filter(f => f.endsWith('.json'))
             .map(f => f.replace(/\.json$/, ''));
-        assert.equal(langs.length, 10, 'all 10 locales are on disk');
+        assert.equal(langs.length, 11, 'all 11 locales are on disk');
         const vars = v => (String(v).match(/\{\w+\}/g) || []).sort();
         const en = JSON.parse(fs.readFileSync(path.join(LOCALES, 'en.json'), 'utf8'));
         for (const k of keys) assert.ok(en[k], 'en.json missing ' + k);

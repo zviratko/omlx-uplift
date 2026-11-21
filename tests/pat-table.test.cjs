@@ -511,7 +511,7 @@ test('auto-update checkbox and check-for-updates button are GONE from chrome', (
         'the header auto-label CSS hook must not come back');
     assert.ok(!/<button[^>]*class="btn"[^>]*id="pt-check-btn"/.test(html),
         'Check-for-updates lives under the ORIGIN column, not as a toolbar btn');
-    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    for (const loc of ['en', 'cs', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(
             path.join(STATIC_DIR, '..', 'locales', `${loc}.json`), 'utf8'));
         assert.ok(!('uplift.patches.auto_check' in d),
@@ -605,7 +605,7 @@ test('table header carries the sub-actions, help marks, and no MANAGE title', ()
     const en = JSON.parse(fs.readFileSync(
         path.join(STATIC_DIR, '..', 'locales', 'en.json'), 'utf8'));
     for (const k of keys) assert.ok(en['uplift.patches.' + k], `en lost ${k}`);
-    for (const loc of ['cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    for (const loc of ['cs', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs.readFileSync(
             path.join(STATIC_DIR, '..', 'locales', `${loc}.json`), 'utf8'));
         for (const k of keys) {

@@ -12,8 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const STATIC = p => fs.readFileSync(path.join(ROOT, 'omlx_uplift', 'static', p), 'utf8');
-const LOCS = ['cs', 'de', 'en', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh-TW', 'zh']
-    .filter(l => l !== 'de'); // uplift ships 10 locales (German is a user call)
+const LOCS = ['cs', 'de', 'en', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh-TW', 'zh']
+    .filter(l => l !== 'de'); // uplift ships 11 locales (German is a user call)
 
 const GSPEC = require(path.join(ROOT, 'omlx_uplift', 'static', 'uplift_gspec.js'));
 

@@ -269,7 +269,7 @@ def test_locale_gate_covers_dev_keys():
     dev_keys = set(re.findall(r"uplift\.patches\.dev_[a-z_]+", src))
     dev_keys |= set(re.findall(r"uplift\.patches\.(?:lbl_scope|scope_[a-z_]+)", src))
     assert dev_keys, "no DEV-5 keys found — wiring lost?"
-    for lang in ["en", "es", "fr", "ja", "ko", "pt-BR", "ru", "zh-TW", "zh", "cs"]:
+    for lang in ["en", "es", "fr", "it", "ja", "ko", "pt-BR", "ru", "zh-TW", "zh", "cs"]:
         d = json.loads((locales / f"{lang}.json").read_text(encoding="utf-8"))
         missing = {k for k in dev_keys if k not in d}
         assert not missing, f"{lang}: {sorted(missing)}"

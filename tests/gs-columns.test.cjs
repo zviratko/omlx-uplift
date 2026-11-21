@@ -267,7 +267,7 @@ test('the sub-key GENERATE button is labelled, never an icon speck', () => {
     assert.match(gsys, /reg\(genB, 'uplift\.gs\.sub_keys_generate', 'text'\)/);
     // t()-style keys are invisible to test_locale_sync — self-pin catalogs.
     const fs2 = require('fs'), path2 = require('path');
-    for (const loc of ['en', 'cs', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
+    for (const loc of ['en', 'cs', 'es', 'fr', 'it', 'ja', 'ko', 'pt-BR', 'ru', 'zh', 'zh-TW']) {
         const d = JSON.parse(fs2.readFileSync(
             path2.join(__dirname, '..', 'omlx_uplift', 'locales', loc + '.json'), 'utf8'));
         const v = d['uplift.gs.sub_keys_generate'];
