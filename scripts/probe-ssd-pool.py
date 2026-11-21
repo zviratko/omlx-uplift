@@ -521,10 +521,17 @@ def run_pool(http: Http, model: str, args, logw: LogWindow, report: dict) -> Non
     peak = max((s["current_gb"] for s in series), default=0)
 
     if not trans:
-        verdict = (f"guard never left 'ok' (peak footprint {peak}GB, "
-                   f"soft {gb(base.get('soft_bytes'))}) - raise "
-                   "--parallel/--queued/--prefix-tokens until the peak "
-                   "approaches the soft level")
+        if peak >= (base.get("soft_bytes") or 2**60) / 2**30:
+            verdict = (f"PATCH BEHAVIOUR: footprint peaked at {peak}GB, "
+                       f"above the soft level ({gb(base.get('soft_bytes'))}), "
+                       "yet the level never left 'ok' - consistent with the "
+                       "pool being discounted (or the spike fell between "
+                       "two 1s polls)")
+        else:
+            verdict = (f"guard never left 'ok' (peak footprint {peak}GB, "
+                       f"soft {gb(base.get('soft_bytes'))}) - raise "
+                       "--parallel/--queued/--prefix-tokens until the peak "
+                       "approaches the soft level")
     elif patched_fmt:
         verdict = ("patched format: transitions carry reclaimable_pool=; "
                    f"levels seen {levels_seen}")
