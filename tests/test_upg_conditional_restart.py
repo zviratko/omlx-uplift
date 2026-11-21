@@ -210,3 +210,21 @@ def test_dev_restart_uses_launchctl_kickstart(monkeypatch, capsys):
     assert calls[0] == ["launchctl", "kickstart", "-k",
                         f"gui/{os.getuid()}/sh.brew.omlx-dev"]
     assert "restarted" in capsys.readouterr().out
+
+
+def test_skipped_upgrade_still_stamps_branch_truth(home, monkeypatch):
+    """A tip cut by NEW store entries (upload replaced by its identical
+    catalog twin) skips the build, but the cards must not stay PENDING:
+    the skip path stamps dev_applied from the commits it just cut."""
+    _stubs(home, monkeypatch)
+    from omlx_uplift import patchsource
+    seen = []
+    monkeypatch.setattr(patchsource, "mark_dev_applied",
+                        lambda store, commits, skipped=(): seen.append(
+                            (list(commits), list(skipped))))
+    monkeypatch.setattr(
+        devsrc, "_stream_build",
+        lambda *a, **k: pytest.fail("brew must NOT run when up to date"))
+    r = devsrc.run_dev_build(conditional=True)
+    assert r.stage == "up-to-date"
+    assert seen == [([], [])]

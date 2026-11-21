@@ -2386,14 +2386,22 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
     # what the last successful build already produced AND its keg is still
     # on disk, neither omlx HEAD nor the patches moved: nothing to rebuild.
     # Only 'dev upgrade' reaches this (install/--force/dry-run are always
-    # full paths); the marks and re-gate below already ran for that tip at
-    # its last real build, so skipping them is safe here.
+    # full paths); the re-gate below already ran for that tip at its last
+    # real build, so skipping it is safe here. The branch-truth stamp is
+    # NOT: the same tip can be cut by NEW store entries (a patch removed and
+    # re-added with identical bytes, e.g. an upload replaced by its catalog
+    # twin), and without a stamp those cards read PENDING until a forced
+    # rebuild although the running keg carries them.
     if conditional and not dry_run:
         built_sha = (cfg.get("built_sha") or "").strip()
         bver = (cfg.get("built_version") or "").strip()
         from . import kegstash as _ks
         if built_sha and tip == built_sha and bver and os.path.isdir(
                 os.path.join(_ks.cellar_dir(), bver)):
+            from . import patches as _patches_skip
+            patchsource.mark_dev_applied(
+                _patches_skip.PatchStore(), commits,
+                skipped=mres.get("skipped_patches") or [])
             res.ok, res.returncode, res.stage = True, 0, "up-to-date"
             _emit(res, "out", "up to date — neither omlx HEAD nor the patch "
                               f"set moved; keg {bver} IS this build "
