@@ -1277,10 +1277,22 @@ def _added_lines(filepatch: dict) -> set[str]:
 # install questionnaire (DEV-2 CLI) — repo part only; DEV-4 owns runtime
 # ---------------------------------------------------------------------------
 
+# Metal toolchain probe timing (user laptop handoff 2026-11-21): the compiler
+# ships as a lazily mounted cryptex disk image that idle-detaches. The
+# first `xcrun metal` after a detach TRIGGERS the async mount but gives
+# up in ~2 s; the mount itself took ~60 s to complete. The headless
+# pre-flight polls within this budget so a dashboard build waits for
+# the mount instead of dying on the formula guard 9 s into brew.
+_METAL_PROBE_TIMEOUT_S = 20.0
+_METAL_MOUNT_BUDGET_S = 90.0
+_METAL_MOUNT_POLL_S = 5.0
+
+
 def _metal_compiler_ok() -> bool:
     """Only RUNNING the compiler agrees with whether the build will work:
     since Xcode 26 `xcrun -f metal` finds a shim that lies (the tap
-    formula says the same). Non-macOS boxes (CI) have nothing to check."""
+    formula says the same). Non-macOS boxes (CI) have nothing to check.
+    Bounded: a stuck xcrun must never hang the build worker."""
     import subprocess
     import sys
 
@@ -1288,8 +1300,9 @@ def _metal_compiler_ok() -> bool:
         return True
     try:
         return subprocess.run(["/usr/bin/xcrun", "metal", "--version"],
-                              capture_output=True).returncode == 0
-    except OSError:
+                              capture_output=True,
+                              timeout=_METAL_PROBE_TIMEOUT_S).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
@@ -1357,6 +1370,47 @@ def _offer_metal_toolchain() -> bool:
           "-downloadComponent\n      MetalToolchain' (or re-answer this "
           "question) — then 'omlx-uplift\n      dev install' builds the "
           "kernels.")
+    return False
+
+
+def _await_metal_compiler(emit=None, budget_s=None, poll_s=None) -> bool:
+    """Headless Metal pre-flight probe (user laptop handoff 2026-11-21).
+
+    The dashboard/service build path has no TTY, so the interactive
+    offer above never runs — but falling through to the brew guard is
+    wrong too: when the MetalToolchain cryptex image is cold-mounted,
+    the guard's own `xcrun` triggers the async mount, waits ~2 s and
+    gives up, killing an otherwise healthy build 9 s in. This probe
+    does the same trigger OUTSIDE the sandbox and then waits out the
+    mount, so the build starts with the compiler answering. `emit` is
+    an optional (stream, text) progress callback. True = compiler
+    ready (or nothing to check, e.g. CI)."""
+    import time
+
+    budget_s = _METAL_MOUNT_BUDGET_S if budget_s is None else budget_s
+    poll_s = _METAL_MOUNT_POLL_S if poll_s is None else poll_s
+    if _metal_compiler_ok():
+        return True
+    if not _xcode_usable():
+        # no Xcode at all: the cryptex will never mount, do not burn
+        # the budget waiting for it
+        if emit:
+            emit("out", "Metal compiler missing and Xcode is not usable "
+                        "on this Mac —\n      nothing to wait for.")
+        return False
+    if emit:
+        emit("out", "Metal compiler not answering — it ships as a lazily "
+                    "mounted disk\n      image that idle-detaches; this "
+                    "probe just asked macOS to remount\n      it, waiting "
+                    f"up to {int(budget_s)} s for the mount.")
+    deadline = time.monotonic() + budget_s
+    while time.monotonic() < deadline:
+        time.sleep(poll_s)
+        if _metal_compiler_ok():
+            if emit:
+                emit("out", "Metal compiler answering — mount completed, "
+                            "proceeding to build.")
+            return True
     return False
 
 
@@ -2473,9 +2527,12 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
 
     # PREFLIGHT (user 2026-10-22): a custom-kernel build on a Mac without
     # the Metal toolchain dies minutes INTO brew (the formula guard is the
-    # backstop). Ask interactively up front and offer the setup; a
-    # non-interactive run (service, dashboard trigger) falls through to
-    # the formula guard with the same message, just later.
+    # backstop). Ask interactively up front and offer the setup. The
+    # headless path (service, dashboard trigger) cannot ask — but since
+    # the 2026-11-21 user laptop handoff it must NOT fall through either: a cold
+    # MetalToolchain cryptex mount fails the brew guard 9 s into an
+    # otherwise healthy build, and only a pre-build probe can wait the
+    # ~1 min the async remount takes.
     if "--with-custom-kernel" in flags:
         import sys as _sys
 
@@ -2490,6 +2547,21 @@ def _run_dev_build_body(res, cfg, build_patches, patchsource, brewutil,
                                   "build_options in dev.json")
                 res.ok, res.returncode, res.stage = False, 2, "toolchain"
                 return res
+        elif not _await_metal_compiler(
+                emit=lambda stream, text: _emit(res, stream, text)):
+            _emit(res, "err", "Metal compiler not answering — stopped "
+                              "BEFORE the build (the formula guard would "
+                              "fail the same way seconds in). If this Mac "
+                              "has Xcode, the MetalToolchain disk image "
+                              "may still be mounting: wait ~1 min and "
+                              "press Build again. If it never had the "
+                              "toolchain: install Xcode + 'xcodebuild "
+                              "-downloadComponent MetalToolchain', or "
+                              "build plain — remove "
+                              "'--with-custom-kernel' from build_options "
+                              "in dev.json")
+            res.ok, res.returncode, res.stage = False, 2, "toolchain"
+            return res
 
     # KEG-VERSIONED (user 2026-10-20): a unique fake version per build,
     # stamped right before brew runs so the formula (which reads dev.json)

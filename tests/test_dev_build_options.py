@@ -240,20 +240,88 @@ def test_build_stops_before_brew_when_toolchain_missing(home_cfg_plain,
     assert any("stopped BEFORE the build" in t for _, t in res.lines)
 
 
-def test_build_preflight_skipped_when_not_a_tty(home_cfg_plain, monkeypatch):
-    """Non-interactive runs must not block on the offer: they fall through
-    to the formula guard instead (the fixture detonates at the stamp step
-    right after the gate to prove flow continued without touching brew)."""
+def test_build_headless_probes_metal_before_brew(home_cfg_plain, monkeypatch):
+    """user laptop handoff 2026-11-21: a headless (dashboard) build must NOT
+    fall through to the brew guard. The non-interactive probe fires, and
+    when the compiler answers the build continues; the interactive offer
+    still never runs without a TTY (the fixture detonates at the stamp
+    step right after the gate to prove flow continued without touching
+    brew)."""
     import sys as _sys
 
     monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: False))
     called = []
     monkeypatch.setattr(devsrc, "_offer_metal_toolchain",
                         lambda: called.append(1) or True)
+    probed = []
+    monkeypatch.setattr(devsrc, "_await_metal_compiler",
+                        lambda emit=None, **kw: probed.append(1) or True)
 
     with pytest.raises(AssertionError, match="reached the stamp step"):
         home_cfg_plain(break_after_preflight=True)
     assert not called, "the tty offer must not run headless"
+    assert probed, "headless builds must probe the Metal compiler first"
+
+
+def test_build_headless_stops_when_probe_gives_up(home_cfg_plain,
+                                                  monkeypatch):
+    """Probe says the compiler never came up: stop at stage 'toolchain'
+    with the wait-and-retry advice, without ever reaching brew."""
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(devsrc, "_await_metal_compiler",
+                        lambda emit=None, **kw: False)
+    res = home_cfg_plain()
+    assert (res.ok, res.returncode, res.stage) == (False, 2, "toolchain")
+    assert any("press Build again" in t for _, t in res.lines), \
+        "the cold-mount case must tell the user to retry in ~1 min"
+
+
+# ---- headless probe (_await_metal_compiler) --------------------------------
+
+def test_probe_ready_compiler_returns_at_once(monkeypatch):
+    """Warm toolchain (the 99% case): no Xcode check, no waiting."""
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: True)
+    monkeypatch.setattr(devsrc, "_xcode_usable",
+                        lambda: (_ for _ in ()).throw(
+                            AssertionError("must not check Xcode when "
+                                           "the compiler answers")))
+    assert devsrc._await_metal_compiler() is True
+
+
+def test_probe_waits_for_cold_cryptex_mount(monkeypatch):
+    """The reported incident case: the first call fails (it TRIGGERS the async
+    mount), a later one answers — the probe must wait, not fail."""
+    answers = iter([False, False, True])
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: next(answers))
+    monkeypatch.setattr(devsrc, "_xcode_usable", lambda: True)
+    lines = []
+    ok = devsrc._await_metal_compiler(
+        emit=lambda stream, text: lines.append(text),
+        budget_s=2, poll_s=0.01)
+    assert ok is True
+    assert any("lazily" in t for t in lines), "the wait must be explained"
+    assert any("mount completed" in t for t in lines)
+
+
+def test_probe_gives_up_after_budget(monkeypatch):
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: False)
+    monkeypatch.setattr(devsrc, "_xcode_usable", lambda: True)
+    assert devsrc._await_metal_compiler(budget_s=0.05,
+                                        poll_s=0.01) is False
+
+
+def test_probe_skips_the_wait_without_xcode(monkeypatch):
+    """No Xcode: the cryptex can never mount — fail fast, do not sleep."""
+    import time as _time
+
+    monkeypatch.setattr(devsrc, "_metal_compiler_ok", lambda: False)
+    monkeypatch.setattr(devsrc, "_xcode_usable", lambda: False)
+    monkeypatch.setattr(_time, "sleep",
+                        lambda s: (_ for _ in ()).throw(
+                            AssertionError("must not wait without Xcode")))
+    assert devsrc._await_metal_compiler(budget_s=5, poll_s=0.01) is False
 
 
 @pytest.fixture()
