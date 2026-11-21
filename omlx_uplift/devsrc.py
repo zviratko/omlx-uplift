@@ -404,6 +404,32 @@ def _apply_one(path: str, pid: str, v: int, diff_bytes: bytes) -> dict:
     return res
 
 
+def _count_only_in(repo: str, ref: str, other: str) -> int | None:
+    """Commits reachable from `ref` but not from `other` (`other..ref`).
+    None when either side is unknown.
+
+    git's default date-order walk mis-prunes when a child commit is dated
+    OLDER than its parent: the materialize commits are epoch-pinned to
+    2000-01-01 for deterministic rebuilds, so once the carrier branch
+    carried 7+ patch commits, `tip..base_sha` counted the whole upstream
+    history (observed 2026-11-21: dev status behind=3850 for a true 0).
+    The ancestor test settles the re-cut case exactly (the carrier always
+    contains its base); the fall-back count only runs on real divergence.
+    """
+    anc = _git(["merge-base", "--is-ancestor", ref, other], cwd=repo,
+               check=False)
+    if not anc.returncode:
+        return 0
+    proc = _git(["rev-list", "--count", f"{other}..{ref}"], cwd=repo,
+                check=False)
+    if proc.returncode:
+        return None
+    try:
+        return int(proc.stdout.strip() or 0)
+    except ValueError:
+        return None
+
+
 def base_distance(repo: str, a: str | None, b: str | None) -> int | None:
     """VER-1: commit distance between two shas in one repo (ahead+behind,
     symmetric). None when either side is unknown (missing stamp, gc'd
@@ -413,14 +439,11 @@ def base_distance(repo: str, a: str | None, b: str | None) -> int | None:
         return None
     if a == b:
         return 0
-    r1 = _git(["rev-list", "--count", f"{a}..{b}"], cwd=repo, check=False)
-    r2 = _git(["rev-list", "--count", f"{b}..{a}"], cwd=repo, check=False)
-    if r1.returncode or r2.returncode:
+    d1 = _count_only_in(repo, b, a)
+    d2 = _count_only_in(repo, a, b)
+    if d1 is None or d2 is None:
         return None
-    try:
-        return int(r1.stdout.strip()) + int(r2.stdout.strip())
-    except ValueError:
-        return None
+    return d1 + d2
 
 
 def gate_failure_detail(res: dict | None, limit: int = 3) -> str:
@@ -1022,10 +1045,8 @@ def status(cfg: dict, patches_to_apply: list[dict] | None = None,
            "base": base_sha, "sync_ref": cfg["sync_ref"],
            "base_pin": (cfg.get("base_pin") or "").strip() or None}
     if tip and base_sha:
-        out["ahead"] = int(_git(["rev-list", "--count", f"{base_sha}..{tip}"],
-                                cwd=path).stdout.strip() or 0)
-        out["behind"] = int(_git(["rev-list", "--count", f"{tip}..{base_sha}"],
-                                 cwd=path).stdout.strip() or 0)
+        out["ahead"] = _count_only_in(path, tip, base_sha) or 0
+        out["behind"] = _count_only_in(path, base_sha, tip) or 0
         out["patch_commits"] = _patch_commits(path, base_sha, tip)
     if patches_to_apply is not None and tip and base_sha:
         out["drift"] = drift_check(path, base_sha, tip, patches_to_apply,

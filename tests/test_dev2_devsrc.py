@@ -135,6 +135,35 @@ class DevsrcFixture(unittest.TestCase):
         with self.assertRaises(devsrc.DevsrcError):
             devsrc.fetch_sync_ref(dict(self.cfg))
 
+    def test_epoch_dated_patch_commits_do_not_inflate_behind(self):
+        """Regression (2026-11-21): materialize pins patch commits to
+        2000-01-01; git's default date-order walk then mis-prunes
+        `tip..base_sha` once 7+ patch commits sit on a newer-dated base —
+        dev status read behind=3850 (the whole upstream history) for a
+        true 0, and base_distance inflated the same way. The carrier
+        always contains its base: ahead must count the patch commits and
+        behind must be 0."""
+        devsrc.ensure_clone(self.cfg)
+        devsrc.fetch_sync_ref(self.cfg)
+        path = devsrc.src_path(self.cfg)
+        base_sha = _git(["rev-parse", "origin/main"], cwd=path).strip()
+        patches = [{"id": f"p-{i}", "version": 1,
+                    "diff_bytes": self._patch_diff(f"e{i}")}
+                   for i in range(7)]
+        r = devsrc.materialize(patches, self.cfg)
+        self.assertTrue(r["ok"], r)
+        st = devsrc.status(self.cfg, patches)
+        self.assertEqual(st["ahead"], 7)
+        self.assertEqual(st["behind"], 0)
+        self.assertFalse(st["drift"]["drift"], st["drift"])
+        # VER-1 ladder math: tip vs its own base is exactly the 7 commits
+        self.assertEqual(devsrc.base_distance(path, st["tip"], base_sha), 7)
+        # and a raw default-order rev-list really does over-count here —
+        # proves the fixture reproduces the date-order shape the fix covers
+        raw = _git(["rev-list", "--count", f"{st['tip']}..{base_sha}"],
+                   cwd=path).strip()
+        self.assertGreaterEqual(int(raw), 1)
+
     def test_materialize_one_commit_per_patch(self):
         devsrc.ensure_clone(self.cfg)
         devsrc.fetch_sync_ref(self.cfg)
