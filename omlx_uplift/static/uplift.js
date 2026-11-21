@@ -2953,6 +2953,17 @@ function reqStatsPoll() {
         .catch(() => { reqStatsCache = null; })   // honest: no overlay, tracker fallback
         .finally(() => { reqStatsFetching = false; reqStatsAt = Date.now(); });
 }
+/* PCT-LABEL: the percentile prefix rides the LOCALIZED catalog string, so a
+   non-English board reads its own wording instead of the English literal these
+   two lines used to write. zh/zh-TW carry the prefix upper-case ('P95 提示词
+   Token'), so mirror the case of the text we replace rather than forcing 'p99'.
+   The keys exist in every locale; before this they were painted once by
+   applyI18n and then overwritten on the next stats tick. */
+const pctLabel = (key, fb) => {
+    const s = C.t(key);
+    return (s === key ? fb : s).replace(/p95/i,
+        (m) => (m === 'P95' ? layout.percentile.toUpperCase() : layout.percentile));
+};
 function renderRequestStats(s) {
     fillSelectOnce();
     reqStatsPoll();
@@ -2963,8 +2974,10 @@ function renderRequestStats(s) {
     const pKey = layout.percentile;
     // Labels must follow the selector in BOTH paths (F-021: server-stats path
     // updated the values but left "p95 …" text under a p99 number).
-    $('lbl-prompt-pct').textContent = `${layout.percentile} prompt tok`;
-    $('lbl-compl-pct').textContent = `${layout.percentile} completion tok`;
+    $('lbl-prompt-pct').textContent = pctLabel('uplift.label.p95_prompt',
+        `${layout.percentile} prompt tok`);
+    $('lbl-compl-pct').textContent = pctLabel('uplift.label.p95_completion',
+        `${layout.percentile} completion tok`);
 
     if (server) {
         const pt = server.prompt_tokens || {}, ct = server.completion_tokens || {};
@@ -2991,8 +3004,10 @@ function renderRequestStats(s) {
     setCounter('v-compl-pct', C.percentile(complSamples, p));
     setCounter('v-ttft', null);
     setCounter('v-errrate', null);
-    $('lbl-prompt-pct').textContent = `${layout.percentile} prompt tok`;
-    $('lbl-compl-pct').textContent = `${layout.percentile} completion tok`;
+    $('lbl-prompt-pct').textContent = pctLabel('uplift.label.p95_prompt',
+        `${layout.percentile} prompt tok`);
+    $('lbl-compl-pct').textContent = pctLabel('uplift.label.p95_completion',
+        `${layout.percentile} completion tok`);
     const n = Math.max(promptSamples.length, complSamples.length);
     $('reqstats-note').textContent =
         `avg: usage aggregates (${S.usageRange}) · p: session samples (${n}, cap 2000)` +
