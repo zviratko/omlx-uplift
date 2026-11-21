@@ -747,7 +747,7 @@ test('SAY-6: an engine that reports no limits shows no fields', async () => {
 
 test('SAY-6: every locale translates the limits copy', () => {
     const locales = fs.readdirSync(SAY6_LOCALES).filter(f => f.endsWith('.json'));
-    assert.equal(locales.length, 10, 'all ten locales present');
+    assert.equal(locales.length, 11, 'all eleven locales present');
     for (const f of locales) {
         const d = JSON.parse(fs.readFileSync(path.join(SAY6_LOCALES, f), 'utf8'));
         for (const k of ['uplift.voices.say_limits_hint',

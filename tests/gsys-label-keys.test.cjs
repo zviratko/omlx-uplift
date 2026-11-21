@@ -91,7 +91,7 @@ test('uplift.gs.say.* is translated in every locale file', () => {
     const L = extractLabels();
     const dir = path.join(__dirname, '..', 'omlx_uplift', 'locales');
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    assert.ok(files.length >= 10, `expected the 10 locale files, found ${files.length}`);
+    assert.ok(files.length >= 11, `expected the 11 locale files, found ${files.length}`);
     const keys = Object.keys(L.say).filter(k => k !== 'ph');
     assert.ok(keys.length >= 6,
         `say family shrank to ${keys.length} — the guard would go vacuous`);

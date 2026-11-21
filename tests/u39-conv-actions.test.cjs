@@ -92,7 +92,7 @@ test('uplift.chat.more_actions exists in every locale, translated', () => {
     const en = JSON.parse(fs.readFileSync(path.join(LOCALES, 'en.json'), 'utf8'));
     assert.equal(en['uplift.chat.more_actions'], 'More actions');
     const files = fs.readdirSync(LOCALES).filter(f => f.endsWith('.json'));
-    assert.ok(files.length >= 10, 'expected the full locale set');
+    assert.ok(files.length >= 11, 'expected the full locale set');
     for (const f of files) {
         if (f === 'en.json') continue;
         const d = JSON.parse(fs.readFileSync(path.join(LOCALES, f), 'utf8'));

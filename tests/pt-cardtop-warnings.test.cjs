@@ -9,7 +9,7 @@
    (which files, which version) instead of asking whether the user edited
    by hand. No vm harness expresses the card layout, so the placement and
    the wiring are pinned as source shape on the checked-in files, and the
-   locale contract is pinned for all ten catalogs. */
+   locale contract is pinned for all eleven catalogs. */
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -87,8 +87,8 @@ test('the alarm strip is sized up in the stylesheet', () => {
         'no invented radius: the frame comes from .pt-banner.pt-drift');
 });
 
-test('locale contract: both keys exist in all ten catalogs', () => {
-    assert.equal(LOCALES.length, 10, 'unexpected locale set: ' + LOCALES);
+test('locale contract: both keys exist in all eleven catalogs', () => {
+    assert.equal(LOCALES.length, 11, 'unexpected locale set: ' + LOCALES);
     const en = JSON.parse(fs.readFileSync(path.join(ROOT, 'locales', 'en.json'), 'utf8'));
     for (const f of LOCALES) {
         const d = JSON.parse(fs.readFileSync(path.join(ROOT, 'locales', f), 'utf8'));

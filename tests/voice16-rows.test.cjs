@@ -163,7 +163,7 @@ const FAM = ['say_read', 'say_reread', 'say_redo', 'say_play', 'say_line',
 const FILES = fs.readdirSync(LOCALE_DIR).filter(f => f.endsWith('.json'));
 
 test('i18n: every VOICE-16 key exists in all locales, translated', () => {
-    assert.equal(FILES.length, 10, 'all ten catalogs present: ' + FILES);
+    assert.equal(FILES.length, 11, 'all eleven catalogs present: ' + FILES);
     const en = JSON.parse(fs.readFileSync(path.join(LOCALE_DIR, 'en.json')));
     for (const key of FAM) {
         const full = 'uplift.chat.' + key;

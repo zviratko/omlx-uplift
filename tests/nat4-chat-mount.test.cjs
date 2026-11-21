@@ -1181,7 +1181,7 @@ test('CHAT-3R: three-region layout — histories left, model/profile top, contro
                 `${key} translated in ${loc}, not an EN fill`);
         }
     }
-    // ROUND 13/14 section captions: present in all ten; cs keeps the
+    // ROUND 13/14 section captions: present in all eleven; cs keeps the
     // established term 'Sampling' in ENGLISH (user terminology policy) —
     // everything else must read as a real translation
     const R13_KEYS = { stt_settings: 'Input settings', voice_section: 'Voice',

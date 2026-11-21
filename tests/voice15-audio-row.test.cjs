@@ -10,7 +10,7 @@
      .live accent for realtime, and hides when empty; unknown details
      print verbatim;
    - wiring: renderLive calls ifActivity; the Idle line yields to it;
-   - CSS + all ten locales carry the labels. */
+   - CSS + all eleven locales carry the labels. */
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
@@ -139,9 +139,9 @@ test('V15: CSS carries the activity row', () => {
     assert.ok(/\.if-act\.live \{[^}]*--accent/.test(css));
 });
 
-test('V15: all ten locales carry every mapped label', () => {
+test('V15: all eleven locales carry every mapped label', () => {
     const locs = fs.readdirSync(LOCALES_DIR).filter(f => f.endsWith('.json'));
-    assert.strictEqual(locs.length, 10);
+    assert.strictEqual(locs.length, 11);
     const keys = ['transcribing', 'realtime', 'synthesizing', 'processing',
                   'embedding', 'reranking', 'deciding']
         .map(k => 'uplift.audio.' + k);

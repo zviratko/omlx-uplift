@@ -251,7 +251,7 @@ test('the uplift.patches.order_* keys exist in every locale with equal placehold
                   'uplift.patches.order_saved', 'uplift.patches.order_set'];
     const dir = path.join(STATIC_DIR, '..', 'locales');
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-    assert.equal(files.length, 10, 'all ten locale files are checked');
+    assert.equal(files.length, 11, 'all eleven locale files are checked');
     const en = JSON.parse(fs.readFileSync(path.join(dir, 'en.json'), 'utf8'));
     const ph = (s) => (s.match(/\{(\w+)\}/g) || []).sort().join(',');
     for (const f of files) {
