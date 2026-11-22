@@ -36,7 +36,7 @@ content is upstream PR jundot/omlx#5542 (linked, not vendored).
   40,960/73,728 tokens after 36.3 s, second request requeued with nothing stored,
   both completed all tokens.
 
-## Pitfall found on the way (omlx-uplift bug, not fixed here)
+## Pitfall found on the way (omlx-uplift bug, fixed in 6b5621b)
 Any omlx-dev keg python started with an omlx SOURCE checkout importable (cwd) runs
 `omlx_uplift.pth` -> `autopatch` -> `patchsync.sync_at_startup()`, which finds the
 checkout via `find_spec("omlx")`, sees no "omlx-dev" in the path, treats it as a vanilla
@@ -44,3 +44,5 @@ target and WRITES the omlx/both-scope patches into the checkout. A PYTHONPATH st
 not stop child processes that tests start with a clean env. During the PR suite run this
 put 4 uplift patches into the PR worktree; caught before the PR was opened. Workaround
 used: `chmod -R a-w omlx` on the tree under test, `git status` after the run.
+Fix: `patches.is_source_checkout()`; the boot sync and the tree doctor skip an omlx
+whose parent holds `.git`. Explicit tree_root callers are unchanged.
