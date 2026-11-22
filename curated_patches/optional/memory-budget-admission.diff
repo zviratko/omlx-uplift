@@ -1,0 +1,611 @@
+diff --git a/omlx/scheduler.py b/omlx/scheduler.py
+index bdee15b5..4d334c66 100644
+--- a/omlx/scheduler.py
++++ b/omlx/scheduler.py
+@@ -13175,6 +13175,298 @@ class Scheduler:
+         """Get number of running requests."""
+         return len(self.running)
+ 
++    # ------------------------------------------------------------------
++    # Memory-budget admission.
++    #
++    # The admission estimate (_admission_estimate) prices a new request
++    # against the memory in use NOW. A running request that is still
++    # prefilling or decoding will allocate more, and that future growth is
++    # invisible, so two large requests can both pass and then collide. And a
++    # request that does not fit now is rejected even when it would fit as
++    # soon as the running work finishes.
++    #
++    # The budget keeps a per-request reservation (the KV of the whole prompt
++    # plus a capped decode allowance) and admits a waiting request only when
++    #   current + not-yet-allocated part of every reservation
++    #           + its own reservation + the largest live prefill transient
++    # stays under the admission limit. A request that does not fit WAITS in
++    # the queue instead of being rejected; it is rejected (same
++    # prefill_memory_exceeded error as before) only after it has waited
++    # OMLX_ADMISSION_MAX_QUEUE_S. Smaller requests that fit may go ahead of
++    # a held or deferred head (backfill), until the held head has waited
++    # OMLX_ADMISSION_AGING_S; from then on the queue holds for it, so large
++    # requests do not starve. The first request always passes when nothing
++    # is admitted, as with the other guards, and the existing estimate,
++    # chunk guard and enforcer still protect every admitted request.
++    # OMLX_ADMISSION_BUDGET=0 restores the old behavior.
++    # ------------------------------------------------------------------
++    _BUDGET_SCAN_LIMIT = 16
++
++    @staticmethod
++    def _battr(obj: Any, name: str) -> Any:
++        """Budget markers live in the instance dict (mocks and stubs stay inert)."""
++        try:
++            return vars(obj).get(name)
++        except TypeError:
++            return None
++
++    @staticmethod
++    def _budget_env_float(name: str, default: float) -> float:
++        import os
++
++        raw = os.environ.get(name)
++        if raw is None or not raw.strip():
++            return default
++        try:
++            return float(raw)
++        except ValueError:
++            return default
++
++    @staticmethod
++    def _budget_enabled() -> bool:
++        import os
++
++        return os.environ.get("OMLX_ADMISSION_BUDGET", "1").strip().lower() not in (
++            "0",
++            "false",
++            "no",
++            "off",
++        )
++
++    def _budget_kv_bytes(self, tokens: int) -> int:
++        monitor = self.memory_monitor
++        if monitor is None or tokens <= 0:
++            return 0
++        return int(monitor.estimate_resident_kv_bytes(int(tokens), chunk_tokens=1))
++
++    def _budget_need(self, request: Request) -> tuple[int, int, int]:
++        """(reserved tokens, reserved KV bytes, prefill transient bytes)."""
++        cached = Scheduler._battr(request, "_budget_need_cache")
++        if cached is not None:
++            return cached
++        prompt = int(getattr(request, "num_prompt_tokens", 0) or 0) + _request_count(
++            request, "requeued_output_tokens"
++        )
++        reserve = int(
++            Scheduler._budget_env_float("OMLX_ADMISSION_DECODE_RESERVE", 2048.0)
++        )
++        max_tokens = getattr(getattr(request, "sampling_params", None), "max_tokens", None)
++        if isinstance(max_tokens, int) and max_tokens > 0:
++            reserve = min(reserve, max_tokens)
++        tokens = prompt + max(0, reserve)
++        kv = Scheduler._budget_kv_bytes(self, tokens)
++        transient = 0
++        est = self._admission_estimate(
++            num_prompt_tokens=prompt, cached_tokens=0, current=0
++        )
++        if est is not None:
++            transient = int(est.transient)
++        need = (tokens, kv, transient)
++        request._budget_need_cache = need
++        return need
++
++    def _budget_committed(self) -> tuple[int, int]:
++        """(KV still to be allocated by admitted requests, largest live transient)."""
++        outstanding = 0
++        transient = 0
++        tracker = get_prefill_tracker()
++        prefilling_ids = {r.request_id for r in self.prefilling}
++        for r in list(self.running.values()) + list(self.prefilling):
++            reserved = Scheduler._battr(r, "_budget_reserved_tokens")
++            if not reserved:
++                continue
++            if r.request_id in prefilling_ids:
++                entry = tracker.get(r.request_id) or {}
++                done = max(
++                    int(getattr(r, "cached_tokens", 0) or 0),
++                    int(entry.get("processed", 0) or 0),
++                )
++                transient = max(transient, int(Scheduler._battr(r, "_budget_transient") or 0))
++            else:
++                done = int(getattr(r, "num_prompt_tokens", 0) or 0) + len(
++                    getattr(r, "output_token_ids", None) or ()
++                )
++            if done < reserved:
++                outstanding += max(
++                    0,
++                    Scheduler._budget_kv_bytes(self, reserved)
++                    - Scheduler._budget_kv_bytes(self, done),
++                )
++        return outstanding, transient
++
++    def _budget_deferred(self, request: Request) -> bool:
++        """Same deferral checks the admission loop applies to its head."""
++        if self._should_defer_for_cache_freshness(request):
++            return True
++        prefetch = getattr(Scheduler, "_should_defer_for_ssd_prefetch", None)
++        if prefetch is not None and prefetch(self, request):
++            return True
++        return False
++
++    def _budget_pick_head(self) -> bool:
++        """Put the request to admit next at waiting[0]; False = admit none now.
++
++        Never raises: any failure falls back to the old head-of-line order.
++        """
++        if not Scheduler._budget_enabled() or not self.waiting:
++            return True
++        try:
++            return Scheduler._budget_pick_head_inner(self)
++        except Exception as exc:  # noqa: BLE001 - never break admission
++            logger.warning("Admission budget failed, using queue order: %s", exc)
++            return True
++
++    def _budget_pick_head_inner(self) -> bool:
++        admitted = self._num_admitted_requests()
++        limit = self._admission_limit_bytes() if self.memory_monitor is not None else 0
++        guard = bool(self._prefill_memory_guard) and limit > 0
++        outstanding, live_transient = (
++            Scheduler._budget_committed(self) if guard and admitted else (0, 0)
++        )
++        current = self._current_usage_bytes(refresh_mlx_active=False) if guard else 0
++        now = time.monotonic()
++        aging = Scheduler._budget_env_float("OMLX_ADMISSION_AGING_S", 60.0)
++        head_id = self.waiting[0].request_id
++        skipped: list[str] = []
++        held_any = False
++        for idx, request in enumerate(list(self.waiting)):
++            if idx >= Scheduler._BUDGET_SCAN_LIMIT:
++                break
++            fits = True
++            need = None
++            if guard and admitted:
++                need = Scheduler._budget_need(self, request)
++                _tokens, kv, transient = need
++                credit = 0
++                try:
++                    credit = int(self._releasable_hot_cache_credit(kv))
++                except Exception:  # noqa: BLE001
++                    credit = 0
++                projected = (
++                    current + outstanding + kv + max(live_transient, transient) - credit
++                )
++                fits = projected <= limit
++                if Scheduler._battr(request, "_budget_last_fit") is not fits:
++                    request._budget_last_fit = fits
++                    logger.debug(
++                        "Admission budget: %s %s (projected %s = in use %s + still "
++                        "to be allocated %s + own KV %s + transient %s - hot-cache "
++                        "credit %s; limit %s; %d admitted)",
++                        request.request_id,
++                        "fits" if fits else "does not fit",
++                        format_bytes(projected),
++                        format_bytes(current),
++                        format_bytes(outstanding),
++                        format_bytes(kv),
++                        format_bytes(max(live_transient, transient)),
++                        format_bytes(credit),
++                        format_bytes(limit),
++                        admitted,
++                    )
++            if not fits:
++                held_any = True
++                if Scheduler._battr(request, "_budget_held_since") is None:
++                    request._budget_held_since = now
++                    logger.info(
++                        "Admission budget: holding %s in the queue (needs %s KV + "
++                        "%s prefill transient; in use %s, still to be allocated "
++                        "by %d admitted request(s) %s, limit %s)",
++                        request.request_id,
++                        format_bytes(need[1]),
++                        format_bytes(need[2]),
++                        format_bytes(current),
++                        admitted,
++                        format_bytes(outstanding),
++                        format_bytes(limit),
++                    )
++                if now - request._budget_held_since >= aging:
++                    # Held long enough: stop letting later requests pass it.
++                    return False
++                skipped.append(request.request_id)
++                continue
++            if Scheduler._budget_deferred(self, request):
++                skipped.append(request.request_id)
++                continue
++            held_since = Scheduler._battr(request, "_budget_held_since")
++            if held_since is not None:
++                logger.info(
++                    "Admission budget: admitting %s after %.1fs held for memory",
++                    request.request_id,
++                    now - held_since,
++                )
++                request._budget_held_since = None
++            if idx > 0:
++                del self.waiting[idx]
++                self.waiting.appendleft(request)
++                logger.info(
++                    "Admission budget: admitting %s ahead of %s (held for memory "
++                    "or deferred: %s)",
++                    request.request_id,
++                    head_id,
++                    ", ".join(skipped),
++                )
++            tokens, _kv, transient = (
++                need if need is not None else Scheduler._budget_need(self, request)
++            )
++            request._budget_reserved_tokens = tokens
++            request._budget_transient = transient
++            request._budget_need_cache = None  # a requeue changes the size
++            return True
++        # Nothing admissible. Held for memory: hold the queue. Only deferred:
++        # let the loop run its own head checks (upstream behavior exactly).
++        return not held_any
++
++    def _budget_expire_waiting(self) -> list[RequestOutput]:
++        """Reject requests held for memory past OMLX_ADMISSION_MAX_QUEUE_S."""
++        if not Scheduler._budget_enabled() or not self.waiting:
++            return []
++        max_wait = Scheduler._budget_env_float("OMLX_ADMISSION_MAX_QUEUE_S", 600.0)
++        if max_wait <= 0:
++            return []
++        now = time.monotonic()
++        out: list[RequestOutput] = []
++        for request in list(self.waiting):
++            if Scheduler._battr(request, "_budget_held_since") is None:
++                continue
++            arrived = getattr(request, "arrival_time", None) or request._budget_held_since
++            waited = now - arrived
++            if waited < max_wait:
++                continue
++            request_id = request.request_id
++            try:
++                self.waiting.remove(request)
++            except ValueError:
++                continue
++            self._release_paged_cache_for_request(request_id)
++            self.requests.pop(request_id, None)
++            self._clear_request_admission_bookkeeping(request_id)
++            get_prefill_tracker().remove(request_id)
++            _tokens, kv, transient = Scheduler._budget_need(self, request)
++            limit = self._admission_limit_bytes()
++            message = (
++                f"Request waited {waited:.0f}s in the queue for memory and was not "
++                f"admitted (needs about {format_bytes(kv)} KV + "
++                f"{format_bytes(transient)} prefill transient, limit "
++                f"{format_bytes(limit)}). Retry later, reduce context length, or "
++                "raise OMLX_ADMISSION_MAX_QUEUE_S."
++            )
++            logger.warning("Admission budget: rejecting %s: %s", request_id, message)
++            out.append(
++                _prefill_memory_error_output(
++                    request_id,
++                    message,
++                    estimated_bytes=int(kv + transient),
++                    limit_bytes=int(limit),
++                )
++            )
++        return out
++
++    def _budget_queue_instead_of_reject(self) -> bool:
++        """Route preflight: True = let a busy engine queue the request."""
++        if not Scheduler._budget_enabled():
++            return False
++        return bool(self._num_admitted_requests() or self.waiting)
++
+     def _num_admitted_requests(self) -> int:
+         """Return requests already occupying scheduler capacity."""
+         return len(self.running) + len(self.prefilling)
+@@ -13464,6 +13756,14 @@ class Scheduler:
+                 peak=est.kv_exact + est.transient,
+                 hard_limit=admission_limit,
+             )
++            if Scheduler._budget_queue_instead_of_reject(self):
++                logger.info(
++                    "Preflight: %s does not fit while other requests run (%s); "
++                    "queued for the admission budget instead of rejected",
++                    request_id,
++                    message,
++                )
++                return
+ 
+             logger.warning(
+                 "Preflight rejected (%d tokens, cached=%d, request_id=%s): %s",
+@@ -13660,6 +13960,8 @@ class Scheduler:
+         # Track SpecPrefill: these requests must be alone (RoPE patching affects whole model)
+         batch_specprefill_status: bool | None = None
+ 
++        rejected_outputs.extend(Scheduler._budget_expire_waiting(self))
++
+         while (
+             self.waiting
+             and self._num_admitted_requests() < self._effective_max_num_seqs()
+@@ -13764,6 +14066,12 @@ class Scheduler:
+                         rejected_outputs.append(stalled)
+                     break
+ 
++            if not Scheduler._budget_pick_head(self):
++                # Held for memory: the head is not stalled, it waits its turn.
++                self._clear_memory_admission_blocker(self.waiting[0].request_id)
++                self._clear_store_cache_admission_blocker(self.waiting[0].request_id)
++                break
++
+             request = self.waiting[0]
+             self._clear_memory_admission_blocker(request.request_id)
+             self._clear_store_cache_admission_blocker(request.request_id)
+diff --git a/tests/test_admission_budget.py b/tests/test_admission_budget.py
+new file mode 100644
+index 00000000..e04e1d34
+--- /dev/null
++++ b/tests/test_admission_budget.py
+@@ -0,0 +1,265 @@
++"""Memory-budget admission: queue instead of reject, reserve future KV, backfill."""
++
++from __future__ import annotations
++
++import logging
++import time
++from collections import deque
++from types import SimpleNamespace
++
++import pytest
++
++from omlx.exceptions import PrefillMemoryExceededError
++from omlx.scheduler import Scheduler
++
++GB = 1024**3
++KV_PER_TOKEN = 1024 * 1024  # 1 MB per token keeps the numbers readable
++
++
++class _Monitor:
++    @staticmethod
++    def estimate_resident_kv_bytes(tokens, *, chunk_tokens=1):
++        return tokens * KV_PER_TOKEN
++
++
++def _req(rid, prompt_tokens, max_tokens=0, arrival=None):
++    r = SimpleNamespace(
++        request_id=rid,
++        num_prompt_tokens=prompt_tokens,
++        sampling_params=SimpleNamespace(max_tokens=max_tokens),
++        cached_tokens=0,
++        output_token_ids=[],
++    )
++    r.arrival_time = time.monotonic() if arrival is None else arrival
++    return r
++
++
++def _sched(*, current_gb=10, limit_gb=100, transient_gb=0, deferred=()):
++    s = SimpleNamespace()
++    s.waiting = deque()
++    s.running = {}
++    s.prefilling = deque()
++    s.requests = {}
++    s.memory_monitor = _Monitor()
++    s._prefill_memory_guard = True
++    s._memory_hard_limit_bytes = limit_gb * GB
++    s._num_admitted_requests = lambda: len(s.running) + len(s.prefilling)
++    s._admission_limit_bytes = lambda: limit_gb * GB
++    s._current_usage_bytes = lambda refresh_mlx_active=True: current_gb * GB
++    s._releasable_hot_cache_credit = lambda own: 0
++    s._should_defer_for_cache_freshness = lambda r: r.request_id in deferred
++    s._admission_estimate = lambda **kw: SimpleNamespace(
++        transient=transient_gb * GB,
++        kv_exact=kw["num_prompt_tokens"] * KV_PER_TOKEN,
++        estimated=kw["current"] + kw["num_prompt_tokens"] * KV_PER_TOKEN + transient_gb * GB,
++        floor_chunk=1,
++        kv_len=kw["num_prompt_tokens"],
++    )
++    s.released = []
++    s._release_paged_cache_for_request = lambda rid: s.released.append(rid)
++    s._clear_request_admission_bookkeeping = lambda rid: None
++    return s
++
++
++@pytest.fixture(autouse=True)
++def _env(monkeypatch):
++    for name in (
++        "OMLX_ADMISSION_BUDGET",
++        "OMLX_ADMISSION_MAX_QUEUE_S",
++        "OMLX_ADMISSION_AGING_S",
++        "OMLX_ADMISSION_DECODE_RESERVE",
++    ):
++        monkeypatch.delenv(name, raising=False)
++    # The SSD prefetch gate may or may not exist in this tree; keep it inert.
++    monkeypatch.setattr(
++        Scheduler, "_should_defer_for_ssd_prefetch", lambda self, r: False, raising=False
++    )
++
++
++def _admit(s, r, reserved):
++    r._budget_reserved_tokens = reserved
++    s.running[r.request_id] = r
++
++
++class TestPickHead:
++    def test_idle_engine_admits_head_whatever_its_size(self):
++        s = _sched(current_gb=10, limit_gb=20)
++        big = _req("big", 500_000)
++        s.waiting.extend([big])
++        assert Scheduler._budget_pick_head(s) is True
++        assert s.waiting[0] is big
++        assert big._budget_reserved_tokens == 500_000 + 2048  # default decode reserve
++
++    def test_reserves_future_growth_of_running_requests(self):
++        # 10 GB in use, running request reserved 60 GB of KV but holds none yet.
++        s = _sched(current_gb=10, limit_gb=100)
++        running = _req("run", 0)  # nothing allocated yet
++        _admit(s, running, 60 * 1024)
++        new = _req("new", 40 * 1024)
++        s.waiting.append(new)
++        # 10 + 60 (outstanding) + 40 = 110 GB > 100 GB -> held, not admitted.
++        assert Scheduler._budget_pick_head(s) is False
++        assert "_budget_held_since" in vars(new)
++        # Once the running request has allocated its KV, only `current` counts it.
++        running.output_token_ids = []
++        running.num_prompt_tokens = 60 * 1024
++        s._current_usage_bytes = lambda refresh_mlx_active=True: 50 * GB
++        # 50 + 0 + 40 = 90 GB -> fits.
++        assert Scheduler._budget_pick_head(s) is True
++        assert vars(new).get("_budget_held_since") is None
++
++    def test_small_request_backfills_past_held_head(self, caplog):
++        s = _sched(current_gb=50, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        big = _req("big", 80 * 1024)
++        small = _req("small", 1024)
++        s.waiting.extend([big, small])
++        with caplog.at_level(logging.INFO, logger="omlx.scheduler"):
++            assert Scheduler._budget_pick_head(s) is True
++        assert list(s.waiting) == [small, big]
++        assert "holding big" in caplog.text
++        assert "admitting small ahead of big" in caplog.text
++
++    def test_decision_logged_once_per_change(self, caplog):
++        s = _sched(current_gb=95, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        s.waiting.append(_req("a", 10 * 1024))
++        with caplog.at_level(logging.DEBUG, logger="omlx.scheduler"):
++            for _ in range(50):
++                Scheduler._budget_pick_head(s)
++        assert caplog.text.count("Admission budget: a does not fit") == 1
++
++    def test_aged_held_head_stops_backfill(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_AGING_S", "30")
++        s = _sched(current_gb=50, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        big = _req("big", 80 * 1024)
++        big._budget_held_since = time.monotonic() - 31
++        small = _req("small", 1024)
++        s.waiting.extend([big, small])
++        assert Scheduler._budget_pick_head(s) is False
++        assert list(s.waiting) == [big, small]
++
++    def test_deferred_head_lets_next_request_in(self):
++        s = _sched(deferred={"head"})
++        _admit(s, _req("run", 1), 1)
++        head, nxt = _req("head", 1024), _req("next", 1024)
++        s.waiting.extend([head, nxt])
++        assert Scheduler._budget_pick_head(s) is True
++        assert s.waiting[0] is nxt
++
++    def test_only_deferred_requests_fall_back_to_upstream_head_path(self):
++        s = _sched(deferred={"head", "next"})
++        _admit(s, _req("run", 1), 1)
++        head, nxt = _req("head", 1024), _req("next", 1024)
++        s.waiting.extend([head, nxt])
++        # True + unchanged order: the loop then runs its own deferral checks.
++        assert Scheduler._budget_pick_head(s) is True
++        assert list(s.waiting) == [head, nxt]
++
++    def test_ssd_prefetch_deferral_is_skipped_too(self, monkeypatch):
++        monkeypatch.setattr(
++            Scheduler,
++            "_should_defer_for_ssd_prefetch",
++            lambda self, r: r.request_id == "head",
++            raising=False,
++        )
++        s = _sched()
++        _admit(s, _req("run", 1), 1)
++        head, nxt = _req("head", 1024), _req("next", 1024)
++        s.waiting.extend([head, nxt])
++        assert Scheduler._budget_pick_head(s) is True
++        assert s.waiting[0] is nxt
++
++    def test_nothing_fits(self):
++        s = _sched(current_gb=95, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        s.waiting.extend([_req("a", 10 * 1024), _req("b", 10 * 1024)])
++        assert Scheduler._budget_pick_head(s) is False
++
++    def test_decode_reserve_capped_by_max_tokens(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_DECODE_RESERVE", "4096")
++        s = _sched()
++        assert Scheduler._budget_need(s, _req("a", 100, max_tokens=50))[0] == 150
++        assert Scheduler._budget_need(s, _req("b", 100, max_tokens=0))[0] == 4196
++
++    def test_largest_live_transient_is_charged(self):
++        s = _sched(current_gb=10, limit_gb=90, transient_gb=5)
++        pre = _req("pre", 1024)
++        pre._budget_reserved_tokens = 1024
++        pre._budget_transient = 30 * GB
++        s.prefilling.append(pre)
++        new = _req("new", 50 * 1024)
++        s.waiting.append(new)
++        # 10 + 1 (pre's KV still to allocate) + 50 + max(30, 5) = 91 GB > 90 GB;
++        # without the live transient it would be 66 GB and fit.
++        assert Scheduler._budget_pick_head(s) is False
++
++    def test_disabled_by_env(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_BUDGET", "0")
++        s = _sched(current_gb=95, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        s.waiting.append(_req("a", 50 * 1024))
++        assert Scheduler._budget_pick_head(s) is True
++        assert Scheduler._budget_expire_waiting(s) == []
++
++    def test_failure_falls_back_to_queue_order(self):
++        s = _sched()
++        _admit(s, _req("run", 1), 1)
++        s.waiting.append(_req("a", 1))
++
++        def boom(**_kw):
++            raise RuntimeError("estimate broke")
++
++        s._admission_estimate = boom
++        assert Scheduler._budget_pick_head(s) is True
++
++
++class TestExpire:
++    def test_held_request_past_max_wait_is_rejected(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_MAX_QUEUE_S", "10")
++        s = _sched()
++        old = _req("old", 1024, arrival=time.monotonic() - 11)
++        old._budget_held_since = time.monotonic() - 5
++        young = _req("young", 1024, arrival=time.monotonic() - 11)  # never held
++        s.waiting.extend([old, young])
++        s.requests = {"old": old, "young": young}
++        out = Scheduler._budget_expire_waiting(s)
++        assert [o.request_id for o in out] == ["old"]
++        assert out[0].error_code == "prefill_memory_exceeded"
++        assert "waited" in out[0].error
++        assert list(s.waiting) == [young]
++        assert s.released == ["old"] and "old" not in s.requests
++
++    def test_zero_disables_the_limit(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_MAX_QUEUE_S", "0")
++        s = _sched()
++        r = _req("r", 1, arrival=time.monotonic() - 10_000)
++        r._budget_held_since = r.arrival_time
++        s.waiting.append(r)
++        assert Scheduler._budget_expire_waiting(s) == []
++
++
++class TestRoutePreflight:
++    def _preflight_sched(self, busy):
++        s = _sched(current_gb=90, limit_gb=100, transient_gb=1)
++        s._memory_hard_limit_bytes = 100 * GB
++        s._format_rejection_message = lambda **kw: "too big"
++        if busy:
++            _admit(s, _req("run", 1), 1)
++        return s
++
++    def test_busy_engine_queues_instead_of_400(self):
++        s = self._preflight_sched(busy=True)
++        Scheduler.preflight_or_raise(s, num_prompt_tokens=20 * 1024, request_id="q")
++
++    def test_idle_engine_still_rejects(self):
++        s = self._preflight_sched(busy=False)
++        with pytest.raises(PrefillMemoryExceededError):
++            Scheduler.preflight_or_raise(s, num_prompt_tokens=20 * 1024, request_id="q")
++
++    def test_busy_engine_rejects_when_disabled(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_BUDGET", "0")
++        s = self._preflight_sched(busy=True)
++        with pytest.raises(PrefillMemoryExceededError):
++            Scheduler.preflight_or_raise(s, num_prompt_tokens=20 * 1024, request_id="q")
