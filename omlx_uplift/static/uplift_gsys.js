@@ -219,7 +219,7 @@ const GS_LABELS = {
         gdn_store_opts: [['auto','Auto (recommended)'],['ssd_sidecar','Dedicated SSD Sidecar'],
                          ['embedded','With KV Cache']],
         gdn_pend: 'SSD Write Buffer',
-        gdn_pend_hint: 'Maximum RAM used by encoded snapshots waiting to be written to SSD. When the buffer is full, cache writes pause until space is available.',
+        gdn_pend_hint: 'Maximum RAM used by encoded snapshots waiting to be written to SSD. When the buffer is full, cache writes pause until space is available. A size without a unit is read as MB.',
         gdn_prec: 'SSD Snapshot Precision',
         gdn_prec_hint: 'Controls GDN state stored in SSD sidecars only. FP32 is the exact default. Reduced-precision modes use less space but introduce reconstruction error. Restored state always runs in FP32.',
         gdn_prec_opts: [['fp32','FP32 (exact, recommended)'],['rht_int16','RHT + int16'],
@@ -364,12 +364,26 @@ function gsMarkSections() {
     gsTabBadges();   // GS-TAB: same dirty truth feeds the section tabs
 }
 function renderDirtyList() {
+    const host = document.getElementById('gs-changes');
     UDirty.renderChangesBox(
-        document.getElementById('gs-changes'),
+        host,
         Object.keys(gsDirty).map(k => ({
             key: k, orig: gsOrigFlat(k), cur: gsDirty[k],
             isSecret: SECRET_KEYS.has(k), display: gsDisplay })),
         C.tf);
+    // cache fields ride the engine's model-unload path (GS_MODEL_UNLOAD_FLATS
+    // mirrors its cache_changed trigger): state it where the user reviews the
+    // queue, before pressing SAVE (bug 2026-11-22: zero indication)
+    if (host && Object.keys(gsDirty).some(
+            k => window.UpliftGSpec.GS_MODEL_UNLOAD_FLATS.has(k))) {
+        const note = document.createElement('div');
+        note.className = 'gs-unload-note';
+        const en = 'Saving unloads all loaded models; they reload on the next request.';
+        note.textContent = C.tf('uplift.gs.unloads_notice', en);
+        note.dataset.i18n = 'uplift.gs.unloads_notice';
+        note.dataset.en = en;
+        host.append(note);
+    }
 }
 function gsSaveBtn() { return document.getElementById('gs-save'); }
 function gsUpdateSaveBtn() {
@@ -390,7 +404,10 @@ function gsUpdateSaveBtn() {
            : (gsRestartPending ? '▶ RESTART SERVER' : 'SAVE'));
     b.title = n ? (restartQ
         ? 'Some queued changes need a server restart to take effect. First click saves; the button then becomes RESTART SERVER.'
-        : 'Apply ' + n + ' queued change' + (n > 1 ? 's' : ''))
+        : (Object.keys(gsDirty).some(k => window.UpliftGSpec.GS_MODEL_UNLOAD_FLATS.has(k))
+            ? C.tf('uplift.gs.unloads_notice',
+                   'Saving unloads all loaded models; they reload on the next request.')
+            : 'Apply ' + n + ' queued change' + (n > 1 ? 's' : '')))
         : (gsForceArmed
             ? 'No supervisor was detected — this shuts omlx down and relies on your watchdog (launchd/menubar) to bring it back.'
             : 'No queued changes');
@@ -439,14 +456,23 @@ async function gsCommit() {
         return;
     }
     gsSaving = true;
-    const sb = gsSaveBtn(); if (sb) sb.disabled = true;
+    const sb = gsSaveBtn();
+    if (sb) {
+        // a save can run for seconds (the engine unloads models inside the
+        // request under load): SAY it on the button, do not just silently
+        // disable it (bug 2026-11-22: the click read as a no-op, users
+        // pressed again)
+        sb.disabled = true;
+        sb.classList.add('saving');
+        sb.textContent = 'SAVING…';
+    }
     let okAll = true;
     try {
         if (Object.keys(classicFields).length) okAll = await gsSaveNow(classicFields);
         if (okAll && Object.keys(envFields).length) okAll = await envSave(envFields);
     } finally {
         gsSaving = false;
-        if (sb) sb.disabled = false;
+        if (sb) { sb.disabled = false; sb.classList.remove('saving'); }
     }
     if (okAll) {
         Object.keys(gsDirty).forEach(k => delete gsDirty[k]);
@@ -718,6 +744,11 @@ function gsText(sec, field, flat, L, extra) {
         let val = inp.value;
         if (extra.number) val = val === '' ? null : Number(val);
         if (extra.bool) val = inp.checked;
+        // size row with a default unit: a plain number means that unit,
+        // never the engine's raw-bytes reading (SSD Write Buffer)
+        if (extra.sizeUnit) {
+            val = window.UpliftGSpec.sizeInputWithUnit(val, extra.sizeUnit);
+        }
         gsQueueSave(flat, val);
         // FE-6 step 3: the old `reload` escape hatch rebuilt the WHOLE page
         // on commit (api_key). No conditional row reads api_key; the focus
@@ -1884,7 +1915,7 @@ function gsSpecRow(it, L, ctx) {
         control = gsText(sec, c.field, flat, L, {
             number: c.k === 'num', bool: c.checked, type: c.type,
             placeholder: gsRef(L, c.ph), list: c.list,
-            min: c.min, max: c.max, step: c.step,
+            min: c.min, max: c.max, step: c.step, sizeUnit: c.sizeUnit,
         });
     }
     if (c.attach) c.attach(control, L, ctx);
@@ -2382,7 +2413,7 @@ const GS_SPEC = [
     // below mirrors classic's :disabled expression.
     {sec: 'adv', lab: 'adv.gdn_pend', hint: 'adv.gdn_pend_hint', ctl: {
         k: 'text', sec: 'cache', field: 'gdn_ssd_pending_max_size',
-        flat: 'gdn_ssd_pending_max_size', ph: '512MB'}},
+        flat: 'gdn_ssd_pending_max_size', ph: '512MB', sizeUnit: 'MB'}},
     {sec: 'adv', lab: 'adv.gdn_prec', hint: 'adv.gdn_prec_hint', ctl: {
         k: 'sel', sec: 'cache', field: 'gdn_sidecar_precision', flat: 'gdn_sidecar_precision',
         opts: 'adv.gdn_prec_opts',

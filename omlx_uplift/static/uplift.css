@@ -2383,10 +2383,17 @@ label.se-row.pending-restart > .se-ctl > select {
 .changelist .ch-line { font: 400 11px/1.5 var(--mono); white-space: pre-wrap;
     word-break: break-all; }
 .changelist .ch-new { color: var(--accent); }
+/* cache-field saves unload loaded models (engine cache_changed path):
+   the note rides the CHANGES box, warn-colored, prose not mono */
+.changelist .gs-unload-note { color: var(--warn); font: 400 11px/1.5 var(--sans);
+    margin-top: 4px; }
 .savebtn { font-weight: 500; letter-spacing: 0.06em; }
 .savebtn.queued { background: var(--accent); border-color: var(--accent); color: var(--ink-on-accent-soft); }
 .savebtn.restart-mode { background: var(--red); border-color: var(--red); color: var(--ink-on-red); }
 .savebtn.force-mode { background: var(--warn, #e8a020); border-color: var(--warn, #e8a020); color: var(--ink-on-accent-soft); }
+/* in-flight save: the label already reads SAVING…; dim + busy cursor make the
+   disabled state visible instead of looking like an ignored click */
+.savebtn.saving { opacity: 0.65; cursor: progress; }
 .modal.editor .editor-bar .savebtn.restart-mode { background: var(--red);
     border-color: var(--red); color: var(--ink-on-red); }
 .modal.editor .editor-bar .savebtn.queued { background: var(--accent);

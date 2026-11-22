@@ -49,7 +49,10 @@ const gsys = fs.readFileSync(
 test('UP-19(5): single-flight save + button disable', () => {
     assert.match(gsys, /let gsSaving = false;/);
     assert.match(gsys, /async function gsCommit\(\) \{\n    if \(gsSaving\) return;/);
-    assert.match(gsys, /gsSaving = true;\n    const sb = gsSaveBtn\(\); if \(sb\) sb\.disabled = true;/);
+    // 2026-11-22: the silent disable became a visible SAVING state; the
+    // UP-19(5) contract is unchanged - guard flag + button disabled while
+    // the POST is in flight.
+    assert.match(gsys, /gsSaving = true;\s*const sb = gsSaveBtn\(\);\s*if \(sb\) \{[\s\S]{0,300}?sb\.disabled = true;/);
 });
 
 test('UP-19(2): validation runs BEFORE any POST and can veto', () => {
@@ -93,4 +96,57 @@ test('UP-19(7): skip-auth row locks off-loopback; (9) dirs queue; (9) live selec
     assert.match(gsys, /gsQueueSave\('model_dirs', nd\);/);
     assert.match(gsys, /flat === 'ui_language' \|\| flat === 'idle_timeout_seconds'\) gsCommit\(\);/);
     assert.match(gsys, /input\[type=password\]/);           // UP-19(6) eye toggle
+});
+
+test('SSD Write Buffer: a plain number saves as MB, never raw bytes', () => {
+    const S = G.sizeInputWithUnit;
+    assert.equal(S('512', 'MB'), '512MB');
+    assert.equal(S(' 1.5 ', 'MB'), '1.5MB');
+    assert.equal(S('512MB', 'MB'), '512MB', 'explicit unit passes through');
+    assert.equal(S('2GB', 'MB'), '2GB', 'other units pass through');
+    assert.equal(S('', 'MB'), '', 'empty passes through (pre-existing behavior)');
+    assert.equal(S(null, 'MB'), '');
+    assert.equal(S('abc', 'MB'), 'abc', 'junk passes to server validation');
+    // wiring: the row declares the unit, gsText applies it before queueing
+    assert.match(gsys, /flat: 'gdn_ssd_pending_max_size', ph: '512MB', sizeUnit: 'MB'/);
+    assert.match(gsys, /sizeUnit: c\.sizeUnit,/);
+    assert.match(gsys, /if \(extra\.sizeUnit\) \{\s*val = window\.UpliftGSpec\.sizeInputWithUnit\(val, extra\.sizeUnit\);/);
+});
+
+test('save feedback: SAVING state on the button while the POST runs', () => {
+    assert.match(gsys, /sb\.classList\.add\('saving'\);/);
+    assert.match(gsys, /sb\.textContent = 'SAVING…';/);
+    assert.match(gsys, /sb\.disabled = false; sb\.classList\.remove\('saving'\);/);
+    const css = fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.css'), 'utf8');
+    assert.match(css, /\.savebtn\.saving \{ opacity: 0\.65; cursor: progress; \}/);
+});
+
+test('cache saves say they unload models (mirror of the engine trigger)', () => {
+    const S = G.GS_MODEL_UNLOAD_FLATS;
+    assert.ok(S.has('gdn_ssd_pending_max_size'), 'SSD Write Buffer warns');
+    for (const f of ['cache_enabled', 'ssd_cache_dir', 'ssd_cache_max_size',
+        'hot_cache_only', 'hot_cache_max_size', 'hot_cache_write_through',
+        'gdn_snapshot_storage', 'gdn_ssd_split_enabled', 'gdn_sidecar_precision',
+        'initial_cache_blocks'])
+        assert.ok(S.has(f), f);
+    assert.ok(!S.has('log_level'), 'non-cache fields stay quiet');
+    // the note renders in the CHANGES box and the button tooltip reads it
+    assert.match(gsys, /k => window\.UpliftGSpec\.GS_MODEL_UNLOAD_FLATS\.has\(k\)/);
+    assert.match(gsys, /note\.className = 'gs-unload-note';/);
+    assert.match(gsys, /note\.dataset\.i18n = 'uplift\.gs\.unloads_notice';/);
+    const css = fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift.css'), 'utf8');
+    assert.match(css, /\.changelist \.gs-unload-note \{/);
+    // key present in every locale, non-empty, translated (not the EN copy)
+    const en = JSON.parse(fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'locales', 'en.json'), 'utf8'));
+    for (const f of fs.readdirSync(path.join(__dirname, '..', 'omlx_uplift', 'locales'))) {
+        if (!f.endsWith('.json')) continue;
+        const d = JSON.parse(fs.readFileSync(
+            path.join(__dirname, '..', 'omlx_uplift', 'locales', f), 'utf8'));
+        const v = d['uplift.gs.unloads_notice'];
+        assert.ok(typeof v === 'string' && v.length > 10, f + ': missing key');
+        if (f !== 'en.json') assert.notEqual(v, en['uplift.gs.unloads_notice'], f + ': untranslated');
+    }
 });

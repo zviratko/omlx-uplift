@@ -191,6 +191,15 @@ function sizeToBytes(str) {
     if (!m) return null;
     return parseFloat(m[1]) * (SIZE_UNITS[(m[2] || 'GB').toUpperCase()] || 1);
 }
+/* UX size rows (SSD Write Buffer, 2026-11-22): the engine's parse_size reads
+   a bare number as BYTES, so a plain "512" silently meant 512 B. A row that
+   declares a default unit sends the number with that unit appended; text
+   that already carries a unit passes through untouched. The appended unit
+   must be one the engine understands (B/KB/MB/GB/TB - it rejects "MiB"). */
+function sizeInputWithUnit(val, unit) {
+    const s = String(val ?? '').trim();
+    return /^\d+(?:\.\d+)?$/.test(s) ? s + unit : s;
+}
 // classic _parseSettingsGB (6528): GB value or null (unparseable/empty)
 function parseSettingsGB(val) {
     if (!val) return null;
@@ -423,11 +432,25 @@ function updateNudge(d) {
     };
 }
 
+/* Mirror of the engine's cache_changed trigger (admin/routes.py
+   update_global_settings): saving one of these flats with a new value makes
+   the engine UNLOAD ALL LOADED MODELS inside the save request itself (they
+   reload on the next request). The UX says so up front, and the save can
+   legitimately take seconds under load because of it (bug 2026-11-22). */
+const GS_MODEL_UNLOAD_FLATS = new Set([
+    'cache_enabled', 'ssd_cache_dir', 'ssd_cache_max_size',
+    'hot_cache_only', 'hot_cache_max_size', 'hot_cache_write_through',
+    'gdn_snapshot_storage', 'gdn_ssd_split_enabled',
+    'gdn_ssd_pending_max_size', 'gdn_sidecar_precision',
+    'initial_cache_blocks',
+]);
+
 return { GS_MAP, GS_PAYLOAD_SKIP, INTEG_PREFIXED,
          isLoopbackBindHost, requiredFieldsError, GS_REQUIRED_FLATS,
          // UP-41 pure machine (cache limits, memory guard, host preset,
          // section deep-links) + UP-26 (launch commands, update nudge)
          sizeToBytes, parseSettingsGB, cachePercentOf, percentToCacheString,
+         sizeInputWithUnit, GS_MODEL_UNLOAD_FLATS,
          hotCachePercentOf, hotCacheStringFromPercent, hotCachePercentFromGB,
          wiredLimitWarned, wiredLimitCommand, guardTierText,
          templateSegments, customGuardCeilingGB,
