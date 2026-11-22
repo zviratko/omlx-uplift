@@ -1,0 +1,10 @@
+{
+  "description": "A slow SSD cache drive no longer freezes the server during a memory-pressure requeue. At hard memory pressure the enforcer stores every running request's KV to the SSD cache and requeues it instead of aborting; that store runs on the inference thread at the drive's write speed, so all decoding stopped and aborts were ignored until it finished (measured on an SD card: one 216 MB block per ~10 s, minutes for two 150k-token requests; the server had to be killed). Now the store stops between blocks when an abort is pending or after OMLX_MEMORY_REQUEUE_STORE_BUDGET_S (default 30 s, 0 = no limit, the old behavior). Blocks already stored stay a valid prefix and the rest is recomputed after the requeue. Measured: requeue of two 150k-token prefills froze the engine 36.3 s instead of minutes, the first request resumed from 40,960 stored tokens, both completed. Limit: the freeze can exceed the budget by one block write. On a fast internal SSD the budget is never reached. Upstream PR jundot/omlx#5542.",
+  "source": {
+    "kind": "github_pr",
+    "repo": "jundot/omlx",
+    "pr": 5542
+  },
+  "reversal": false,
+  "scope": "both"
+}
