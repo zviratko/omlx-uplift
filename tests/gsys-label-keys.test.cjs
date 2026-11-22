@@ -38,6 +38,22 @@ function extractLabels() {
             else if (ch === inStr) inStr = null;
             continue;
         }
+        // Comment-aware (2026-11-22): apostrophes in comments used to throw
+        // the string state off - the walk survived only on whole-file quote
+        // parity, so one new "engine's" comment broke all three tests here.
+        // Strings are resolved by the inStr branch above, so 'http://...'
+        // inside a value stays a string.
+        if (ch === '/' && src[j + 1] === '/') {
+            j = src.indexOf('\n', j);
+            if (j < 0) break;
+            continue;
+        }
+        if (ch === '/' && src[j + 1] === '*') {
+            j = src.indexOf('*/', j + 2);
+            if (j < 0) break;
+            j++;
+            continue;
+        }
         if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
         if (ch === '{' || ch === '[' || ch === '(') depth++;
         else if (ch === '}' || ch === ']' || ch === ')') {
