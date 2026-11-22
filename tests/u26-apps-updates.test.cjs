@@ -15,6 +15,7 @@ const { STATIC_DIR } = require('./static-src.cjs');
 const G = require(path.join(STATIC_DIR, 'uplift_gspec.js'));
 const helper = fs.readFileSync(path.join(STATIC_DIR, 'uplift_helper.js'), 'utf8');
 const css = fs.readFileSync(path.join(STATIC_DIR, 'uplift.css'), 'utf8');
+const boot = fs.readFileSync(path.join(STATIC_DIR, 'uplift_boot.js'), 'utf8');
 
 /* ---- item 2: shellQuote / launch templating (classic 3816/4230) ------- */
 test('shellQuote is POSIX-safe (classic verbatim)', () => {
@@ -173,6 +174,18 @@ test('update nudge: hourly recheck, release link, separate from the build chip',
     assert.ok(helper.includes("C.tf('navbar.update_available'"));
     assert.match(helper, /chip\.href = n\.url/);
     assert.match(helper, /chip\.hidden = true/);       // silent on no-update/error
+    // LANE GATE (owner 2026-11-22): the nudge must NOT self-start at script
+    // load - boot arms it only when identity proves a non-dev board, because
+    // a dev-lane box builds uplift-dev and cannot pull a vanilla release.
+    assert.match(helper, /function upUpdateArm\(devLane\) \{/);
+    assert.match(helper, /if \(upArmed \|\| devLane\) return;/);
+    assert.match(helper, /window\.Uplift\.helper = \{ renderHelperModels, INTEG_PREFIXED, upUpdateArm \}/);
+    assert.match(boot, /upUpdateArm\(!!\(d && d\.dev\)\)/);
+    assert.match(boot, /upUpdateArm\(false\)/);        // identity unreadable: vanilla behavior
+    // the ::before arrow is a CSS escape - one backslash; the double-escaped
+    // form painted the literal '\2191' (user screenshot 2026-11-22)
+    assert.match(css, /content: "\\2191";/);
+    assert.ok(!/content: "\\\\2191"/.test(css), 'no double-escaped arrow');
     // own-build chip (uplift_boot.js #logo-build) is NOT touched here
     assert.ok(!/getElementById\(['"]logo-build|'logo-build'\)/.test(helper),
         'dev-keg flag stays separate');

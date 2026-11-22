@@ -37,6 +37,8 @@ fetchJson(`${API}/admin/api/device-info`).then(d => {
    the other keg answers. 'DEV' is brand text (like 'Uplift'): untranslated,
    colour via --dev-accent so skins can restyle it. */
 fetchJson(`${API}/admin/api/identity`).then(d => {
+    // the release nudge only makes sense where a release can be pulled in
+    if (window.Uplift.helper) window.Uplift.helper.upUpdateArm(!!(d && d.dev));
     if (!d || !d.dev) return;
     const f = $('logo-flavor');
     f.textContent = 'DEV';
@@ -44,7 +46,10 @@ fetchJson(`${API}/admin/api/identity`).then(d => {
     document.querySelector('.logo')?.classList.add('is-dev');
     document.title = 'oMLX · DEV';
     renderDevBuild();
-}).catch(() => {});
+}).catch(() => {
+    // identity unreadable: no lane proof - keep the vanilla behavior
+    if (window.Uplift.helper) window.Uplift.helper.upUpdateArm(false);
+});
 /* BUILD-1: superscript on the DEV wordmark — line 1: the omlx base commit +
    version the built keg tracks; line 2: the enabled build-scope patch ids.
    Server truth comes from /dev/build-info (cheap: file reads only). Honest by

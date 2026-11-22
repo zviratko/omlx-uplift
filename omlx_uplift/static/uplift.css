@@ -4083,7 +4083,7 @@ main.grid-stack > .grid-stack-item > .grid-stack-item-content > .card-frame.metr
     cursor: pointer;
 }
 .chip.up-update-chip::before {
-    content: "\\2191";      /* upward arrow: a release to pull in, not a lamp */
+    content: "\2191";      /* upward arrow: a release to pull in, not a lamp */
     margin-right: 4px;
 }
 .chip.up-update-chip[hidden] { display: none; }

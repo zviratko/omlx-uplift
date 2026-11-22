@@ -825,12 +825,22 @@ function upUpdateCheck() {
         chip.hidden = false;
     }).catch(() => { chip.hidden = true; });
 }
-try {
-    upUpdateCheck();
-    setInterval(upUpdateCheck, 3600000);   // classic's hourly recheck
-} catch (_) { /* nudge is decoration; never break boot */ }
+/* Lane gate (owner 2026-11-22): a dev-lane board builds omlx from our
+   uplift-dev branch - a vanilla release feed is not actionable there, and
+   checking for one is noise. uplift_boot.js arms this ONLY after
+   /admin/api/identity says the board is not DEV; uplift's own commits ride
+   the nightly sync, not a header chip. */
+let upArmed = false;
+function upUpdateArm(devLane) {
+    if (upArmed || devLane) return;
+    upArmed = true;
+    try {
+        upUpdateCheck();
+        setInterval(upUpdateCheck, 3600000);   // classic's hourly recheck
+    } catch (_) { /* nudge is decoration; never break boot */ }
+}
 
 
 window.Uplift = window.Uplift || {};
-window.Uplift.helper = { renderHelperModels, INTEG_PREFIXED };
+window.Uplift.helper = { renderHelperModels, INTEG_PREFIXED, upUpdateArm };
 })();
