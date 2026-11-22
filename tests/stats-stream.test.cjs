@@ -472,3 +472,31 @@ test('no regressions against the frozen lane contract: unknown m-only frames, ex
     assert.ok(/if \(!d\.samples && !d\.m\) return;/.test(ingest),
         'a stats-only frame never touches columns or chart listeners');
 });
+
+test('TOTAL TOKENS card: raw animated in/out, compact unit line below', () => {
+    // owner 2026-11-22: the card shows animated RAW numbers for input and
+    // output; the human-readable compact form sits under each. The old
+    // compact-total main number must not come back (negative pin).
+    const html = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+    const up = fs.readFileSync(path.join(STATIC_DIR, 'uplift.js'), 'utf8');
+    for (const [id, src] of [['v-tokens-in', 'promptTokens'],
+                             ['v-tokens-out', 'completionTokens']]) {
+        assert.match(html, new RegExp(
+            'class="stat-value sz-22" id="' + id + '"'));
+        assert.match(up, new RegExp(
+            "counter\\('" + id + "',\\s+v => C\\.fmtNumber\\(v\\)\\)"));
+        assert.match(up, new RegExp(
+            "setCounter\\('" + id + "', s\\." + src + "\\)"));
+        assert.match(html, new RegExp('id="' + id + '-c"'));
+        assert.match(up, new RegExp(
+            "\\$\\('" + id + "-c'\\)\\.textContent =\\s+s\\." + src +
+            " !== null \\? C\\.fmtCompact"));
+    }
+    assert.ok(!html.includes('id="v-tokens"'),
+        'no compact-total main number returns');
+    assert.ok(!up.includes("setCounter('v-tokens'"),
+        'no compact-total main number returns');
+    // animation switch: the shared setCounter easeOutCubic lane, already
+    // gated on motionOff() (prefs motion = auto/off) - no new motion code
+    assert.match(up, /if \(c\.value === null \|\| motionOff\(\) \|\| c\.value === target\)/);
+});

@@ -165,9 +165,14 @@
 
     <section class="card grid-stack-item" data-id="tokens" data-tab="status" gs-id="tokens" data-block="tokens"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.tokens">Total tokens</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.tokens">Total tokens</span><span class="right"></span></h2>
         <div class="card-body">
-            <div class="stat-value t2" id="v-tokens">—</div>
-            <div class="stat-label" data-i18n="uplift.label.served_total">processed</div>
-            <div class="stat-sub sub-mt6" id="v-tokens-sub"></div>
+            <div class="pair">
+                <div><div class="stat-value sz-22" id="v-tokens-in">—</div>
+                     <div class="stat-label" data-i18n="uplift.label.total_in">in</div>
+                     <div class="stat-sub sub-mt6" id="v-tokens-in-c"></div></div>
+                <div><div class="stat-value sz-22" id="v-tokens-out">—</div>
+                     <div class="stat-label" data-i18n="uplift.label.total_out">out</div>
+                     <div class="stat-sub sub-mt6" id="v-tokens-out-c"></div></div>
+            </div>
         </div></div></div></div></section>
 
     <section class="card grid-stack-item" data-id="chart-tps" data-tab="status" gs-id="chart-tps" data-block="chart-tps"><div class="grid-stack-item-content"><div class="card-frame"><div class="card-chrome"><div class="card-handle"><span class="hatch" data-icon="grip"></span><span data-i18n="uplift.card.throughput">Throughput</span></div><button type="button" class="card-remove" data-icon="close" title="Remove from dashboard" data-i18n-title="uplift.layout.remove" aria-label="Remove from dashboard">×</button></div><div class="card-pad"><h2><span data-i18n="uplift.card.throughput">Throughput</span> <span class="right"><span class="opt-label" data-i18n="uplift.opt.smoothing">Smoothing</span><select id="opt-tps-smooth" aria-label="Smoothing"><option value="1" data-i18n="uplift.smooth.off">off</option><option value="3" data-i18n="uplift.smooth.light">light</option><option value="5" data-i18n="uplift.smooth.medium">medium</option><option value="9" data-i18n="uplift.smooth.strong">strong</option></select><span id="chart-tps-window"></span></span><div class="ts-row" data-block="chart-tps" role="group" aria-label="Timespan"></div></h2>

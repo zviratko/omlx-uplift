@@ -2228,7 +2228,10 @@ function setCounter(elId, target) {
 counter('v-gentps',     v => v.toFixed(1));
 counter('v-prefilltps', v => v.toFixed(0));
 counter('v-requests',   v => C.fmtNumber(v));
-counter('v-tokens',     v => C.fmtCompact(v));
+// TOTAL TOKENS card: animated RAW numbers for in/out (owner 2026-11-22);
+// the human-readable compact form rides the sub-line under each.
+counter('v-tokens-in',  v => C.fmtNumber(v));
+counter('v-tokens-out', v => C.fmtNumber(v));
 counter('v-cacheeff',   v => v.toFixed(1) + '%');
 counter('v-prompt-avg', v => C.fmtCompact(v));
 counter('v-prompt-pct', v => C.fmtCompact(v));
@@ -2254,14 +2257,15 @@ function render(s) {
     setCounter('v-gentps', s.genTps);
     setCounter('v-prefilltps', s.prefillTps);
     setCounter('v-requests', s.requests);
-    setCounter('v-tokens', s.totalTokens);
+    setCounter('v-tokens-in', s.promptTokens);
+    setCounter('v-tokens-out', s.completionTokens);
+    $('v-tokens-in-c').textContent =
+        s.promptTokens !== null ? C.fmtCompact(s.promptTokens) : '';
+    $('v-tokens-out-c').textContent =
+        s.completionTokens !== null ? C.fmtCompact(s.completionTokens) : '';
     setCounter('v-cacheeff', s.cacheEfficiency);
-    $('v-tokens-sub').textContent = s.promptTokens !== null && s.completionTokens !== null
-        ? `${C.tf('uplift.label.total_in', 'in')} ${C.fmtCompact(s.promptTokens)} · `
-          + `${C.tf('uplift.label.total_out', 'out')} ${C.fmtCompact(s.completionTokens)}`
-        : '';
     // U25/U26: the prefill/generation tiles carry the lifetime input/output
-    // totals in their second half (same numbers as the tokens tile sub-line).
+    // totals in their second half (same numbers as the tokens tile columns).
     $('v-prefill-sub').textContent = s.promptTokens !== null
         ? C.tf('uplift.label.total_in', 'in') + ' ' + C.fmtCompact(s.promptTokens) : '';
     $('v-gen-sub').textContent = s.completionTokens !== null
