@@ -561,6 +561,22 @@ def keg_id(omlx_root: str | None = None) -> str | None:
     return f"{parent_name}:{digest.hexdigest()[:16]}"
 
 
+def is_source_checkout(omlx_root: str | None) -> bool:
+    """True when ``omlx_root`` is the omlx package of a git source checkout.
+
+    An installed omlx lives in a site-packages dir, which never holds a
+    ``.git`` entry. A checkout (or a git worktree, where ``.git`` is a file)
+    does. ``_omlx_root()`` resolves through ``find_spec``, so any interpreter
+    started inside a checkout finds the CHECKOUT first; boot-time writers
+    must not treat that as an install (measured: the boot sync wrote every
+    omlx/both-scope patch into PR worktrees during their test runs).
+    """
+    if not omlx_root:
+        return False
+    parent = os.path.dirname(os.path.realpath(omlx_root))
+    return os.path.lexists(os.path.join(parent, ".git"))
+
+
 def _omlx_root() -> str | None:
     """Locate the installed omlx package dir without importing it."""
     import importlib.util

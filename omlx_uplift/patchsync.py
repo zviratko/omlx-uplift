@@ -466,6 +466,14 @@ def sync_at_startup(store=None, tree_root: str | None = None,
             _log.warning("uplift boot sync skipped: omlx not importable")
             return {"skipped_reason": "omlx not importable", "verify_only": True,
                     "changed": False, "reports": [], "reexec": False}
+        if _patches.is_source_checkout(root):
+            # The interpreter found a source checkout (cwd or editable
+            # install), not an installed omlx. Never write patches into it.
+            # An explicit tree_root (CLI, tests) is still honored.
+            _log.info("uplift boot sync skipped: omlx resolves to the source "
+                      "checkout %s, not an install", os.path.dirname(root))
+            return {"skipped_reason": "source checkout", "verify_only": True,
+                    "changed": False, "reports": [], "reexec": False}
         tree_root = os.path.dirname(root)
 
     report = reconcile(store, tree_root, allow_reexec=allow_reexec)

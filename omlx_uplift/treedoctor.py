@@ -231,8 +231,8 @@ def boot_check(store=None) -> dict | None:
         if store.patches_disabled():
             return None          # kill switch: stay completely out of the way
         root = _patches._omlx_root()
-        if not root:
-            return None
+        if not root or _patches.is_source_checkout(root):
+            return None          # no install here (see is_source_checkout)
         tree_root = os.path.dirname(root)
         keg = _patches.keg_id(root)
         if not keg:
