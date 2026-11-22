@@ -693,6 +693,29 @@ var TP = {
                       labeled(t('bench.config.external_api_key', 'API key'), ekey),
                       labeled(t('bench.config.external_model', 'Model'), emod));
 
+        // EXTPERSIST (owner 2026-11-22): the external endpoint is typed once
+        // and reused - a reload must not empty it. Browser pref in
+        // localStorage (same doctrine as the acc picks and the extras fold);
+        // the key field is type=password, so it rests masked. Save on
+        // 'change': clicking RUN blurs the field first, so the last edit is
+        // never lost.
+        var EXT_LS = 'uplift.bench.extapi.v1';
+        try {
+            var ep = JSON.parse(localStorage.getItem(EXT_LS)) || {};
+            if (typeof ep.url === 'string') eurl.value = ep.url;
+            if (typeof ep.key === 'string') ekey.value = ep.key;
+            if (typeof ep.model === 'string') emod.value = ep.model;
+        } catch (_) { /* blocked or absent storage = no pref */ }
+        function extPrefSave() {
+            try {
+                localStorage.setItem(EXT_LS, JSON.stringify(
+                    { url: eurl.value, key: ekey.value, model: emod.value }));
+            } catch (_) { /* a denied storage is 'no pref', never a throw */ }
+        }
+        [eurl, ekey, emod].forEach(function (i) {
+            i.addEventListener('change', extPrefSave);
+        });
+
         // U48: full-width section; external inputs live INSIDE it now (the
         // old form kept the toggle in the details but rendered its inputs
         // at form level — the 'visible while you were not looking' half of
