@@ -105,6 +105,9 @@
         // SYNC-1 (upstream 3c39990): model-level, not server-level
         'qwen4_gdn_decode_wide_proj',
         'deepseek_v41_ced_prefill_enabled', 'deepseek_v41_engram_ssd_offload',
+        // SYNC-1 run 32 (upstream b43daeb0 #5475): Hy4 Flash Engram offload -
+        // family material like its DeepSeek twin.
+        'hy4_engram_ssd_offload',
         'a8_prefill_enabled', 'a8_prefill_min_tokens',
         // SYNC-1 fire 18 (upstream f6897ff #5065): the Prefill Accelerator
         // block lives in classic's ms-acceleration section, behind the same
@@ -164,6 +167,7 @@
         if (on(s.qwen4_gdn_decode_wide_proj)) out.push('qwen4_gdn_decode_wide_proj');
         if (on(s.deepseek_v41_ced_prefill_enabled)) out.push('deepseek_v41_ced_prefill_enabled');
         if (on(s.deepseek_v41_engram_ssd_offload)) out.push('deepseek_v41_engram_ssd_offload');
+        if (on(s.hy4_engram_ssd_offload)) out.push('hy4_engram_ssd_offload');
         if (s.chat_template_kwargs && Object.keys(s.chat_template_kwargs).length)
             out.push('chat_template_kwargs');
         return out;
@@ -269,10 +273,13 @@
     // Lightning MTP depth: one adaptive ceiling. New servers carry it as
     // mtp_adaptive_max_depth (62171bdf); older ones store the same value as
     // mtp_num_draft_tokens. Accept either name, clamp to the modeled set.
+    // SYNC-1 run 32 (upstream ee6b5407 #5541): '' means "Model default" -
+    // the engine v3 migration drops a stored 3 the same way, and the
+    // ceiling list grew to 3..8.
     function mtpDepthOf(s) {
         const raw = s.mtp_adaptive_max_depth != null ? s.mtp_adaptive_max_depth
             : s.mtp_num_draft_tokens;
-        return [3, 4, 5, 6].includes(Number(raw)) ? String(Number(raw)) : '3';
+        return [3, 4, 5, 6, 7, 8].includes(Number(raw)) ? String(Number(raw)) : '';
     }
 
     function buildState(model, s) {
@@ -329,6 +336,11 @@
             deepseek_v41_engram_ssd_offload_requested: s.deepseek_v41_engram_ssd_offload === true,
             deepseek_v41_engram_ssd_offload_supported: !!(model && model.deepseek_v41_engram_ssd_offload_supported === true),
             deepseek_v41_engram_ssd_offload_forced: !!(model && model.deepseek_v41_engram_ssd_offload_forced === true),
+            // SYNC-1 run 32 (upstream b43daeb0 #5475, classic dashboard.js:2291):
+            // Hy4 Flash Engram offload - supported flag from the server, no
+            // forced/requested pair (the memory guard never forces it).
+            hy4_engram_ssd_offload: s.hy4_engram_ssd_offload === true,
+            hy4_engram_ssd_offload_supported: !!(model && model.hy4_engram_ssd_offload_supported === true),
             enableThinkingBudget: !!s.thinking_budget_tokens,
             thinking_budget_tokens: s.thinking_budget_tokens || null,
             // SYNC-1 (upstream d59d797 #4855 + 95e0fd6 #4819): classic's
@@ -628,6 +640,8 @@
             deepseek_v41_engram_ssd_offload: ms.deepseek_v41_engram_ssd_offload_forced
                 ? !!ms.deepseek_v41_engram_ssd_offload_requested
                 : !!ms.deepseek_v41_engram_ssd_offload,
+            // SYNC-1 run 32 (upstream b43daeb0 #5475, classic dashboard.js:3639).
+            hy4_engram_ssd_offload: !!ms.hy4_engram_ssd_offload,
             thinking_budget_enabled: !!ms.enableThinkingBudget,
             thinking_budget_tokens: ms.enableThinkingBudget ? (ms.thinking_budget_tokens || null) : 0,
             // SYNC-1: classic sends both keys unconditionally
@@ -705,8 +719,10 @@
             mtp_enabled: !!ms.mtp_enabled,
             // upstream 62171bdf: depth rides mtp_adaptive_max_depth only;
             // the legacy fixed depth is cleared on every save.
-            mtp_adaptive_max_depth: ms.mtp_enabled
-                ? Math.max(1, parseInt(ms.mtp_adaptive_max_depth || '3', 10) || 3) : null,
+            // SYNC-1 run 32 (upstream ee6b5407 #5541, classic dashboard.js:3726):
+            // empty select -> null -> the model's own default ceiling.
+            mtp_adaptive_max_depth: ms.mtp_enabled && ms.mtp_adaptive_max_depth
+                ? parseInt(ms.mtp_adaptive_max_depth, 10) : null,
             mtp_fixed_depth: null,
             vlm_mtp_enabled: !!ms.vlm_mtp_enabled,
             vlm_mtp_draft_model: ms.vlm_mtp_enabled ? (ms.vlm_mtp_draft_model || null) : null,

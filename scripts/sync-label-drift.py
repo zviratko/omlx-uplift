@@ -54,6 +54,11 @@ RUN = 5               # shared normalized word-run length that flags a mirror
 
 # uplift literal -> why it is NOT a stale mirror (triaged 2026-11-21)
 ALLOW = {
+    "Maximum RAM used by encoded snapshots waiting to be written to SSD. "
+    "When the buffer is full, cache writes pause until space is available. "
+    "A size without a unit is read as MB.":
+        "classic hint verbatim + uplift unit sentence (owner report: the "
+        "engine reads a bare number as bytes; uplift stamps MB)",
     "A custom benchmark is already running in this server.":
         "uplift's own bench panel; classic's string names classic's "
         "throughput bench",
@@ -104,6 +109,9 @@ ALLOW_ROW = {
     ("external_engine", "hint"):
         "uplift's picker hint is its own (multi-engine list); classic's "
         "select_hint names one engine; the GGUF branch uses classic's key",
+    ("gdn_ssd_pending_max_size", "hint"):
+        "classic's hint verbatim + uplift's unit sentence (owner report: "
+        "the engine reads a bare number as bytes; uplift's input stamps MB)",
 }
 
 

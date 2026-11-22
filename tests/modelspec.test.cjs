@@ -300,10 +300,13 @@ test('draft pools: current model excluded', () => {
 });
 
 /* ---- upstream 62171bdf: adaptive MTP depth semantics ---- */
-test('buildState: mtp_adaptive_max_depth is a 3/4/5/6 string, default 3', () => {
-    assert.strictEqual(S.buildState(base(), {}).mtp_adaptive_max_depth, '3');
+test('buildState: mtp_adaptive_max_depth is a 3..8 string, default "" (model default)', () => {
+    // SYNC-1 run 32 (upstream ee6b5407 #5541): '' = the model's own ceiling;
+    // the option list grew to 3..8.
+    assert.strictEqual(S.buildState(base(), {}).mtp_adaptive_max_depth, '');
     assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 5 }).mtp_adaptive_max_depth, '5');
-    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 99 }).mtp_adaptive_max_depth, '3');
+    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 8 }).mtp_adaptive_max_depth, '8');
+    assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 99 }).mtp_adaptive_max_depth, '');
 });
 test('buildState: legacy mtp_num_draft_tokens reads as the same depth', () => {
     // servers older than 62171bdf store the adaptive ceiling under the
@@ -311,7 +314,7 @@ test('buildState: legacy mtp_num_draft_tokens reads as the same depth', () => {
     assert.strictEqual(S.buildState(base(), { mtp_num_draft_tokens: 4 }).mtp_adaptive_max_depth, '4');
     assert.strictEqual(S.buildState(base(), { mtp_adaptive_max_depth: 5,
         mtp_num_draft_tokens: 4 }).mtp_adaptive_max_depth, '5');
-    assert.strictEqual(S.buildState(base(), { mtp_num_draft_tokens: 99 }).mtp_adaptive_max_depth, '3');
+    assert.strictEqual(S.buildState(base(), { mtp_num_draft_tokens: 99 }).mtp_adaptive_max_depth, '');
 });
 test('buildPayload: depth rides mtp_adaptive_max_depth; fixed depth cleared', () => {
     const p = S.buildPayload(S.buildState(base(), { mtp_enabled: true, mtp_adaptive_max_depth: '4' }), base());
@@ -319,6 +322,9 @@ test('buildPayload: depth rides mtp_adaptive_max_depth; fixed depth cleared', ()
     assert.strictEqual(p.mtp_fixed_depth, null);
     const off = S.buildPayload(S.buildState(base(), { mtp_enabled: false, mtp_adaptive_max_depth: '4' }), base());
     assert.strictEqual(off.mtp_adaptive_max_depth, null);
+    // SYNC-1 run 32: MTP on with the Model-default option sends null
+    const def = S.buildPayload(S.buildState(base(), { mtp_enabled: true }), base());
+    assert.strictEqual(def.mtp_adaptive_max_depth, null);
 });
 /* ---- server payload adaptation (version skew: keg predates 62171bdf) ---- */
 test('adaptToServerPayload: old server gets the legacy mtp key back', () => {

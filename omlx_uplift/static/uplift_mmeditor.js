@@ -1316,9 +1316,14 @@ function renderEditorFields(container) {
                         label: C.tf('modal.model_settings.mtp_depth', 'Adaptive max depth'),
                         hint: C.tf('modal.model_settings.mtp_depth_hint',
                             'Automatically adjusts the draft depth up to the selected maximum.'),
-                        options: [{ value: '3', label: '3 tokens (Default)' },
-                                  ...[4, 5, 6].map(n => ({ value: String(n),
-                                      label: C.tf('uplift.se.mtp_depth.opt.' + n, n + ' tokens')}))]})]);
+                        // SYNC-1 run 32 (upstream ee6b5407 #5541 + template
+                        // range(3,9)): '' = the model's own default ceiling,
+                        // then 3..8. Classic's own keys, x11 locales.
+                        options: [{ value: '',
+                                  label: C.tf('modal.model_settings.mtp_depth_adaptive', 'Model default') },
+                                  ...[3, 4, 5, 6, 7, 8].map(n => ({ value: String(n),
+                                      label: C.tf('modal.model_settings.mtp_depth_option',
+                                          '{n} tokens').replace('{n}', String(n))}))]})]);
             }
 
             const drafterType = (m.config_model_type || '').toLowerCase().replace(/-/g, '_');
@@ -1443,18 +1448,25 @@ function renderEditorFields(container) {
     if (extEngActive()) sect.__body.append(eeNote());   // UP-18 (3), classic MO:803
     g = grid();
     if (m.qwen4_ple_ssd_offload_supported || m.deepseek_v41_engram_ssd_offload_supported
-            || seValues.qwen4_ple_ssd_offload || seValues.deepseek_v41_engram_ssd_offload) {
+            || m.hy4_engram_ssd_offload_supported
+            || seValues.qwen4_ple_ssd_offload || seValues.deepseek_v41_engram_ssd_offload
+            || seValues.hy4_engram_ssd_offload) {
         // classic #4415 merged the two per-family rows into ONE 'SSD
         // N-gram Offload' (ssdNgramOffloadKey): the server keeps both
         // keys, a model exposes at most one family — resolve the same way.
+        // SYNC-1 run 32 (upstream b43daeb0 #5475, classic dashboard.js:3453):
+        // Hy4 Flash Engram joins the ladder last; it has no forced state.
         const isQwen = m.qwen4_ple_ssd_offload_supported || !!seValues.qwen4_ple_ssd_offload;
-        const k = isQwen ? 'qwen4_ple_ssd_offload' : 'deepseek_v41_engram_ssd_offload';
+        const isDs = !isQwen && (m.deepseek_v41_engram_ssd_offload_supported
+            || !!seValues.deepseek_v41_engram_ssd_offload);
+        const k = isQwen ? 'qwen4_ple_ssd_offload'
+            : isDs ? 'deepseek_v41_engram_ssd_offload' : 'hy4_engram_ssd_offload';
         const forced = isQwen ? m.qwen4_ple_ssd_offload_forced
-                              : m.deepseek_v41_engram_ssd_offload_forced;
+            : isDs ? m.deepseek_v41_engram_ssd_offload_forced : false;
         g.append(seBind('bool', k, { label: C.tf('modal.model_settings.ssd_ngram_offload', 'SSD N-gram Offload'),
             hint: forced
                 ? C.tf('modal.model_settings.ssd_ngram_offload_forced', 'Required because resident loading exceeds the configured model-memory limit.')
-                : C.tf('modal.model_settings.ssd_ngram_offload_hint', 'Keeps the large N-gram table (Qwen4 PLE or DeepSeek V4.1 Engram) on SSD and reads only the rows it needs. Saves memory, but speed depends on SSD reads. Changing this setting reloads the model.'),
+                : C.tf('modal.model_settings.ssd_ngram_offload_hint', 'Keeps the large N-gram table on SSD and reads only the rows it needs. Saves memory, but speed depends on SSD reads. Changing this setting reloads the model.'),
             disabled: !!forced }));
     }
     if (m.moe_expert_offload_supported && !S.isDiffusion(m)) {
@@ -3778,7 +3790,7 @@ const SE_GEN_CLEAR = [
     ['dflash_draft_quant_group_size', null],
     ['dflash_draft_window_size', null], ['dflash_block_size', null],
     ['dflash_verify_mode', 'adaptive'],
-    ['mtp_enabled', false], ['mtp_adaptive_max_depth', '3'],
+    ['mtp_enabled', false], ['mtp_adaptive_max_depth', ''],
     ['trust_remote_code', false],
 ];
 function genDefaultsPatch(data, modelRow, state) {

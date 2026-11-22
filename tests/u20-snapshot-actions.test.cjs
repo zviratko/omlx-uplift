@@ -339,7 +339,7 @@ const CLASSIC_CLEAR = [
     ['dflash_draft_quant_group_size', null],
     ['dflash_draft_window_size', null], ['dflash_block_size', null],
     ['dflash_verify_mode', 'adaptive'],
-    ['mtp_enabled', false], ['mtp_adaptive_max_depth', '3'],
+    ['mtp_enabled', false], ['mtp_adaptive_max_depth', ''],
     ['trust_remote_code', false],
 ];
 test('SE_GEN_CLEAR mirrors the classic hard-clear list key-for-key', () => {
