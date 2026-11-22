@@ -58,6 +58,11 @@ Per-patch engineering notes (design, measurements, safety analysis, open items):
   only cold after an explicit eviction (the probe does it).
 - With 4 concurrent long prefills, decode fairness cut prefill chunks to 1216 tokens
   and total prompt throughput fell below 2-slot levels (ticket 0003).
+- Saving a cache-section field (SSD Write Buffer, cache on/off, GDN storage
+  or precision, cache sizes/blocks) makes the engine UNLOAD ALL LOADED MODELS
+  inside the `global-settings` POST (the cache_changed path in its admin
+  routes); a slow SAVE there is that unload, not a hang. `GS_MODEL_UNLOAD_FLATS`
+  in uplift_gspec.js mirrors the trigger set - keep it in sync on SYNC-1 runs.
 - Upstream test suite: 6 tests fail on current `main` without any change
   (`test_glm5_next_mtp` split-K x2, `test_hy_v4` NAX, `test_install_detection` x2,
   `test_mcp_client` SSE headers). Compare failure sets, not counts.
