@@ -5,3 +5,6 @@ __pycache__/
 # HYGIENE-2: work plans stay out of the public tree
 .hermes-plans/
 /plan-*.md
+
+# probe-ssd-pool.py writes its report into the current directory
+uplift-probe-report-*.json
