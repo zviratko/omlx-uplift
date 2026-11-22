@@ -32,3 +32,7 @@ for patches that UNDO a merged change (disable restores original bytes).
 
 A manifest without a description or with an unusable source is listed
 but skipped on sync — never installed half-declared.
+
+An optional `<name>.md` next to a patch holds engineering notes (design,
+measurements, safety analysis, open items) for reviewers and agents. The
+code never reads it; only `index.json` and the `.json` manifests count.
