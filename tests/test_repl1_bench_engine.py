@@ -808,6 +808,26 @@ async def test_concurrency_lift_applies_and_restores(fake_bench, cache_env):
 
 
 @pytest.mark.asyncio
+async def test_concurrency_lift_keeps_user_cap_set_during_run(fake_bench,
+                                                              cache_env):
+    """A save that lands WHILE the lifted run is in flight owns the cap:
+    the run-end restore must not write the pre-run snapshot back over it
+    (same guard as upstream _restore_concurrency; without it the user's
+    save is silently undone in memory until a server restart)."""
+    be = _engine_mod()
+    cache_env.gs.scheduler.max_concurrent_requests = 4
+    pool = FakePool()
+    out = await be.start({"model_id": "m1", "prompt_lengths": [1024],
+                          "batch_sizes": [8]}, pool)
+    run = fake_bench.get_run(out["bench_id"])
+    assert cache_env.gs.scheduler.max_concurrent_requests == 8
+    cache_env.gs.scheduler.max_concurrent_requests = 3   # user saves mid-run
+    await asyncio.wait_for(run.task, 2)
+    assert cache_env.gs.scheduler.max_concurrent_requests == 3
+    assert pool.applied == [8]        # restore skipped - no apply(4)
+
+
+@pytest.mark.asyncio
 async def test_concurrency_lift_raise_only_never_demotes(fake_bench,
                                                          cache_env):
     """Cap 8, batches up to 8: nothing to lift — the seam is never called

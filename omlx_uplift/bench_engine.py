@@ -215,6 +215,14 @@ async def _lift_concurrency(pool, batch_sizes):
                        f"the benchmark: {e.__class__.__name__}: {e}") from e
 
     async def restore():
+        # Keep a cap the user changed during the run (upstream
+        # _restore_concurrency semantics): once the live value is no longer
+        # what WE lifted it to, someone else owns it - writing the pre-run
+        # snapshot back would silently undo their save until a restart.
+        if gs.scheduler.max_concurrent_requests != needed:
+            logger.info("uplift bench concurrency lift: the cap changed "
+                        "during the run; keeping the new value")
+            return
         gs.scheduler.max_concurrent_requests = current
         try:
             await apply(current)   # back to the user's own ceiling
