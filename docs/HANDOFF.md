@@ -11,7 +11,7 @@ names or home paths here.
 | Curated `default` | ctx-probe-above-native, omlx-tts-macos-say, vlm-load-tokenizer-offloop, warm-before-ready, memory-requeue-store-budget (links jundot/omlx#5542) |
 | Curated `optional` | pool-aware-memory-pressure, ssd-prefix-prefetch, memory-budget-admission (v2: timeout releases to vanilla, D1) |
 | Upstream PRs | jundot/omlx#5542 open: bound the memory-pressure requeue store and let aborts stop it. Planned: memory-budget-admission as a DRAFT PR after the owner has run with it (D4, ticket 0001). ssd-prefix-prefetch is not upstreamed (ticket 0004). |
-| In the repo, not yet on installed boxes | `6b5621b`: the boot sync never writes into an omlx source checkout. A box has it only after `brew reinstall omlx-uplift` and `omlx-uplift install` (restarts the boards). |
+| `6b5621b` rollout | The boot sync never writes patches into an omlx source checkout. The guard ships with main; a box picks it up at its next uplift install/upgrade (`omlx-uplift install`, restarts the boards); until then hazard H2 applies there. |
 | Probe tools | `scripts/probe-ssd-pool.py` (SSD restore stall, pool pressure; evicts the cache files from the OS file cache without root), `scripts/probe-admission.py` (sized prompts at given fire times, memory sampling, budget log capture). |
 
 Per-patch engineering notes (design, measurements, safety analysis, open items):
