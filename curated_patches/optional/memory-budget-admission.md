@@ -32,9 +32,15 @@ on `f99a31f4`. Plan: owner runs with it, then a draft PR to jundot/omlx.
 - First request always passes when nothing is admitted (same rule as the other guards):
   no permanent block.
 - Not fitting = held in the queue (`_budget_held_since`). Held longer than
-  `OMLX_ADMISSION_MAX_QUEUE_S` (600, 0 = no limit), counted from arrival -> rejected
-  with the SAME `prefill_memory_exceeded` output, so clients see no new error type.
-  Only memory-held requests time out; waiting for a slot never does (as before).
+  `OMLX_ADMISSION_MAX_QUEUE_S` (600, 0 = hold until it fits), counted from arrival ->
+  RELEASED (`_budget_released`): the budget no longer checks it, and the normal
+  (vanilla) admission checks admit or reject it as without the patch. The budget
+  never rejects anything itself. (v1 of the patch rejected at the timeout; changed
+  so the bottom line is vanilla behavior.)
+- Why not ask the vanilla check earlier and admit as soon as it says yes: vanilla
+  prices against memory in use NOW, which is exactly the blind spot. It says "fits"
+  for a second large request while the first is still early in its prefill, so
+  admitting on its yes would switch the budget off.
 - Route preflight (`preflight_or_raise`): if the vanilla check would 400 but the engine
   is busy (admitted or waiting requests), the request is queued instead. An idle engine
   still 400s a prompt that can never fit.
@@ -52,7 +58,8 @@ on `f99a31f4`. Plan: owner runs with it, then a draft PR to jundot/omlx.
   `_num_admitted_requests`. Methods are called as `Scheduler._x(self, ...)` so the tests
   can drive them with plain stubs (same style as ssd-prefix-prefetch).
 - Hook 1: `_schedule_waiting`, before the admission `while`:
-  `rejected_outputs.extend(Scheduler._budget_expire_waiting(self))`.
+  `Scheduler._budget_release_overdue(self)` (releases overdue held requests; wrapped,
+  on any error it releases every held request).
 - Hook 2: in the loop, right before `request = self.waiting[0]`:
   `if not Scheduler._budget_pick_head(self): <clear head stall timers>; break`.
   The picker moves the chosen request to `waiting[0]`; all upstream head checks and the
@@ -60,8 +67,8 @@ on `f99a31f4`. Plan: owner runs with it, then a draft PR to jundot/omlx.
 - Hook 3: `preflight_or_raise`, before the "Preflight rejected" warning.
 - Markers live in the request's instance dict and are read with `vars()` (`_battr`):
   `getattr` on MagicMock requests in upstream tests returns truthy mocks.
-- Logging: INFO when a request is first held, admitted after a hold, or admitted ahead
-  of another (names the skipped ids); WARNING on timeout; DEBUG with the full
+- Logging: INFO when a request is first held, admitted after a hold, admitted ahead
+  of another (names the skipped ids), or released at the timeout; DEBUG with the full
   projection ONLY when a request's fits/does-not-fit verdict changes (an unconditional
   line flooded 47,865 lines in one run).
 
@@ -76,7 +83,8 @@ position if you rebase.
 
 ## Safety analysis (other models, failure modes)
 **The budget never relaxes a vanilla memory check, with one deliberate exception.**
-It only reorders the queue, delays admission, or rejects after a timeout. Every
+It only reorders the queue and delays admission (at most OMLX_ADMISSION_MAX_QUEUE_S
+for one request, then vanilla decides). It never rejects a request itself. Every
 admitted request still passes upstream's in-stream `_preflight_memory_check`, the chunk
 sizer, the soft-pressure pause and the enforcer, unchanged. The exception is the route
 preflight on a busy engine: it queues instead of 400. That request then meets the
@@ -97,9 +105,8 @@ Direction of errors:
   Exposure is the SAME as vanilla's (vanilla also ignores outstanding growth, so it
   admits even more). Covered by the same reactive guards. Not a new risk.
 - Overestimate -> requests are held longer than needed. This is the only path where
-  the patch can do WORSE than vanilla: a request vanilla would have admitted (and that
-  might have succeeded) waits and, after 600 s with running work still holding
-  memory, is rejected. Known overestimate sources: SpecPrefill requests (reservation
+  the patch can do worse than vanilla, and only in time: a request vanilla would have
+  admitted waits up to OMLX_ADMISSION_MAX_QUEUE_S, then vanilla decides as before. Known overestimate sources: SpecPrefill requests (reservation
   uses the full prompt KV, the sparse prefill keeps only the selected tokens), the
   decode allowance on models with large KV/token, and any estimator overestimate.
 - Larger KV per token (dense full-attention models, ~10x Flash-Next for a 32B with
@@ -116,9 +123,8 @@ Code failure modes:
 - No memory monitor, or `prefill_memory_guard` off -> no holds, no timeouts, no
   preflight change. Only the deferral backfill stays active.
 - Estimate returns None -> transient 0, KV from the monitor.
-- KNOWN GAP: `_budget_expire_waiting` is not wrapped in try/except. It reuses the
-  cached size estimate of held requests, so it should not raise, but if it did, the
-  exception would leave `_schedule_waiting`. Wrap it (return []) before upstreaming.
+- Release step raises -> caught, WARNING, every held request is released (vanilla).
+  (v1 had this step unwrapped; fixed in v2.)
 
 **Does it need testing per model?** Not for memory safety (argument above, it only adds
 restrictions on top of vanilla's checks). Yes for usefulness: false holds or a
@@ -128,9 +134,12 @@ a dense full-attention model, a sliding-window model (gemma), and a hybrid
 (Qwen3.5-style, already done). The procedure is below.
 
 ## Verification done
-- 17 unit tests `tests/test_admission_budget.py` (in the diff). Mutation check: with
+- 20 unit tests `tests/test_admission_budget.py` (in the diff). Mutation checks: with
   `_budget_committed` -> (0, 0) and `_budget_queue_instead_of_reject` -> False,
-  exactly the 3 targeted tests fail (reservation, transient, busy preflight).
+  exactly the 3 targeted tests fail (reservation, transient, busy preflight); with
+  `_budget_release_overdue_inner` -> no-op, exactly the release test fails.
+- v2 (release instead of reject): 705 scheduler/preflight/admission tests pass; the
+  full-suite numbers below are from v1 (the v2 change is confined to the timeout path).
 - Upstream suite on uplift-dev + patch (`-m "not slow"`): 19,308 passed. 8 failures,
   all identical without the patch: test_context_benchmark capped_by_native (comes from
   the ctx-probe-above-native patch), glm5_next_mtp split_k x2, hy_v4 NAX (hardware),
@@ -157,9 +166,10 @@ With the patch (hot-copied into the keg, see method):
 | run | setup | result |
 |---|---|---|
 | T1b | ceiling 115, 2x200k + 3 small | pair fits (projected 94.2 GB vs limit 108.8 GB), real peak 96.2 GiB (103.3 GB) |
-| T2b | ceiling 105, decode reserve inflated to 400k | 2nd held; 3 small admitted ahead; held request rejected after 600 s with a clean `prefill_memory_exceeded` |
+| T2b (v1) | ceiling 105, decode reserve inflated to 400k | 2nd held; 3 small admitted ahead; v1 rejected the held request after 600 s with a clean `prefill_memory_exceeded` |
 | T2e | ceiling 92, 2x150k at t=0/1 s, small at 30/50/100 s | 2nd held; small at 30 and 50 s admitted ahead; held admitted after 96.8 s when it fit (first request still prefilling); all OK; guard reached soft once (peak 87.3 GiB vs projection 86.8 GB) |
 | T4 | ceiling 115, max_concurrent 4, 2x150k + 2x30k at once + 2 small | all 6 OK, peak 101.9 GiB, guard ok, ~920 tok/s total |
+| T5 (v2) | ceiling 92, OMLX_ADMISSION_MAX_QUEUE_S=30, 2x150k at t=0/1 s | 2nd held, released after 32 s; the vanilla in-stream check then rejected it (needed 86.95 GB, limit 86.92 GB) with its own message; 1st completed. Note: vanilla decides with the memory in use at RELEASE time, not at arrival. |
 
 Not observed live: aging (the held request was admitted 3 s before the late small one
 arrived), the busy-route-preflight queueing (needs a prompt that fails the vanilla
@@ -191,9 +201,8 @@ with 2 slots).
   the budget log lines).
 
 ## Open items before an upstream PR
-1. Wrap `_budget_expire_waiting` in try/except (known gap above).
-2. Decide the timeout semantics: reject (current, as asked) or "stop holding and let
-   the vanilla check decide" (bottom line = vanilla behavior).
+1. (done in v2) Release step wrapped; timeout = release to the vanilla checks.
+2. (decided) Bottom line = vanilla: the budget never rejects.
 3. Per-architecture A/B (dense, sliding window) with projection vs peak.
 4. Settings UI / settings.json keys instead of env vars (upstream will want them).
 5. Rebase onto the current upstream tip and rerun the suite there.

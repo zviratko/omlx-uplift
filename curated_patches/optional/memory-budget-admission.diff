@@ -1,8 +1,8 @@
 diff --git a/omlx/scheduler.py b/omlx/scheduler.py
-index bdee15b5..4d334c66 100644
+index bdee15b5..58c0aadc 100644
 --- a/omlx/scheduler.py
 +++ b/omlx/scheduler.py
-@@ -13175,6 +13175,298 @@ class Scheduler:
+@@ -13175,6 +13175,297 @@ class Scheduler:
          """Get number of running requests."""
          return len(self.running)
  
@@ -21,9 +21,10 @@ index bdee15b5..4d334c66 100644
 +    #   current + not-yet-allocated part of every reservation
 +    #           + its own reservation + the largest live prefill transient
 +    # stays under the admission limit. A request that does not fit WAITS in
-+    # the queue instead of being rejected; it is rejected (same
-+    # prefill_memory_exceeded error as before) only after it has waited
-+    # OMLX_ADMISSION_MAX_QUEUE_S. Smaller requests that fit may go ahead of
++    # the queue instead of being rejected. Once it has waited
++    # OMLX_ADMISSION_MAX_QUEUE_S the budget stops holding it and the normal
++    # (vanilla) admission checks decide, so the worst case is the old
++    # behavior, never a new rejection. Smaller requests that fit may go ahead of
 +    # a held or deferred head (backfill), until the held head has waited
 +    # OMLX_ADMISSION_AGING_S; from then on the queue holds for it, so large
 +    # requests do not starve. The first request always passes when nothing
@@ -165,7 +166,7 @@ index bdee15b5..4d334c66 100644
 +                break
 +            fits = True
 +            need = None
-+            if guard and admitted:
++            if guard and admitted and not Scheduler._battr(request, "_budget_released"):
 +                need = Scheduler._budget_need(self, request)
 +                _tokens, kv, transient = need
 +                credit = 0
@@ -247,50 +248,48 @@ index bdee15b5..4d334c66 100644
 +        # let the loop run its own head checks (upstream behavior exactly).
 +        return not held_any
 +
-+    def _budget_expire_waiting(self) -> list[RequestOutput]:
-+        """Reject requests held for memory past OMLX_ADMISSION_MAX_QUEUE_S."""
++    def _budget_release_overdue(self) -> None:
++        """Stop holding requests that waited OMLX_ADMISSION_MAX_QUEUE_S.
++
++        A released request goes through the normal admission checks only:
++        they admit it or reject it exactly as without the budget. Never
++        raises: on an error every held request is released.
++        """
 +        if not Scheduler._budget_enabled() or not self.waiting:
-+            return []
++            return
++        try:
++            Scheduler._budget_release_overdue_inner(self)
++        except Exception as exc:  # noqa: BLE001 - never break admission
++            logger.warning("Admission budget release failed, releasing all: %s", exc)
++            for request in list(self.waiting):
++                try:
++                    if Scheduler._battr(request, "_budget_held_since") is not None:
++                        request._budget_released = True
++                        request._budget_held_since = None
++                except Exception:  # noqa: BLE001
++                    pass
++
++    def _budget_release_overdue_inner(self) -> None:
 +        max_wait = Scheduler._budget_env_float("OMLX_ADMISSION_MAX_QUEUE_S", 600.0)
 +        if max_wait <= 0:
-+            return []
++            return
 +        now = time.monotonic()
-+        out: list[RequestOutput] = []
 +        for request in list(self.waiting):
-+            if Scheduler._battr(request, "_budget_held_since") is None:
++            held_since = Scheduler._battr(request, "_budget_held_since")
++            if held_since is None:
 +                continue
-+            arrived = getattr(request, "arrival_time", None) or request._budget_held_since
++            arrived = getattr(request, "arrival_time", None) or held_since
 +            waited = now - arrived
 +            if waited < max_wait:
 +                continue
-+            request_id = request.request_id
-+            try:
-+                self.waiting.remove(request)
-+            except ValueError:
-+                continue
-+            self._release_paged_cache_for_request(request_id)
-+            self.requests.pop(request_id, None)
-+            self._clear_request_admission_bookkeeping(request_id)
-+            get_prefill_tracker().remove(request_id)
-+            _tokens, kv, transient = Scheduler._budget_need(self, request)
-+            limit = self._admission_limit_bytes()
-+            message = (
-+                f"Request waited {waited:.0f}s in the queue for memory and was not "
-+                f"admitted (needs about {format_bytes(kv)} KV + "
-+                f"{format_bytes(transient)} prefill transient, limit "
-+                f"{format_bytes(limit)}). Retry later, reduce context length, or "
-+                "raise OMLX_ADMISSION_MAX_QUEUE_S."
++            request._budget_released = True
++            request._budget_held_since = None
++            logger.info(
++                "Admission budget: released %s after %.0fs in the queue "
++                "(OMLX_ADMISSION_MAX_QUEUE_S); the normal admission checks decide",
++                request.request_id,
++                waited,
 +            )
-+            logger.warning("Admission budget: rejecting %s: %s", request_id, message)
-+            out.append(
-+                _prefill_memory_error_output(
-+                    request_id,
-+                    message,
-+                    estimated_bytes=int(kv + transient),
-+                    limit_bytes=int(limit),
-+                )
-+            )
-+        return out
 +
 +    def _budget_queue_instead_of_reject(self) -> bool:
 +        """Route preflight: True = let a busy engine queue the request."""
@@ -301,7 +300,7 @@ index bdee15b5..4d334c66 100644
      def _num_admitted_requests(self) -> int:
          """Return requests already occupying scheduler capacity."""
          return len(self.running) + len(self.prefilling)
-@@ -13464,6 +13756,14 @@ class Scheduler:
+@@ -13464,6 +13755,14 @@ class Scheduler:
                  peak=est.kv_exact + est.transient,
                  hard_limit=admission_limit,
              )
@@ -316,16 +315,16 @@ index bdee15b5..4d334c66 100644
  
              logger.warning(
                  "Preflight rejected (%d tokens, cached=%d, request_id=%s): %s",
-@@ -13660,6 +13960,8 @@ class Scheduler:
+@@ -13660,6 +13959,8 @@ class Scheduler:
          # Track SpecPrefill: these requests must be alone (RoPE patching affects whole model)
          batch_specprefill_status: bool | None = None
  
-+        rejected_outputs.extend(Scheduler._budget_expire_waiting(self))
++        Scheduler._budget_release_overdue(self)
 +
          while (
              self.waiting
              and self._num_admitted_requests() < self._effective_max_num_seqs()
-@@ -13764,6 +14066,12 @@ class Scheduler:
+@@ -13764,6 +14065,12 @@ class Scheduler:
                          rejected_outputs.append(stalled)
                      break
  
@@ -340,10 +339,10 @@ index bdee15b5..4d334c66 100644
              self._clear_store_cache_admission_blocker(request.request_id)
 diff --git a/tests/test_admission_budget.py b/tests/test_admission_budget.py
 new file mode 100644
-index 00000000..e04e1d34
+index 00000000..26ff9520
 --- /dev/null
 +++ b/tests/test_admission_budget.py
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,294 @@
 +"""Memory-budget admission: queue instead of reject, reserve future KV, backfill."""
 +
 +from __future__ import annotations
@@ -547,7 +546,9 @@ index 00000000..e04e1d34
 +        _admit(s, _req("run", 1), 1)
 +        s.waiting.append(_req("a", 50 * 1024))
 +        assert Scheduler._budget_pick_head(s) is True
-+        assert Scheduler._budget_expire_waiting(s) == []
++        s.waiting[0]._budget_held_since = 0.0
++        Scheduler._budget_release_overdue(s)
++        assert vars(s.waiting[0]).get("_budget_released") is None
 +
 +    def test_failure_falls_back_to_queue_order(self):
 +        s = _sched()
@@ -561,29 +562,56 @@ index 00000000..e04e1d34
 +        assert Scheduler._budget_pick_head(s) is True
 +
 +
-+class TestExpire:
-+    def test_held_request_past_max_wait_is_rejected(self, monkeypatch):
++class TestRelease:
++    def test_overdue_held_request_goes_to_the_normal_checks(self, monkeypatch, caplog):
 +        monkeypatch.setenv("OMLX_ADMISSION_MAX_QUEUE_S", "10")
-+        s = _sched()
-+        old = _req("old", 1024, arrival=time.monotonic() - 11)
++        s = _sched(current_gb=95, limit_gb=100)
++        _admit(s, _req("run", 1), 1)
++        old = _req("old", 10 * 1024, arrival=time.monotonic() - 11)
 +        old._budget_held_since = time.monotonic() - 5
 +        young = _req("young", 1024, arrival=time.monotonic() - 11)  # never held
 +        s.waiting.extend([old, young])
-+        s.requests = {"old": old, "young": young}
-+        out = Scheduler._budget_expire_waiting(s)
-+        assert [o.request_id for o in out] == ["old"]
-+        assert out[0].error_code == "prefill_memory_exceeded"
-+        assert "waited" in out[0].error
-+        assert list(s.waiting) == [young]
-+        assert s.released == ["old"] and "old" not in s.requests
++        with caplog.at_level(logging.INFO, logger="omlx.scheduler"):
++            Scheduler._budget_release_overdue(s)
++        assert "released old after" in caplog.text
++        # Nothing is rejected or removed: the request stays queued ...
++        assert list(s.waiting) == [old, young] and s.released == []
++        assert vars(old).get("_budget_released") is True
++        assert vars(young).get("_budget_released") is None
++        # ... and the budget no longer holds it, although it still does not fit.
++        assert Scheduler._budget_pick_head(s) is True
++        assert s.waiting[0] is old
 +
-+    def test_zero_disables_the_limit(self, monkeypatch):
++    def test_not_overdue_stays_held(self, monkeypatch):
++        monkeypatch.setenv("OMLX_ADMISSION_MAX_QUEUE_S", "600")
++        s = _sched()
++        r = _req("r", 1)
++        r._budget_held_since = time.monotonic()
++        s.waiting.append(r)
++        Scheduler._budget_release_overdue(s)
++        assert vars(r).get("_budget_released") is None
++
++    def test_zero_holds_until_it_fits(self, monkeypatch):
 +        monkeypatch.setenv("OMLX_ADMISSION_MAX_QUEUE_S", "0")
 +        s = _sched()
 +        r = _req("r", 1, arrival=time.monotonic() - 10_000)
 +        r._budget_held_since = r.arrival_time
 +        s.waiting.append(r)
-+        assert Scheduler._budget_expire_waiting(s) == []
++        Scheduler._budget_release_overdue(s)
++        assert vars(r).get("_budget_released") is None
++
++    def test_error_releases_everything_instead_of_raising(self, monkeypatch):
++        s = _sched()
++        r = _req("r", 1)
++        r._budget_held_since = time.monotonic()
++        s.waiting.append(r)
++
++        def boom(self):
++            raise RuntimeError("release broke")
++
++        monkeypatch.setattr(Scheduler, "_budget_release_overdue_inner", boom)
++        Scheduler._budget_release_overdue(s)  # must not raise
++        assert vars(r).get("_budget_released") is True
 +
 +
 +class TestRoutePreflight:
