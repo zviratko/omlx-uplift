@@ -13,7 +13,14 @@ Scenario "ssd"  - a waiting request whose cached prefix lives only on the
                   all share one SSD-only prefix, and measures the
                   inter-token gaps of the streams. Patched: the gaps stay
                   small and the log shows "SSD prefetch for <id>
-                  started/done".
+                  started/done". Unpatched, on a drive that needs more
+                  than ~20 s for the read, the request can also FAIL: the
+                  lazy restore reads the files inside a Metal command
+                  buffer and the macOS GPU watchdog kills it
+                  (kIOGPUCommandBufferCallbackErrorTimeout).
+                  Before each SSD pass the probe drops the cache files
+                  from the macOS file cache (msync MS_INVALIDATE per file,
+                  no root needed), so the read is really cold.
 
 Scenario "pool" - MLX keeps freed Metal buffers for reuse; phys_footprint
                   charges them, so the memory guard used to read soft/hard
@@ -30,15 +37,18 @@ Scenario "pool" - MLX keeps freed Metal buffers for reuse; phys_footprint
 
 Usage examples:
   python3 probe-ssd-pool.py                    # auto-detect, both scenarios
-  python3 probe-ssd-pool.py --scenario ssd --iters 2 --parallel 3 --purge
+  python3 probe-ssd-pool.py --scenario ssd --iters 2
   python3 probe-ssd-pool.py --base-url http://127.0.0.1:8001 \
-      --api-key KEY --model Qwen3-32B-4bit --log ~/.omlx-dev/omlx.log
+      --api-key KEY --model Qwen3-32B-4bit --log ~/.omlx-dev/logs/server.log
 """
 
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.util
 import json
+import mmap
 import os
 import random
 import re
@@ -49,6 +59,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from pathlib import Path
 
 GAP_SLOW_S = 0.5          # an inter-token gap above this is a stall
@@ -57,7 +68,12 @@ SETTINGS_CANDIDATES = [
     "~/.omlx/settings.json",
     "~/Library/Application Support/oMLX/settings.json",
 ]
+# server.log first: the Homebrew service log can be cut down to warnings,
+# and the INFO lines the verdicts need ("SSD prefetch for ...") land only in
+# <base>/logs/server.log.
 LOG_CANDIDATES = [
+    "~/.omlx-dev/logs/server.log",
+    "~/.omlx/logs/server.log",
     "/opt/homebrew/var/log/omlx-dev.log",
     "/opt/homebrew/var/log/omlx.log",
     "~/.omlx-dev/omlx.log",
@@ -107,6 +123,7 @@ class Http:
     def chat_stream_timed(self, model: str, prompt: str, max_tokens: int,
                           stop_after: threading.Event | None = None,
                           prog: dict | None = None,
+                          extra: dict | None = None,
                           ) -> dict:
         """Stream a completion, timestamp every token chunk.
 
@@ -124,6 +141,7 @@ class Http:
                 "max_tokens": max_tokens,
                 "temperature": 0,
                 "stream": True,
+                **(extra or {}),
             }, timeout=600.0)
         except Exception as exc:  # noqa: BLE001
             return {"error": f"{type(exc).__name__}: {exc}"}
@@ -183,6 +201,103 @@ def try_purge() -> str:
             "terminal before each SSD pass, or start the probe under sudo)")
 
 
+_libc = None
+
+
+def _libc_fns():
+    global _libc
+    if _libc is None:
+        lc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        lc.mmap.restype = ctypes.c_void_p
+        lc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                            ctypes.c_int, ctypes.c_int, ctypes.c_longlong]
+        lc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        lc.msync.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+        lc.mincore.argtypes = [ctypes.c_void_p, ctypes.c_size_t,
+                               ctypes.c_char_p]
+        _libc = lc
+    return _libc
+
+
+def file_cache(cache_dir: str, evict: bool) -> dict:
+    """Measure (and optionally drop) the OS file cache of the SSD cache files.
+
+    Eviction is msync(MS_SYNC | MS_INVALIDATE) on a shared read-only mapping
+    of each block file, the same call `vmtouch -e` uses. MS_SYNC writes any
+    dirty page first, so no data is lost; only the cached copy goes. No root
+    needed. Residency is read back with mincore(). Never fails the run.
+    """
+    if sys.platform != "darwin":
+        return {"error": "file-cache eviction is implemented for macOS only"}
+    try:
+        lc = _libc_fns()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"libc not usable: {exc}"}
+    ms_sync, ms_invalidate = 0x10, 0x2          # <sys/mman.h> on Darwin
+    page = mmap.PAGESIZE
+    n_files = total = resident = 0
+    for dirpath, _dirs, names in os.walk(cache_dir):
+        for name in names:
+            if not name.endswith(".safetensors"):
+                continue
+            path = os.path.join(dirpath, name)
+            try:
+                size = os.path.getsize(path)
+                if size == 0:
+                    continue
+                fd = os.open(path, os.O_RDONLY)
+            except OSError:
+                continue
+            try:
+                addr = lc.mmap(None, size, mmap.PROT_READ, mmap.MAP_SHARED,
+                               fd, 0)
+                if addr in (None, ctypes.c_void_p(-1).value):
+                    continue
+                try:
+                    if evict:
+                        lc.msync(addr, size, ms_sync | ms_invalidate)
+                    vec = ctypes.create_string_buffer((size + page - 1) // page)
+                    lc.mincore(addr, size, vec)
+                    resident += min(size, sum(b & 1 for b in vec.raw) * page)
+                finally:
+                    lc.munmap(addr, size)
+                n_files += 1
+                total += size
+            finally:
+                os.close(fd)
+    return {"files": n_files, "gb": round(total / 1024 ** 3, 2),
+            "resident_gb": round(resident / 1024 ** 3, 2)}
+
+
+def wait_cache_quiet(cache_dir: str, quiet_s: float = 8.0,
+                     timeout_s: float = 900.0) -> float:
+    """Wait until no block file in cache_dir changes for quiet_s seconds.
+
+    After a hot-cache clear the blocks go to the SSD write queue; while they
+    are pending they are served from RAM and no drive read happens. On a slow
+    card the queue needs minutes. Returns the seconds waited.
+    """
+    t0 = time.monotonic()
+    last = None
+    quiet_since = time.monotonic()
+    while time.monotonic() - t0 < timeout_s:
+        snap = 0
+        for dirpath, _dirs, names in os.walk(cache_dir):
+            for name in names:
+                try:
+                    st = os.stat(os.path.join(dirpath, name))
+                except OSError:
+                    continue
+                snap = hash((snap, name, st.st_size, st.st_mtime_ns))
+        if snap != last:
+            last = snap
+            quiet_since = time.monotonic()
+        elif time.monotonic() - quiet_since >= quiet_s:
+            break
+        time.sleep(1.0)
+    return round(time.monotonic() - t0, 1)
+
+
 def long_prompt(target_tokens: int, tag: str) -> str:
     """Unique filler text of roughly target_tokens tokens (about 0.8 w/tok).
 
@@ -190,7 +305,9 @@ def long_prompt(target_tokens: int, tag: str) -> str:
     and frees buffers and each prefix really has to be written to the SSD.
     """
     words = max(10, int(target_tokens / 0.8))
-    rng = random.Random(hash((NONCE, tag)) & 0xFFFFFFFF)
+    # crc32, not hash(): str hashes are randomized per process, so a run
+    # that re-uses --nonce would otherwise build a different prompt
+    rng = random.Random(zlib.crc32(f"{NONCE}/{tag}".encode()))
     syll = ("ta ne ki ro mu sen vi dl a tr po ke li zn ga fe ti "
             "bo ru sha kle mon vii zeta qua").split()
     head = f"Probe {NONCE}/{tag}. Read the following invented log corpus. "
@@ -276,8 +393,11 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
             prog: dict = {}
 
             def stream_bg(box=box, prog=prog):
-                box["b"] = http.chat_stream_timed(model, filler, 400,
-                                                  stop_after=stop, prog=prog)
+                # ignore_eos: the stream must outlive the restore window;
+                # a stream that ends early measures nothing
+                box["b"] = http.chat_stream_timed(model, filler, 4000,
+                                                  stop_after=stop, prog=prog,
+                                                  extra={"ignore_eos": True})
 
             t = threading.Thread(target=stream_bg, daemon=True)
             t.start()
@@ -316,14 +436,37 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
             t.start()
             hit_threads.append(t)
             time.sleep(0.05)     # near-simultaneous, ordered
+
+        # A short unrelated request: while a prefetch defers the SSD hit,
+        # admission of ALL waiting requests is held, so this shows the
+        # head-of-line cost (first token vs. the SSD hit's latency).
+        small: dict = {}
+
+        def small_req():
+            delay = 1.0 - (time.monotonic() - t_fire)
+            if delay > 0:
+                time.sleep(delay)
+            small["fired_s"] = round(time.monotonic() - t_fire, 2)
+            out = http.chat_stream_timed(model, f"Say hi. ({NONCE} {label})", 8)
+            small["ttft_s"] = (round(out["ttft_s"], 2)
+                               if out.get("ttft_s") is not None else None)
+            small["error"] = out.get("error")
+
+        ts = threading.Thread(target=small_req, daemon=True)
+        ts.start()
         for t in hit_threads:
             t.join(timeout=900)
+        ts.join(timeout=900)
         stop.set()
         for t, _bx, _p in streams:
             t.join(timeout=300)
 
         res["a_fire_offset_s"] = round(t_fire - pass_t0, 1)
         res["hits"] = hits
+        res["small"] = small
+        if small.get("ttft_s") is not None:
+            small["first_token_after_fire_s"] = round(
+                small["fired_s"] + small["ttft_s"], 2)
         ok_hits = [h for h in hits if "latency_s" in h]
         res["a_max_latency_s"] = max((h["latency_s"] for h in ok_hits),
                                      default=None)
@@ -357,6 +500,9 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
             print(f"      hit {h['n']}: " + (f"{h.get('latency_s')}s, cached "
                   f"{h.get('cached_tokens')}" if "latency_s" in h
                   else f"FAILED {h.get('error')}"))
+        print(f"      small request (fired at +{small.get('fired_s')}s): first "
+              f"token at +{small.get('first_token_after_fire_s')}s"
+              + (f", FAILED {small['error']}" if small.get("error") else ""))
         return res
 
     passes = []
@@ -372,9 +518,6 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
                   "between iterations instead, otherwise the prefix stays "
                   "in RAM and the test is invalid")
             break
-        time.sleep(1)
-        if args.purge:
-            print(f"    OS file cache: {try_purge()}")
         noop = (clear_report.get("total_cleared", 0) == 0
                 and clear_report.get("bytes_reclaimed", 0) == 0)
         note = ("  WARNING: clear was a no-op (total_cleared=0) - the RAM "
@@ -382,11 +525,31 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
                 "the SSD path" if noop else "")
         print(f"[2.{i + 1}] hot cache cleared ({json.dumps(clear_report)[:120]})"
               f"{note}")
+        time.sleep(1)
+        if args.cache_dir:
+            waited = wait_cache_quiet(args.cache_dir)
+            print(f"    SSD writes settled after {waited}s")
+        if args.evict and args.cache_dir:
+            fc = file_cache(args.cache_dir, evict=True)
+            print(f"    OS file cache of {args.cache_dir}: {fc}")
+            if fc.get("resident_gb"):
+                print("    WARNING: some block files are still cached; the "
+                      "read below is partly warm")
+        elif args.evict:
+            print("    cache dir unknown (pass --cache-dir); the SSD read may "
+                  "be served warm from the OS file cache")
+        if args.purge:
+            print(f"    OS file cache (purge): {try_purge()}")
         passes.append(one_pass(f"run {i + 1}: SSD-only prefix"))
         time.sleep(2)
 
     window = logw.new_lines()
     markers = [ln for ln in window if "SSD prefetch" in ln]
+    gpu_fail = [ln for ln in window
+                if "Command buffer execution failed" in ln
+                or "GPU Timeout" in ln]
+    speeds = [float(m.group(1)) for ln in markers
+              for m in [re.search(r"\((\d+(?:\.\d+)?) MB/s\)", ln)] if m]
     verdict = "inconclusive"
     ssd_passes = [p for p in passes if p["label"].startswith("run")]
     if ssd_passes:
@@ -394,14 +557,27 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
         worst = max((p.get("b_max_gap_s") or 0) for p in ssd_passes)
         ctrl_gap = ctrl.get("b_max_gap_s") or 0
         cold = [p for p in ssd_passes if p.get("a_cached_tokens", 0) == 0]
-        if len(cold) == len(ssd_passes):
+        failed = [h for p in ssd_passes for h in p.get("hits", [])
+                  if "error" in h]
+        if failed and gpu_fail:
+            verdict = (f"OLD PATH FAILED: {len(failed)} SSD-hit request(s) "
+                       "died in the Metal GPU watchdog "
+                       "(kIOGPUCommandBufferCallbackErrorTimeout) - the "
+                       "synchronous restore read the drive inside a GPU "
+                       f"command buffer; decode froze for up to {worst}s")
+        elif failed:
+            verdict = (f"{len(failed)} SSD-hit request(s) failed "
+                       f"({failed[0].get('error')}); read the server log")
+        elif len(cold) == len(ssd_passes):
             verdict = ("PRECONDITION FAILED: request A got no cache hit after "
                        "the clear - the prefix never reached the SSD (hot "
                        "cache write-through off?) or was dropped with it; "
                        "the stall question is unanswered")
         elif markers:
             verdict = (f"prefetch path ACTIVE ({len(markers)} log lines); "
-                       f"worst stall {worst}s vs RAM-hit control {ctrl_gap}s")
+                       f"worst stall {worst}s vs RAM-hit control {ctrl_gap}s"
+                       + (f"; drive read {min(speeds):.0f}-{max(speeds):.0f}"
+                          " MB/s" if speeds else ""))
         elif worst > max(2.0, 3 * max(ctrl_gap, 0.05)):
             verdict = (f"STALL REPRODUCED: SSD-only restore blocked the "
                        f"decode for up to {worst}s (control {ctrl_gap}s), "
@@ -410,11 +586,13 @@ def run_ssd(http: Http, model: str, args, logw: LogWindow, report: dict) -> None
             verdict = (f"cache hit after clear but no stall ({worst}s vs "
                        f"control {ctrl_gap}s) and no prefetch log lines - "
                        "the read was served warm (OS page cache or a RAM "
-                       "copy the clear missed); rerun with --purge for a "
-                       "cold read")
+                       "copy the clear missed); check the 'OS file cache' "
+                       "lines above")
     report["ssd"] = {
         "passes": passes,
         "prefetch_log_lines": markers[-10:],
+        "gpu_failure_log_lines": gpu_fail[-5:],
+        "prefetch_mb_s": speeds,
         "hot_cache_clear_response": clear_report,
         "verdict": verdict,
     }
@@ -560,7 +738,7 @@ def run_pool(http: Http, model: str, args, logw: LogWindow, report: dict) -> Non
 # main
 # --------------------------------------------------------------------------
 
-def auto_detect() -> tuple[str | None, str | None]:
+def auto_detect() -> tuple[str | None, str | None, dict, Path | None]:
     for cand in SETTINGS_CANDIDATES:
         p = Path(cand).expanduser()
         if not p.exists():
@@ -575,8 +753,8 @@ def auto_detect() -> tuple[str | None, str | None]:
         host = server.get("host") or "127.0.0.1"
         if host in ("0.0.0.0", "::"):
             host = "127.0.0.1"
-        return f"http://{host}:{port}", auth.get("api_key")
-    return None, None
+        return f"http://{host}:{port}", auth.get("api_key"), data, p
+    return None, None, {}, None
 
 
 def pick_model(http: Http) -> str | None:
@@ -601,9 +779,13 @@ def pick_model(http: Http) -> str | None:
     return chat[0] if chat else (ids[0] if ids else None)
 
 
-def find_log(explicit: str | None) -> str | None:
+def find_log(explicit: str | None, settings_path: Path | None = None) -> str | None:
     if explicit:
         return explicit
+    if settings_path is not None:
+        own = settings_path.parent / "logs" / "server.log"
+        if own.exists():
+            return str(own)
     for cand in LOG_CANDIDATES:
         p = Path(cand).expanduser()
         if p.exists():
@@ -629,9 +811,10 @@ def main() -> int:
     ap.add_argument("--stream-lead-s", type=float, default=2.0,
                     help="let the decode stream run this long before firing "
                          "the SSD-hit request (default 2)")
-    ap.add_argument("--parallel", type=int, default=2,
+    ap.add_argument("--parallel", type=int, default=None,
                     help="requests decoding concurrently (both scenarios; "
-                         "default 2)")
+                         "default 2, capped so the SSD hit still gets a slot "
+                         "under the board's max_concurrent_requests)")
     ap.add_argument("--queued", type=int, default=2,
                     help="extra requests piled onto the queue (default 2)")
     ap.add_argument("--decode-tokens", type=int, default=256,
@@ -640,20 +823,41 @@ def main() -> int:
     ap.add_argument("--stagger-s", type=float, default=0.75,
                     help="delay between starting concurrent requests "
                          "(default 0.75)")
+    ap.add_argument("--no-evict", dest="evict", action="store_false",
+                    help="do NOT drop the SSD cache files from the OS file "
+                         "cache before each SSD pass (default: drop them, no "
+                         "root needed, so the read is really cold)")
+    ap.add_argument("--cache-dir",
+                    help="SSD cache dir (default: cache.ssd_cache_dir from "
+                         "the board's settings.json)")
     ap.add_argument("--purge", action="store_true",
-                    help="run 'purge' (needs root) before each SSD pass so "
-                         "the block files are really cold in the OS cache")
+                    help="also run 'purge' (needs root) before each SSD pass")
     ap.add_argument("--report",
                     default=f"uplift-probe-report-{time.strftime('%Y%m%d-%H%M%S')}.json")
     args = ap.parse_args()
 
-    base, key = auto_detect()
+    base, key, settings, settings_path = auto_detect()
     base = args.base_url or base or "http://127.0.0.1:8000"
     key = args.api_key or key
     http = Http(base, key)
-    logw = LogWindow(find_log(args.log))
+    logw = LogWindow(find_log(args.log, settings_path))
+    if not args.cache_dir:
+        cd = (settings.get("cache") or {}).get("ssd_cache_dir")
+        if cd:
+            args.cache_dir = os.path.realpath(os.path.expanduser(cd))
+    max_conc = (settings.get("scheduler") or {}).get("max_concurrent_requests")
+    if args.parallel is None:
+        args.parallel = 2
+        if isinstance(max_conc, int) and max_conc > 0:
+            args.parallel = max(1, min(2, max_conc - 1))
+    elif isinstance(max_conc, int) and args.parallel >= max_conc:
+        print(f"WARNING: --parallel {args.parallel} fills all "
+              f"{max_conc} slots (max_concurrent_requests); extra streams and "
+              "the SSD hit queue instead of running beside the restore")
 
     print(f"board   : {base}")
+    print(f"settings: {settings_path or 'not found'}; cache dir: "
+          f"{args.cache_dir or 'unknown'}; parallel streams: {args.parallel}")
     print(f"log     : {logw.path or 'NOT FOUND (measurements only, no log markers)'}")
     if logw.path:
         hist = logw.history_markers()
