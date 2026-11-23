@@ -2287,8 +2287,11 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
                 disabled = {q.get("id")
                             for q in store.load().get("patches", [])
                             if not q.get("enabled")}
-            except Exception:               # noqa: BLE001 — display-only info
-                pass
+            except (OSError, ValueError, AttributeError) as exc:
+                # display-only info: a store we cannot read keeps every row
+                # treated as enabled (the old console behaviour) — but the
+                # reason lands in the log, never silently (HYGIENE-3)
+                _log.info("patch store unreadable for the disabled check: %s", exc)
             for pid, rep in (dr.get("reports") or {}).items():
                 if rep.get("check") == "update_available" and rep.get("promoted"):
                     # "curated" only when it IS one of ours: a personal patch with
