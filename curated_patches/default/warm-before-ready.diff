@@ -1,8 +1,8 @@
 diff --git a/omlx/engine/base.py b/omlx/engine/base.py
-index 9058744..859a0be 100644
+index d5cd95d2..2b99ace8 100644
 --- a/omlx/engine/base.py
 +++ b/omlx/engine/base.py
-@@ -367,6 +367,58 @@ class BaseEngine(ABC):
+@@ -439,6 +439,58 @@ class BaseEngine(ABC):
          """
          pass
  
@@ -62,12 +62,12 @@ index 9058744..859a0be 100644
      async def stream_generate(
          self,
 diff --git a/omlx/engine/batched.py b/omlx/engine/batched.py
-index 9f5bb96..8fba51c 100644
+index a37317ce..73cbebd2 100644
 --- a/omlx/engine/batched.py
 +++ b/omlx/engine/batched.py
-@@ -815,6 +815,8 @@ class BatchedEngine(BaseEngine):
-                 except Exception as e:
-                     logger.error(f"SpecPrefill: draft model load failed: {e}")
+@@ -818,6 +818,8 @@ class BatchedEngine(BaseEngine):
+                 get_mlx_executor(), attach_specprefill_draft, self, draft_path
+             )
  
 +        await self._warm_before_ready("BatchedEngine")
 +
@@ -75,10 +75,10 @@ index 9f5bb96..8fba51c 100644
          logger.info(f"BatchedEngine loaded: {self._model_name}")
  
 diff --git a/omlx/engine/vlm.py b/omlx/engine/vlm.py
-index 04f2481..b653274 100644
+index f0cbd147..b5ceb296 100644
 --- a/omlx/engine/vlm.py
 +++ b/omlx/engine/vlm.py
-@@ -2913,6 +2913,11 @@ class VLMBatchedEngine(BaseEngine):
+@@ -2938,6 +2938,11 @@ class VLMBatchedEngine(BaseEngine):
          # Inject mlx-lm tool calling support into VLM tokenizer
          self._inject_tool_calling(self._tokenizer)
  
