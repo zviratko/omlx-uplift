@@ -2275,6 +2275,20 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
         try:
             dr = patchsource.check_all(store, keg_sp, dev_root=base_wt)
             summary["drift"] = dr
+            # A row the user DISABLED already opted out of the build: a
+            # re-gate that cannot land is its steady state, not a build
+            # event (user report 2026-11-23: the retired specprefill-profile
+            # printed 'source re-gate failed — 7/29 files' on every build
+            # after `patch disable`). check_all still stores any candidate
+            # that validates — the update_available announcement below is
+            # the cue to re-enable, and that one stays on the console.
+            disabled = set()
+            try:
+                disabled = {q.get("id")
+                            for q in store.load().get("patches", [])
+                            if not q.get("enabled")}
+            except Exception:               # noqa: BLE001 — display-only info
+                pass
             for pid, rep in (dr.get("reports") or {}).items():
                 if rep.get("check") == "update_available" and rep.get("promoted"):
                     # "curated" only when it IS one of ours: a personal patch with
@@ -2308,9 +2322,14 @@ def _refresh_patch_sources(cfg: dict, res) -> dict:
                     # fetch_and_gate printed an unattributed 'gate REJECTED' —
                     # users read it as the build failing (it was not; the
                     # candidate simply cannot be stored). Name the patch.
-                    _emit(res, "out", f"{pid}: source re-gate failed — "
-                                      f"{gate_failure_detail(rep)[:200]} "
-                                      "(stored version unchanged)")
+                    detail = gate_failure_detail(rep)[:200]
+                    if pid in disabled:
+                        _log.info("%s: source re-gate failed — %s "
+                                  "(patch disabled — stored version unchanged)",
+                                  pid, detail)
+                    else:
+                        _emit(res, "out", f"{pid}: source re-gate failed — "
+                                          f"{detail} (stored version unchanged)")
         except Exception as exc:                    # noqa: BLE001 — best-effort
             _emit(res, "err", f"drift check skipped: {exc}")
         finally:

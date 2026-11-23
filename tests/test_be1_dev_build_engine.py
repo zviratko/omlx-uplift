@@ -323,3 +323,53 @@ def test_cli_no_longer_reaches_devsrc_privates():
         assert priv not in cli_src, f"cli still touches devsrc.{priv}"
     assert "cmd_dev_install" not in dev_router, "router must use the engine"
     assert "RESULT:" not in dev_router and "RESULT:" not in (repo / "omlx_uplift" / "static" / "uplift_devpanel.js").read_text()
+
+
+def test_disabled_patch_regate_noise_goes_to_the_log(home, monkeypatch, caplog):
+    """user report 2026-11-23: after `patch disable specprefill-profile` (the
+    PR closed as superseded by upstream #5562), EVERY build printed
+
+        specprefill-profile: source re-gate failed — 7/29 files failed: ...
+
+    for the disabled row. Disabling is opting out of the build - a re-gate
+    that cannot land is that row's steady state, not a build event. The
+    failure line belongs in the process log only; positive announcements
+    (update vN available) still print - that is the cue to re-enable."""
+    cfg = _cfg(home, monkeypatch)
+    from omlx_uplift import brewutil, curated, patchsource, patches as _pm
+
+    (home / "dev-src").mkdir(parents=True, exist_ok=True)
+    cfg["src_path"] = str(home / "dev-src")
+    monkeypatch.setattr(devsrc, "_vanilla_keg_site_packages", lambda: "")
+    monkeypatch.setattr(brewutil, "keg_site_packages", lambda name: "/tmp/fake-sp")
+    monkeypatch.setattr(devsrc, "detached_base_worktree",
+                        lambda cfg, tmp: str(home))
+
+    class _Store:
+        def load(self):
+            return {"patches": [{"id": "dead-pr", "enabled": False},
+                                {"id": "live-pr", "enabled": True}]}
+
+    monkeypatch.setattr(_pm, "PatchStore", lambda *a, **k: _Store())
+    monkeypatch.setattr(
+        curated, "sync", lambda store, keg, build_root=None: {
+            "ok": True, "report": {}, "notes": []})
+    err = lambda f: {"check": "error", "reason": "context mismatch",
+                     "files": [{"path": f, "status": "fail",
+                                "reason": "context mismatch"}]}
+    reports = {"dead-pr": err("omlx/engine/batched.py"),
+               "live-pr": err("omlx/x.py")}
+    monkeypatch.setattr(patchsource, "check_all",
+                        lambda store, keg, dev_root=None: {
+                            "ok": True, "reports": dict(reports)})
+    res = devsrc.BuildResult(ok=True, stage="refresh", returncode=0)
+    with caplog.at_level(logging.INFO):
+        devsrc._refresh_patch_sources({"src_path": str(home / "dev-src")}, res)
+    out = "\n".join(t for _, t in res.lines)
+    assert "live-pr: source re-gate failed" in out, out
+    assert "dead-pr" not in out, \
+        "a disabled row's re-gate failure must not print on the console"
+    assert any("dead-pr: source re-gate failed" in r.getMessage()
+               and "patch disabled" in r.getMessage()
+               for r in caplog.records), \
+        "the disabled row's failure must stay discoverable in the log"
