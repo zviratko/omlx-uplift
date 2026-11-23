@@ -1356,7 +1356,7 @@
  "uplift.se.typenote.hidden": "Le impostazioni di generazione (sampling, ragionamento, grammatica, decodifica speculativa) non si applicano al motore {type} e qui sono nascoste, esattamente come nel pannello classic.",
  "uplift.se.typenote.sticky": "Le impostazioni memorizzate delle famiglie nascoste NON vengono azzerate dal filtro del tipo e mantengono l'effetto indicato: {keys}.",
  "uplift.se.typenote.template": "I template globali possono contenere ogni impostazione; ogni modello applica solo le chiavi adatte al suo tipo.",
- "uplift.se.specprefill.load_locked": "Legato al caricamento del modello — modificalo nella scheda BASE. Un alias può differire solo all'attivazione.",
+ "uplift.se.specprefill.reload_title": "La scelta del primo modello draft viene applicata subito; modificare o cancellare quello caricato si libera solo con il ricaricamento del modello.",
  "uplift.status.no_engines": "Nessun modello caricato",
  "uplift.ui.delete_global_template": "Elimina questo template globale (pacchetto di impostazioni memorizzate)",
  "uplift.ui.edit_global_template": "Modifica questo template",

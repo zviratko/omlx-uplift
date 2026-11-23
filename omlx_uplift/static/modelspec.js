@@ -36,12 +36,11 @@
         'moe_expert_offload_enabled', 'moe_expert_offload_resident_fraction',
         'a8_prefill_enabled', 'a8_prefill_min_tokens',
         'external_engine',
-        // SPEC-1 (our specprefill split): the master switch and drafter are
-        // not profile fields at all anymore (server EXCLUDED), so they cannot
-        // appear in a diffusion profile; keep_pct/threshold are universal
-        // request-time profile fields — spec-decode is inert on the diffusion
-        // lane, so they sit in THIS set — and specprefill_auto_enabled is
-        // universal but inert without the master (classic leaves it out).
+        // SYNC-1 run 34 (upstream 69abd86f #5562): the native per-alias
+        // SpecPrefill split replaces our specprefill-profile patch — classic
+        // lists the whole family here (dashboard.js:54-58); spec-decode is
+        // inert on the diffusion lane.
+        'specprefill_enabled', 'specprefill_draft_model',
         'specprefill_keep_pct', 'specprefill_threshold',
         // SYNC-1 (upstream 7a4ea39): the dflash cache/context knobs are gone
         // from ModelSettingsRequest (extra='forbid'); only these survive.
@@ -116,9 +115,9 @@
         'external_engine',
         'specprefill_enabled', 'specprefill_draft_model', 'specprefill_keep_pct',
         // SYNC-1 (upstream 7a4ea39): surviving dflash family only.
-        // SPEC-1: specprefill_auto_enabled is LLM-family material too (the
-        // row lives behind the llm/vlm gate; strip it on a type flip).
-        'specprefill_threshold', 'specprefill_auto_enabled',
+        // SYNC-1 run 34: the auto-activation field died with the retired
+        // specprefill-profile patch — #5562 activates per alias natively.
+        'specprefill_threshold',
         'dflash_enabled', 'dflash_draft_model',
         'dflash_draft_quant_enabled', 'dflash_draft_quant_weight_bits',
         'dflash_draft_quant_group_size', 'dflash_draft_window_size',
@@ -404,8 +403,6 @@
             specprefill_draft_model: s.specprefill_draft_model || '',
             specprefill_keep_pct: s.specprefill_keep_pct ? String(s.specprefill_keep_pct) : '0.2',
             specprefill_threshold: s.specprefill_threshold || null,
-            // SPEC-1: absent/unset = active for every request (classic helper init)
-            specprefill_auto_enabled: s.specprefill_auto_enabled !== false,
             external_engine: s.external_engine || '',
             dflash_enabled: s.dflash_enabled || false,
             dflash_draft_model: s.dflash_draft_model || '',
@@ -694,9 +691,6 @@
             specprefill_draft_model: ms.specprefill_draft_model || null,
             specprefill_keep_pct: ms.specprefill_enabled ? (parseFloat(ms.specprefill_keep_pct) || 0.2) : null,
             specprefill_threshold: ms.specprefill_enabled ? (ms.specprefill_threshold || null) : null,
-            // SPEC-1 (classic send shape): false = idle drafter; anything
-            // else = null, i.e. unset (active for every request, the default).
-            specprefill_auto_enabled: ms.specprefill_auto_enabled === false ? false : null,
             external_engine: ms.external_engine || null,
             // SYNC-1 (upstream 7a4ea39): the cache/context knobs (activation
             // bits, max_ctx, in-memory cache + entries + bytes, ssd cache +
@@ -794,7 +788,6 @@
                 qwen35_ane_prefill_cpu_threads: 8, qwen35_ane_prefill_cpu_shared_resource: true,
                 specprefill_enabled: false, specprefill_draft_model: null,
                 specprefill_keep_pct: null, specprefill_threshold: null,
-                specprefill_auto_enabled: null,
                 external_engine: '',
                 dflash_enabled: false, mtp_enabled: false,
                 mtp_adaptive_max_depth: null, mtp_fixed_depth: null,
@@ -836,6 +829,38 @@
     function ctxRebuilds(model, oldWindow, newWindow) {
         if (!yarnFamily(model)) return false;
         return yarnFactor(model, oldWindow) !== yarnFactor(model, newWindow);
+    }
+
+    /* SYNC-1 run 34 (upstream 69abd86f #5562): the effective SpecPrefill
+       draft — the server's specprefill_draft() rule (model_settings.py):
+       the drafter path while the switch is on, nothing while it is off. */
+    function specprefillEffectiveDraft(p) {
+        return p && p.specprefill_enabled ? (p.specprefill_draft_model || null) : null;
+    }
+    /* Whether a queued BASE-tab change would unload the loaded engine.
+       Picking a first drafter attaches in place (no reload); changing or
+       clearing one the settings carry releases only on an unload (admin
+       routes requires_reload: 'Only an unload releases a SpecPrefill draft
+       that is no longer used'). On ANE-k2 models the drafter is engine
+       material for ANY change — those reject it at load, so the signature
+       carries it (engine_pool:1400-1402). Tensor-parallel deployments are
+       the gate's other arm and invisible to the editor — the same accepted
+       approximation as a8/rank_a8. */
+    function specprefillQueuedRebuild(model, origPayload, nextPayload) {
+        const a = specprefillEffectiveDraft(origPayload);
+        const b = specprefillEffectiveDraft(nextPayload);
+        if (a === b) return false;
+        const gated = !!(nextPayload && nextPayload.qwen35_ane_prefill_enabled)
+            && normType(model && model.config_model_type) === 'k2_horizon';
+        return gated || !!a;
+    }
+    /* Whether the RELOAD badge can ever apply to this model's SpecPrefill
+       rows: a stored draft (change/clear unloads) or an ANE-k2 model (any
+       draft change is engine material there). Mirrors the 'render whenever
+       it CAN apply' rule of the context-window badge. */
+    function specprefillReloadPossible(model, origPayload) {
+        return !!specprefillEffectiveDraft(origPayload) ||
+            normType(model && model.config_model_type) === 'k2_horizon';
     }
 
     /* ---- runtime-signature replica (engine_pool._engine_runtime_signature)
@@ -927,14 +952,16 @@
         add('qwen4_gdn_decode_wide_proj', !!d.qwen4_gdn_decode_wide_proj);
         add('deepseek_v41_engram_ssd_offload', !!d.deepseek_v41_engram_ssd_offload);
         add('deepseek_v41_ced_prefill_enabled', cedPrefillOn(d));
-        const spOn = !!d.specprefill_enabled && has(d.specprefill_draft_model);
-        add('specprefill_enabled', spOn);
-        if (spOn) {
-            add('specprefill_draft_model', d.specprefill_draft_model);
-            // SPEC-1 v3: keep_pct/threshold left the engine signature
-            // server-side — the request carries the effective (profile-
-            // merged) values, so an alias may tune them without a reload.
-        }
+        // SYNC-1 run 34 (upstream 69abd86f #5562): a SpecPrefill draft now
+        // attaches to the LOADED engine in place, so the pair left the
+        // signature — the server signs the effective draft under one key
+        // only where SpecPrefill is rejected at load (engine_pool:1400-1402:
+        // a tensor-parallel deployment or the ANE k2 backend). Deployments
+        // are invisible to the editor — the same accepted approximation as
+        // a8/rank_a8; the single-machine unload rule is measured by
+        // specprefillQueuedRebuild, not by the signature.
+        if (aneOn && normType(model && model.config_model_type) === 'k2_horizon')
+            add('specprefill', specprefillEffectiveDraft(d));
         // SYNC-1 2026-10-13: engine_pool._engine_runtime_signature adds
         // ('external_engine', value or None) UNCONDITIONALLY under its
         // security/load gates — mirror the same shape so runtimeDiff and
@@ -998,9 +1025,12 @@
         // SYNC-1 (3c39990): model-level + engine_pool signature material → the
         // editor must badge it RELOAD, exactly like the PLE offload row.
         'qwen4_gdn_decode_wide_proj',
-        'specprefill_enabled', 'specprefill_draft_model',
-        // SPEC-1 v3: keep_pct/threshold are no longer runtime material (the
-        // server dropped them from the engine signature; they ride requests).
+        // SYNC-1 run 34 (upstream 69abd86f #5562): the whole SpecPrefill
+        // family left the static runtime set — a draft attaches in place, so
+        // picking one saves live. Changing or clearing a LOADED draft still
+        // needs an unload (admin routes requires_reload); the editor routes
+        // exactly that case through the deferred store via
+        // specprefillQueuedRebuild (the max_context_window pattern).
         'external_engine',
         // SYNC-1 (7a4ea39): surviving dflash family only — the cache/context
         // knobs no longer exist server-side, so they cannot be runtime material.
@@ -1062,9 +1092,6 @@
             turboquant_kv_scheme: 'turboquant_kv_enabled',
             a8_prefill_min_tokens: 'a8_prefill_enabled',
             moe_expert_offload_resident_fraction: 'moe_expert_offload_enabled',
-            specprefill_draft_model: 'specprefill_enabled',
-            specprefill_keep_pct: 'specprefill_enabled',
-            specprefill_threshold: 'specprefill_enabled',
             dflash_draft_model: 'dflash_enabled',
             dflash_draft_quant_enabled: 'dflash_enabled',
             dflash_draft_quant_weight_bits: 'dflash_enabled',
@@ -1085,6 +1112,7 @@
     function _sigRaw(d, key) {
         // map signature names back to a displayable raw value
         if (key === 'ane_prefill_backend') return d.ane_prefill_backend;
+        if (key === 'specprefill') return specprefillEffectiveDraft(d);
         return d[key];
     }
 
@@ -1221,15 +1249,17 @@
         'thinking_budget_enabled', 'thinking_budget_tokens',
         'reasoning_parser', 'guided_grammar_enabled', 'guided_grammar',
         'max_tool_result_tokens',
-        // SPEC-1: activation + keep rate + threshold are universal
-        // request-time fields (an alias may differ without touching the
-        // engine; the master switch and drafter never ride profiles).
-        'specprefill_auto_enabled', 'specprefill_keep_pct', 'specprefill_threshold',
+        // SYNC-1 run 34 (upstream 69abd86f #5562): the whole family rides
+        // profiles and every request carries its own values (server
+        // _specprefill_kwargs) — an alias differs on activation, drafter,
+        // keep rate or threshold without touching the shared engine.
+        'specprefill_enabled', 'specprefill_draft_model',
+        'specprefill_keep_pct', 'specprefill_threshold',
     ];
     const REQ_CHILD_MASTER = {
         thinking_budget_tokens: 'thinking_budget_enabled',
         guided_grammar: 'guided_grammar_enabled',
-        specprefill_auto_enabled: 'specprefill_enabled',
+        specprefill_draft_model: 'specprefill_enabled',
         specprefill_keep_pct: 'specprefill_enabled',
         specprefill_threshold: 'specprefill_enabled',
     };
@@ -1370,6 +1400,8 @@
              buildState, validate, buildPayload, adaptToServerPayload,
              adaptToServerSettings,
              runtimeSignature, runtimeDiff, sigMasterKey, RUNTIME_SETTING_KEYS,
+             specprefillEffectiveDraft, specprefillQueuedRebuild,
+             specprefillReloadPossible,
              YARN_MODEL_TYPES, yarnFamily, yarnFactor, ctxRebuilds,
              effDefault, requestDiff, eqBase, REQUEST_DIFF_KEYS,
              isDflashDraftModel, isVlmMtpDraftModel, isSpecPrefillDraftModel,

@@ -121,9 +121,25 @@ function seDirtyKeys() {                     // dirty keys of the ACTIVE tab
 function seIsRuntimeKey(k) {
     return k === 'model_type_override' ||
         window.UpliftModelSpec.RUNTIME_SETTING_KEYS.has(k) ||
-        seCtxQueuedRebuild(k);
+        seCtxQueuedRebuild(k) ||
+        seSpQueuedRebuild(k);
 }
-/* The one CONDITIONAL reload key: max_context_window is engine material only
+/* The SECOND conditional reload key (SYNC-1 run 34, upstream 69abd86f
+   #5562): a SpecPrefill draft attaches to the loaded engine in place, so
+   PICKING one saves live; changing or clearing a draft the settings carry
+   releases only on an unload (admin routes requires_reload). Base tab only:
+   on a profile tab the whole family is request-time activation — the alias's
+   own switch decides whether its requests use the attached drafter, and an
+   alias never owns an engine rebuild. Contract in modelspec. */
+function seSpQueuedRebuild(k) {
+    if (k !== 'specprefill_enabled' && k !== 'specprefill_draft_model') return false;
+    if (!seIsBaseTab()) return false;
+    const t = seTab();
+    if (!t || !seFormModel) return false;
+    const orig = t.origVals || seOrig || {};
+    return window.UpliftModelSpec.specprefillQueuedRebuild(seFormModel, orig, seValues);
+}
+/* The first conditional reload key: max_context_window is engine material only
    where the queued window passes the checkpoint's native one (YaRN scaling
    baked into the rope tables); inside the native window it is a request-time
    limit the running engine picks up live. Deciding it from the static key set
@@ -567,6 +583,15 @@ function seBind(kind, key, opts) {
             C.tf('uplift.se.ctx.reload_title',
                 'A context window above the model default rebuilds the loaded '
                 + 'engine (model reload); one at or below it applies live.')));
+    else if ((key === 'specprefill_enabled' || key === 'specprefill_draft_model')
+            && seIsBaseTab()
+            && window.UpliftModelSpec.specprefillReloadPossible(
+                seFormModel, seOrig || {}))
+        // CONDITIONAL (SYNC-1 run 34, #5562): rendered whenever it CAN apply
+        // — a stored draft or an ANE-k2 model. Same rule as the ctx badge.
+        name.append(' ', seReloadBadge([key], C.tf('uplift.se.specprefill.reload_title',
+            'Picking a first drafter applies live; changing or clearing the '
+            + 'loaded one releases it only on a model reload.')));
     if (opts && opts.hint) {
         const h = document.createElement('small');
         h.className = 'se-hint';
@@ -613,26 +638,13 @@ function seGatedDiv(cls) {
     if (cls) d.className = cls;
     return d;
 }
-/* SPEC-1 (user 2026-10-28): model-load knobs are not profile fields — the
-   server strips them from profile settings, so editing one on an alias tab
-   silently saves nothing. Keep them VISIBLE greyed (the alias reads what it
-   inherits) but LOCKED; mark the row and let seGateEnabled() honour it.
-   Locking a row never propagates to siblings or children: the activation
-   row lives under a locked master and stays editable, because family
-   gating reads seValues[masterKey], not the master's DOM input. */
-function seLockOnProfile(rowEl, key, why) {
-    if (!rowEl || seIsBaseTab()) return;
-    rowEl.dataset.lockProf = key;
-    rowEl.classList.add('se-off');
-    rowEl.title = why;
-    const i = rowEl.querySelector('input, select, textarea');
-    if (i) i.disabled = true;
-}
+/* Family gating walk: a row is enabled only while every [data-gate] ancestor
+   carries a master that reads true. (SPEC-1's profile-lock branch left with
+   upstream 69abd86f #5562 — the whole SpecPrefill family is now a normal
+   profile field set, editable on alias tabs.) */
 function seGateEnabled(host) {
-    for (let n = host.closest('[data-gate]') || host.closest('[data-lock-prof]');
-            n; n = n.parentElement &&
-            (n.parentElement.closest('[data-gate]') || n.parentElement.closest('[data-lock-prof]'))) {
-        if (n.dataset.lockProf) return false;
+    for (let n = host.closest('[data-gate]'); n;
+            n = n.parentElement && n.parentElement.closest('[data-gate]')) {
         if (n.dataset.gate && seValues[n.dataset.gate] !== true) return false;
     }
     return true;
@@ -2000,13 +2012,6 @@ function renderEditorFields(container) {
                     spBool.title = seValues.is_paroquant
                         ? (seValues.paroquant_reason || 'Paroquant checkpoint')
                         : 'VLM MTP cannot be combined with SpecPrefill.';
-                const spAuto = seBind('bool', 'specprefill_auto_enabled', {
-                    // SPEC-1: reuses classic's modal keys — translated in
-                    // every locale through the mounted catalog.
-                    label: C.tf('modal.model_settings.specprefill_auto',
-                        'Active for Every Request'),
-                    hint: C.tf('modal.model_settings.specprefill_auto_hint',
-                        'Use SpecPrefill on every request above the threshold. When off, the drafter stays loaded but idle — requests can opt in individually and model aliases can turn it on.') });
                 const spDraft = seBind('select', 'specprefill_draft_model',
                     { label: C.tf('uplift.ui.draft_model', 'Drafter model'), options: [{ value: '', label: 'Select draft model...' }, ...pool], picker: true });
                 const spKeep = seBind('select', 'specprefill_keep_pct', { label: 'Keep Rate', options: [
@@ -2018,15 +2023,16 @@ function renderEditorFields(container) {
                     { value: '0.5', label: '50% — Minimal (~1.5x)' }], picker: true });
                 const spThr = seBind('number', 'specprefill_threshold',
                     { label: C.tf('modal.model_settings.specprefill_threshold', 'Threshold (tokens)'), min: 1024, max: 131072, step: 1024 });
-                // SPEC-1 v3: the master switch and drafter ride the model load
-                // (excluded from profile settings server-side); keep rate and
-                // threshold ARE alias-tunable — they left the engine signature
-                // and travel per request, so no lock and no reload badge.
-                const spWhy = C.tf('uplift.se.specprefill.load_locked',
-                    'Tied to the model load — edit it on the BASE tab. An alias can only differ on activation.');
-                seLockOnProfile(spBool, 'specprefill_enabled', spWhy);
-                seLockOnProfile(spDraft, 'specprefill_draft_model', spWhy);
-                seFam(g, 'specprefill_enabled', spBool, [spAuto, spDraft, spKeep, spThr]);
+                // SYNC-1 run 34 (upstream 69abd86f #5562): the native split
+                // replaces our specprefill-profile patch — the whole family is
+                // a model-specific profile field and every request carries its
+                // own values (server _specprefill_kwargs), so nothing here is
+                // locked to the base tab. On the BASE tab the master+drafter
+                // ATTACH the draft: picking a first one saves live, changing
+                // or clearing a loaded one carries the RELOAD badge (the
+                // engine_pool signature holds the draft only on models that
+                // reject SpecPrefill at load — ANE k2 / TP deployments).
+                seFam(g, 'specprefill_enabled', spBool, [spDraft, spKeep, spThr]);
             }
     }
 
@@ -3781,9 +3787,6 @@ const SE_GEN_CLEAR = [
     ['qwen35_ane_prefill_cpu_shared_resource', true],
     ['specprefill_enabled', false], ['specprefill_draft_model', null],
     ['specprefill_keep_pct', 0.2], ['specprefill_threshold', null],
-    // SPEC-1: classic's clear-on-master-off resets the activation flag to
-    // its form default (active) — state shape.
-    ['specprefill_auto_enabled', true],
     ['dflash_enabled', false], ['dflash_draft_model', null],
     ['dflash_draft_quant_enabled', false],
     ['dflash_draft_quant_weight_bits', null],

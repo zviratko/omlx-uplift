@@ -1360,7 +1360,7 @@
  "uplift.se.typenote.hidden": "Les paramètres de génération (échantillonnage, réflexion, Guided Grammar, décodage spéculatif) ne s'appliquent pas au moteur {type} et sont masqués ici, exactement comme dans le tableau de bord classique.",
  "uplift.se.typenote.sticky": "La porte de type N'EFFACE PAS les paramètres enregistrés des familles masquées ; ils gardent leur effet listé : {keys}.",
  "uplift.se.typenote.template": "Les modèles globaux peuvent porter tous les paramètres ; chaque modèle n'applique que les clés adaptées à son type.",
- "uplift.se.specprefill.load_locked": "Lié au chargement du modèle — modifiez-le dans l’onglet BASE. Un alias ne peut différer que sur l’activation.",
+ "uplift.se.specprefill.reload_title": "Choisir un premier drafter s’applique immédiatement ; modifier ou effacer celui qui est chargé ne se libère qu’au rechargement du modèle.",
  "uplift.status.no_engines": "Aucun modèle chargé",
  "uplift.ui.delete_global_template": "Supprimer ce modèle global (lot de paramètres enregistrés)",
  "uplift.ui.edit_global_template": "Modifier ce modèle",

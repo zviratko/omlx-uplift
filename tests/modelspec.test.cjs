@@ -386,97 +386,126 @@ test('runtimeDiff: mtp depth diverges while mtp is on', () => {
     assert.deepStrictEqual(d.map(r => r.key), ['mtp_adaptive_max_depth']);
 });
 test('runtimeDiff: a profile enabling a whole feature diverges on its key', () => {
-    const d = S.runtimeDiff(rt(), rt({ specprefill_enabled: true, specprefill_draft_model: 'd' }));
-    assert.ok(d.some(r => r.key === 'specprefill_enabled'));
+    const d = S.runtimeDiff(rt(), rt({ dflash_enabled: true, dflash_draft_model: 'd' }));
+    assert.ok(d.some(r => r.key === 'dflash_enabled'));
 });
 test('runtimeDiff: sampling-only differences never diverge', () => {
     assert.deepStrictEqual(S.runtimeDiff(rt({ temperature: 0.2 }), rt({ temperature: 1.1 })), []);
 });
 
-/* ---- SPEC-1: SpecPrefill activation split (our omlx branch patch) ----
-   specprefill_auto_enabled is the model/alias "active for every request"
-   switch: request-time only. It must NEVER be engine material (the whole
-   point is that aliases differ on it without a reload), it sends classic's
-   fold (false = idle, anything else = null/unset), and it rides type flips
-   with its SpecPrefill siblings. */
-test('SPEC-1 buildState: unset reads active; stored false reads idle', () => {
-    assert.strictEqual(S.buildState(base(), {}).specprefill_auto_enabled, true);
-    assert.strictEqual(S.buildState(base(), { specprefill_auto_enabled: false })
-        .specprefill_auto_enabled, false);
-    assert.strictEqual(S.buildState(base(), { specprefill_auto_enabled: true })
-        .specprefill_auto_enabled, true);
+/* ---- SYNC-1 run 34 (upstream 69abd86f #5562): native SpecPrefill split ----
+   The merged upstream commit replaces our specprefill-profile patch: the
+   drafter attaches to the LOADED engine in place, every request carries its
+   own SpecPrefill values (server _specprefill_kwargs), and the whole family
+   is a model-specific profile field. specprefill_auto_enabled is gone; the
+   master+drafter pair became a CONDITIONAL reload key measured by
+   specprefillQueuedRebuild (the max_context_window pattern). */
+test('run34: specprefillEffectiveDraft mirrors the server rule', () => {
+    assert.strictEqual(S.specprefillEffectiveDraft({ specprefill_enabled: true,
+        specprefill_draft_model: 'd' }), 'd');
+    assert.strictEqual(S.specprefillEffectiveDraft({ specprefill_enabled: false,
+        specprefill_draft_model: 'd' }), null);
+    assert.strictEqual(S.specprefillEffectiveDraft({ specprefill_enabled: true }), null);
+    assert.strictEqual(S.specprefillEffectiveDraft(undefined), null);
 });
-test('SPEC-1 buildPayload: false persists, true sends null (= unset)', () => {
-    const st = S.buildState(base(), { specprefill_enabled: true,
-                                      specprefill_draft_model: 'd' });
-    st.specprefill_auto_enabled = false;
-    assert.strictEqual(S.buildPayload(st, base()).specprefill_auto_enabled, false);
-    st.specprefill_auto_enabled = true;
-    assert.strictEqual(S.buildPayload(st, base()).specprefill_auto_enabled, null);
+test('run34: no SpecPrefill key is static runtime material anymore', () => {
+    for (const k of ['specprefill_enabled', 'specprefill_draft_model',
+                     'specprefill_keep_pct', 'specprefill_threshold'])
+        assert.ok(!S.RUNTIME_SETTING_KEYS.has(k), k + ' must leave the static set');
 });
-test('SPEC-1: activation is never engine material', () => {
-    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_auto_enabled'));
-    assert.strictEqual(S.sigMasterKey('specprefill_auto_enabled'), '');
-    const on = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
-                    specprefill_auto_enabled: true });
-    const off = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
-                     specprefill_auto_enabled: false });
-    assert.deepStrictEqual(S.runtimeDiff(on, off), [],
-        'an alias flipping activation must never demand a reload');
+test('run34: runtimeDiff never flags specprefill on a normal model', () => {
+    const a = rt({ specprefill_enabled: true, specprefill_draft_model: 'd' });
+    assert.deepStrictEqual(S.runtimeDiff(a, rt(), base()), [],
+        'clearing the draft does not rebuild a normal engine');
+    const b = rt({ specprefill_enabled: true, specprefill_draft_model: 'other' });
+    assert.deepStrictEqual(S.runtimeDiff(a, b, base()), [],
+        'a different drafter does not rebuild a normal engine (#5562 shares it)');
 });
-test('SPEC-1 requestDiff: idle override on an active base diverges', () => {
-    const d = S.requestDiff({ specprefill_enabled: true, specprefill_auto_enabled: true },
-                            { specprefill_auto_enabled: false });
-    assert.deepStrictEqual(d.map(r => r.key), ['specprefill_auto_enabled']);
-    // dead knob both sides: master off everywhere -> no row (DIV-1)
-    const dead = S.requestDiff({ specprefill_enabled: false, specprefill_auto_enabled: true },
-                               { specprefill_auto_enabled: false });
-    assert.deepStrictEqual(dead, []);
+test('run34: runtimeDiff flags the draft only where load rejects it (ANE k2)', () => {
+    const k2 = base({ config_model_type: 'k2_horizon' });
+    const mk = (draft) => S.buildPayload(S.buildState(k2, {
+        qwen35_ane_prefill_enabled: true,
+        specprefill_enabled: true, specprefill_draft_model: draft }), k2);
+    const d = S.runtimeDiff(mk('d'), mk('other'), k2);
+    assert.deepStrictEqual(d.map(r => r.key), ['specprefill']);
+    assert.strictEqual(d[0].base, 'd');
+    assert.strictEqual(d[0].other, 'other');
+    // ANE off on both sides: the gate is closed, no divergence
+    const c = S.buildPayload(S.buildState(k2, { specprefill_enabled: true,
+        specprefill_draft_model: 'd' }), k2);
+    const e = S.buildPayload(S.buildState(k2, { specprefill_enabled: true,
+        specprefill_draft_model: 'other' }), k2);
+    assert.deepStrictEqual(S.runtimeDiff(c, e, k2), []);
 });
-test('SPEC-1 v3: knob overrides are request divergence rows', () => {
-    const d = S.requestDiff({ specprefill_enabled: true, specprefill_threshold: 1024,
-                              specprefill_keep_pct: 0.2 },
-                            { specprefill_threshold: 65536, specprefill_keep_pct: 0.4 });
+test('run34: queued rebuild - add applies live, change/clear unloads', () => {
+    const m = base();
+    assert.strictEqual(S.specprefillQueuedRebuild(m, {},
+        { specprefill_enabled: true, specprefill_draft_model: 'd' }), false,
+        'picking a first drafter attaches in place');
+    assert.strictEqual(S.specprefillQueuedRebuild(m,
+        { specprefill_enabled: true, specprefill_draft_model: 'd' },
+        { specprefill_enabled: true, specprefill_draft_model: 'e' }), true,
+        'swapping a loaded draft needs the unload');
+    assert.strictEqual(S.specprefillQueuedRebuild(m,
+        { specprefill_enabled: true, specprefill_draft_model: 'd' },
+        { specprefill_enabled: false, specprefill_draft_model: 'd' }), true,
+        'disabling with a loaded draft needs the unload');
+    assert.strictEqual(S.specprefillQueuedRebuild(m,
+        { specprefill_enabled: false, specprefill_draft_model: 'd' },
+        { specprefill_enabled: true, specprefill_draft_model: 'd' }), false,
+        'enabling a stored draft path is still an add (nothing was loaded)');
+    assert.strictEqual(S.specprefillQueuedRebuild(m,
+        { specprefill_enabled: true, specprefill_draft_model: 'd' },
+        { specprefill_enabled: true, specprefill_draft_model: 'd',
+          specprefill_keep_pct: 0.5 }), false,
+        'keep/threshold never rebuild (they ride requests)');
+});
+test('run34: ANE-k2 models rebuild on ANY draft change', () => {
+    const k2 = base({ config_model_type: 'k2_horizon' });
+    assert.strictEqual(S.specprefillQueuedRebuild(k2, {},
+        { qwen35_ane_prefill_enabled: true, specprefill_enabled: true,
+          specprefill_draft_model: 'd' }), true,
+        'k2 + ANE: the drafter is engine material even as a first add');
+    assert.strictEqual(S.specprefillQueuedRebuild(k2, {},
+        { specprefill_enabled: true, specprefill_draft_model: 'd' }), false,
+        'without ANE the k2 model follows the normal in-place rule');
+});
+test('run34: reload badge can apply with a stored draft or an ANE-k2 model', () => {
+    assert.strictEqual(S.specprefillReloadPossible(base(),
+        { specprefill_enabled: true, specprefill_draft_model: 'd' }), true);
+    assert.strictEqual(S.specprefillReloadPossible(base(), {}), false);
+    assert.strictEqual(S.specprefillReloadPossible(
+        base({ config_model_type: 'k2_horizon' }), {}), true);
+});
+test('run34: requestDiff rows for the alias-tunable family', () => {
+    const d = S.requestDiff({ specprefill_enabled: true, specprefill_draft_model: 'd',
+                              specprefill_threshold: 1024, specprefill_keep_pct: 0.2 },
+                            { specprefill_draft_model: 'e',
+                              specprefill_threshold: 65536, specprefill_keep_pct: 0.4 });
     assert.deepStrictEqual(d.map(r => r.key).sort(),
-                           ['specprefill_keep_pct', 'specprefill_threshold']);
-    // inert without the master on either side: no rows
+        ['specprefill_draft_model', 'specprefill_keep_pct', 'specprefill_threshold']);
+    // an alias flipping its own activation diverges as a REQUEST row
+    const a = S.requestDiff({ specprefill_enabled: true, specprefill_draft_model: 'd' },
+                            { specprefill_enabled: false });
+    assert.deepStrictEqual(a.map(r => r.key), ['specprefill_enabled']);
+    // dead family both sides: master off everywhere -> no knob rows (DIV-1)
     const dead = S.requestDiff({ specprefill_enabled: false, specprefill_threshold: 1024 },
                                { specprefill_threshold: 65536 });
     assert.deepStrictEqual(dead, []);
 });
-test('SPEC-1 type flip strips the activation payload key like its family', () => {
-    assert.ok(S.TYPE_ONLY_KEYS.has('specprefill_auto_enabled'));
-    const embModel = base({ id: 'e1', model_type: 'embedding' });
-    const st = S.buildState(embModel, { specprefill_enabled: true,
-                                        specprefill_draft_model: 'd' });
-    st.specprefill_auto_enabled = false;
-    assert.ok(!('specprefill_auto_enabled' in S.buildPayload(st, embModel)),
-        'non-LLM save must not carry the activation flag');
-});
-test('SPEC-1: SpecPrefill profile classification after v3', () => {
-    // master + drafter: not profile fields anymore (server EXCLUDED).
-    for (const k of ['specprefill_enabled', 'specprefill_draft_model'])
-        assert.ok(!S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be absent');
-    // keep/threshold: model-specific profile fields again — spec-decode is
-    // inert on the diffusion lane, so they stay in the unsupported set.
-    for (const k of ['specprefill_keep_pct', 'specprefill_threshold'])
-        assert.ok(S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be listed');
-    // activation: universal but inert without the master — classic leaves it out.
+test('run34: specprefill_auto_enabled is gone from every surface', () => {
+    const st = S.buildState(base(), {});
+    assert.ok(!('specprefill_auto_enabled' in st));
+    assert.ok(!('specprefill_auto_enabled' in S.buildPayload(st, base())));
+    assert.ok(!S.TYPE_ONLY_KEYS.has('specprefill_auto_enabled'));
     assert.ok(!S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has('specprefill_auto_enabled'));
 });
-test('SPEC-1 v3: keep/threshold left the runtime badge and signature', () => {
-    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_keep_pct'));
-    assert.ok(!S.RUNTIME_SETTING_KEYS.has('specprefill_threshold'));
-    assert.ok(S.RUNTIME_SETTING_KEYS.has('specprefill_enabled'));
-    assert.ok(S.RUNTIME_SETTING_KEYS.has('specprefill_draft_model'));
-    const a = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
-                   specprefill_keep_pct: 0.2, specprefill_threshold: 1024 });
-    const b = rt({ specprefill_enabled: true, specprefill_draft_model: 'd',
-                   specprefill_keep_pct: 0.5, specprefill_threshold: 65536 });
-    assert.deepStrictEqual(S.runtimeDiff(a, b), [],
-        'an alias tuning keep/threshold must never demand a reload');
-    const c = rt({ specprefill_enabled: true, specprefill_draft_model: 'other' });
-    assert.ok(S.runtimeDiff(a, c).length > 0, 'a different drafter still forks');
+test('run34: the whole family is diffusion-unsupported and type-stripped', () => {
+    for (const k of ['specprefill_enabled', 'specprefill_draft_model',
+                     'specprefill_keep_pct', 'specprefill_threshold']) {
+        assert.ok(S.DIFFUSION_UNSUPPORTED_PROFILE_FIELDS.has(k), k + ' must be listed');
+        assert.ok(S.TYPE_ONLY_KEYS.has(k), k + ' strips on a type flip');
+    }
 });
 
 /* ---- MT-1: model-type family (classic's llm/vlm gate) ----------------- */

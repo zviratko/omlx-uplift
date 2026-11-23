@@ -96,7 +96,6 @@ test('DIV: every dependent key runtimeSignature gates has a master mapping', () 
     const gated = ['mtp_adaptive_max_depth', 'mtp_fixed_depth',
         'turboquant_kv_bits', 'a8_prefill_min_tokens',
         'moe_expert_offload_resident_fraction',
-        'specprefill_draft_model', 'specprefill_keep_pct', 'specprefill_threshold',
         'dflash_draft_model', 'dflash_draft_quant_enabled',
         'dflash_draft_quant_weight_bits', 'dflash_draft_quant_group_size',
         'dflash_draft_window_size', 'dflash_block_size', 'dflash_verify_mode',
@@ -105,6 +104,12 @@ test('DIV: every dependent key runtimeSignature gates has a master mapping', () 
         assert.ok(S.sigMasterKey(k), 'sigMasterKey maps ' + k);
     assert.strictEqual(S.sigMasterKey('temperature'), '');
     assert.strictEqual(S.sigMasterKey('moe_expert_offload_enabled'), '');
+    // SYNC-1 run 34 (upstream 69abd86f #5562): the SpecPrefill family left
+    // the signature (the server signs one gated 'specprefill' entry), so no
+    // dependent mapping may linger for its payload keys.
+    for (const dead of ['specprefill_draft_model', 'specprefill_keep_pct',
+                        'specprefill_threshold'])
+        assert.strictEqual(S.sigMasterKey(dead), '', 'sigMasterKey still maps ' + dead);
     // dead fields: gone from the signature, so no mapping may linger
     for (const dead of ['dflash_draft_quant_activation_bits', 'dflash_max_ctx',
                         'dflash_in_memory_cache', 'dflash_in_memory_cache_max_entries',
