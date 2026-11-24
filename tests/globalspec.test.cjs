@@ -165,10 +165,14 @@ test('MODEL_TYPE_OPTIONS mirrors the classic model-type <option> list', { skip: 
    whole Settings > Integrations card (omlx-tts-macos-say, PR #5076) that no gate
    ever asked Uplift to carry. git puts the enclosing class in the @@ header, so
    added `    key: type = None` lines under `class GlobalSettingsRequest` are the
-   patch's accepted request fields. */
-function patchAddedGSFields() {
-    const dir = path.join(__dirname, '..', 'curated_patches', 'default');
+   patch's accepted request fields. The seed that taught this guard is gone
+   (#5076 merged upstream as 2bb2332d, the patch retired in SYNC-1 run 35), so
+   the anti-vacuity control reads a FIXTURE diff instead of the live catalog:
+   the parser can never go blind just because no catalog patch adds a GS field
+   at the moment. */
+function patchAddedGSFields(dir) {
     const found = new Map();
+    if (!fs.existsSync(dir)) return found;
     for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.diff'))) {
         let inCls = false;
         for (const line of fs.readFileSync(path.join(dir, name), 'utf8').split('\n')) {
@@ -184,18 +188,17 @@ function patchAddedGSFields() {
 }
 
 test('curated patches cannot add a global-settings field Uplift does not carry', () => {
-    const added = patchAddedGSFields();
-    // Anti-vacuity: the parser must still find the keys that proved the hole.
-    // If this fails, FIX THE PARSER — a blind guard is what let the card ship.
-    for (const k of ['macos_say_enabled', 'macos_say_autodetect', 'macos_say_language'])
-        assert.ok(added.has(k), `patch parser went blind: ${k} not found in any .diff`);
-    // Read-only: the server reports it, the request never accepts it. Unmapped
-    // is correct, and the rows hide without it.
-    const READ_ONLY = new Set(['macos_say_available']);
+    // Anti-vacuity: the parser must still find the fields of a known-shaped
+    // fixture. If this fails, FIX THE PARSER — a blind guard is what let the
+    // card ship once already.
+    const probe = patchAddedGSFields(path.join(__dirname, 'fixtures', 'gs-patch'));
+    assert.ok(probe.has('fixture_added_flag') && probe.has('fixture_added_text'),
+        'patch parser went blind: fixture fields not found in tests/fixtures/gs-patch');
+    const added = patchAddedGSFields(
+        path.join(__dirname, '..', 'curated_patches', 'default'));
     const gsys = fs.readFileSync(
         path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_gsys.js'), 'utf8');
     for (const [key, from] of added) {
-        if (READ_ONLY.has(key)) continue;
         assert.ok(Object.prototype.hasOwnProperty.call(GSPEC.GS_MAP, key),
             `${key} (added by ${from}) is missing from GS_MAP`);
         assert.ok(!GSPEC.INTEG_PREFIXED.has(key),
@@ -203,6 +206,41 @@ test('curated patches cannot add a global-settings field Uplift does not carry',
         assert.ok(new RegExp("flat:\\s*'" + key + "'").test(gsys),
             `${key} is mapped but has no row — not reachable in the editor`);
     }
+});
+
+/* ---- SYNC-1 run 35: native macOS Speech card + Splash concurrent limit ---- */
+/* #5076 merged upstream (2bb2332d) as ONE toggle with no availability flag and
+   no language settings; #5582 (f062a272) added the Splash concurrent-request
+   limit. Pin the mirror on both sides: classic's keys exist, uplift's
+   GS_LABELS.say literals equal classic's EN values (the copy-drift class that
+   sync-label-drift.py sweeps), and the classic keys the helper row reads are
+   real. */
+test('run 35: say card literals and splash max_concurrent keys match classic', { skip: !HAS_CLASSIC && 'no classic checkout (set OMLX_SRC or create ~/git/omlx-upstream)' }, () => {
+    const i18nRels = [
+        ['apps', 'omlx-web', 'omlx_web', 'i18n', 'en.json'],
+        ['omlx', 'admin', 'i18n', 'en.json'],
+    ];
+    let catPath = null;
+    for (const rel of i18nRels)
+        if (fs.existsSync(path.join(ROOT, ...rel))) { catPath = path.join(ROOT, ...rel); break; }
+    assert.ok(catPath, 'classic i18n en.json located');
+    const cat = JSON.parse(fs.readFileSync(catPath, 'utf8'));
+    const K = 'settings.integrations.macos_say.';
+    for (const k of ['section_label', 'enabled', 'enabled_hint'])
+        assert.ok(typeof cat[K + k] === 'string' && cat[K + k].length, K + k + ' missing');
+    const S = 'settings.integrations.splash.';
+    for (const k of ['max_concurrent', 'max_concurrent_hint', 'auto'])
+        assert.ok(typeof cat[S + k] === 'string' && cat[S + k].length, S + k + ' missing');
+    // The PR draft's language keys never reached the merged catalog.
+    for (const k of ['autodetect', 'language'])
+        assert.ok(!(K + k in cat), `classic catalog carries ${K}${k} again - the say mirror needs a look`);
+    // uplift's GS_LABELS.say literals are byte-equal to classic's EN values.
+    const gsys = fs.readFileSync(
+        path.join(__dirname, '..', 'omlx_uplift', 'static', 'uplift_gsys.js'), 'utf8');
+    const m = gsys.match(/say: \{ enabled: '([^']*)',\s*enabled_hint: '([^']*)' \}/);
+    assert.ok(m, 'GS_LABELS.say block shape (enabled + enabled_hint only)');
+    assert.strictEqual(m[1], cat[K + 'enabled'], 'say.enabled drifted from classic');
+    assert.strictEqual(m[2], cat[K + 'enabled_hint'], 'say.enabled_hint drifted from classic');
 });
 
 // P1A-7 interop: Uplift-style global-settings round-trip against the REAL

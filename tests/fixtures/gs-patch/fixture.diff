@@ -1,0 +1,9 @@
+diff --git a/omlx/admin/routes.py b/omlx/admin/routes.py
+index 1111111..2222222 100644
+--- a/omlx/admin/routes.py
++++ b/omlx/admin/routes.py
+@@ -900,6 +900,8 @@ class GlobalSettingsRequest(BaseModel):
+     markitdown_enabled: bool | None = None
++    fixture_added_flag: bool | None = None
++    fixture_added_text: str | None = None
+     web_search_provider: str | None = None

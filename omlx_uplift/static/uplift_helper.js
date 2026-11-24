@@ -720,6 +720,21 @@ async function renderHelperModels() {
     ssdField.append(ssdWarn);
     exGrid.append(ssdField);
 
+    // SYNC-1 run 35 (upstream f062a272 #5582): classic's Splash card gained a
+    // concurrent-request limit. Auto sends null (Splash's own default of 4);
+    // the server accepts 1-8. Labels ride classic's i18n keys through the
+    // mounted catalog, so all locales follow with no uplift copies.
+    exGrid.append(integField(
+        C.tf('settings.integrations.splash.max_concurrent', 'Concurrent requests'),
+        C.tf('settings.integrations.splash.max_concurrent_hint', 'How many requests each Splash model serves at once. Auto uses Splash\'s default of 4; more requests wait in Splash\'s queue. Needs Splash 1.7.1 or later and applies the next time the model loads.'),
+        integSelect([['', C.tf('settings.integrations.splash.auto', 'Auto')],
+                     ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'],
+                     ['5', '5'], ['6', '6'], ['7', '7'], ['8', '8']],
+            String(integ.splash_max_concurrent_requests ?? ''),
+            async v => { optErr.textContent =
+                await saveIntegrationErr({ splash_max_concurrent_requests:
+                    v === '' ? null : Number(v) }); })));
+
     const aneInp = document.createElement('input'); aneInp.type = 'checkbox';
     aneInp.checked = !!integ.splash_ane_prefill;
     aneInp.onchange = async () => {

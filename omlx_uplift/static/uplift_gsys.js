@@ -131,30 +131,23 @@ const GS_LABELS = {
         local: 'Local', cloud: 'Cloud',
         opus: 'Opus Model', sonnet: 'Sonnet Model', haiku: 'Haiku Model',
         ph: 'Pick or type a model' },
-    // Vendored omlx-tts-macos-say (PR #5076). Plain English literals, one per
-    // row string. Translation for this form happens LATER and only one way:
-    // gsLocalize() walks the literal after the catalog lands and overwrites each
-    // entry from the catalog key 'uplift.gs.' + its dotted label path. A C.tf
-    // call inside this literal is therefore dead weight — GS_LABELS is built at
-    // script-load time, before the catalog exists, so it can only return its own
-    // fallback, and the overlay is what actually paints the row. (Paths ending
-    // in _placeholder are excluded from the overlay on purpose.)
-    // The six uplift.gs.say.* values are the upstream translations of the
-    // classic card, copied into all 10 locale files, so the board and the
+    // macOS Speech (upstream #5076, merged as 2bb2332d). Plain English
+    // literals, one per row string. Translation for this form happens LATER
+    // and only one way: gsLocalize() walks the literal after the catalog
+    // lands and overwrites each entry from the catalog key 'uplift.gs.' +
+    // its dotted label path. A C.tf call inside this literal is therefore
+    // dead weight — GS_LABELS is built at script-load time, before the
+    // catalog exists, so it can only return its own fallback, and the
+    // overlay is what actually paints the row. (Paths ending in
+    // _placeholder are excluded from the overlay on purpose.)
+    // The two uplift.gs.say.* values are the upstream translations of the
+    // classic card, copied into all 11 locale files, so the board and the
     // classic page cannot drift in wording or in coverage.
     // (Keep this comment free of apostrophes: the GS_LABELS extractor in
     // tests/gsys-label-keys.test.cjs brace-walks the literal without stripping
     // comments, so a stray quote swallows real delimiters and the eval dies.)
     say: { enabled: 'Enable macos-say',
-        enabled_hint: 'Answer /v1/audio/speech requests for model "macos-say" '
-            + 'with the voices installed on this Mac. No download, no GPU.',
-        autodetect: 'Detect language',
-        autodetect_hint: 'Choose the voice from the language of the text. A voice '
-            + 'or language in the request always wins.',
-        language: 'Default language',
-        language_hint: 'Used when detection is off or not sure, for example en-GB '
-            + 'or cs-CZ. Empty: the system voice.',
-        ph: 'en-GB' },
+        enabled_hint: 'Answer /v1/audio/speech requests for model "macos-say" with the voices installed on this Mac. No download, no GPU.' },
     gen: { max_ctx: 'Max Context Window',
         max_ctx_hint: 'Largest context a request may claim.',
         max_policy: 'Max Context Policy',
@@ -2348,21 +2341,13 @@ const GS_SPEC = [
     {sec: 'net', lab: 'net.ca_bundle', hint: 'net.ca_hint', ctl: {
         k: 'text', sec: 'network', field: 'ca_bundle', flat: 'network_ca_bundle'}},
 
-    // Vendored omlx-tts-macos-say (upstream PR #5076): classic's Integrations
-    // card, mirrored row for row. The group hides unless the server reports the
-    // engine (read-only macos_say_available) — a Linux host or a keg without
-    // the patch has nothing to configure, and classic hides its card the same
-    // way. Turning the engine off greys the two dependent rows rather than
-    // removing them (gsDisabledSync), like classic's :disabled bindings.
+    // macOS Speech (upstream #5076, merged as 2bb2332d): classic's
+    // Integrations card is a single toggle, always visible. The merged
+    // engine dropped the language settings and the availability flag its
+    // PR draft carried, so there is nothing to gate or grey out.
     {sec: 'say', lab: 'say.enabled', hint: 'say.enabled_hint', ctl: {
         k: 'tog', sec: 'integrations', field: 'macos_say_enabled',
-        flat: 'macos_say_enabled'}, show: (ctx) => ctx.sayAvail},
-    {sec: 'say', lab: 'say.autodetect', hint: 'say.autodetect_hint', ctl: {
-        k: 'tog', sec: 'integrations', field: 'macos_say_autodetect',
-        flat: 'macos_say_autodetect'}, show: (ctx) => ctx.sayAvail},
-    {sec: 'say', lab: 'say.language', hint: 'say.language_hint', ctl: {
-        k: 'text', sec: 'integrations', field: 'macos_say_language',
-        flat: 'macos_say_language', ph: 'say.ph'}, show: (ctx) => ctx.sayAvail},
+        flat: 'macos_say_enabled'}},
 
     {t: 'Advanced'},
     {sec: 'adv', lab: 'adv.distributed_enabled', hint: 'adv.distributed_hint', ctl: {
@@ -2467,18 +2452,6 @@ function gsDisabledSync() {
         srow.title = loop ? '' : C.tf('js.error.api_key_required_network',
             'An API key is required when the server is reachable beyond localhost.');
     }
-    // Vendored omlx-tts-macos-say (PR #5076): classic greys the language
-    // controls while the engine is off (:disabled="!macos_say_enabled"). Reads
-    // the QUEUED value (gsEffFlat), not the saved one, so the grey-out lands on
-    // the click. The stored values stay visible rather than faking an OFF like
-    // classic's `autodetect && enabled` does — a greyed row that shows what is
-    // saved is the honest state, and the payload keeps the real value.
-    const sayOn = gsEffFlat('macos_say_enabled') !== false;
-    for (const f of ['macos_say_autodetect', 'macos_say_language']) {
-        const row = document.querySelector('#gs-body [data-flat="' + f + '"]');
-        const ctl = row && row.querySelector('input,select');
-        if (ctl) ctl.disabled = !sayOn;
-    }
 }
 function gsBodySanitize() {
     // UP-19 (6): classic gives the API-key row an eye button. Uplift keeps
@@ -2507,9 +2480,6 @@ function gsCtxNow() {
         gdn: gsEffFlat('gdn_snapshot_storage'),
         gdnEff: gsGdnEff(),
         prec: gsEffFlat('gdn_sidecar_precision'),
-        // Vendored omlx-tts-macos-say: strict === true, because a server
-        // without the engine omits the flag and the card must not appear.
-        sayAvail: gsGet('integrations', 'macos_say_available') === true,
     };
 }
 /* MGC-1: the Custom ceiling starts at the server's own auto policy —

@@ -54,6 +54,8 @@ RUN = 5               # shared normalized word-run length that flags a mirror
 
 # uplift literal -> why it is NOT a stale mirror (triaged 2026-11-21)
 ALLOW = {
+    "PENDING RESTART — {n} saved setting(s) apply the next time the model reloads":
+        'uplift\'s own pending-restart banner (CHANGES rail); the 5-word run "the next time the model" collides with classic\'s NEW splash max_concurrent_hint - coincidence of phrasing, not a copy',
     "Maximum RAM used by encoded snapshots waiting to be written to SSD. "
     "When the buffer is full, cache writes pause until space is available. "
     "A size without a unit is read as MB.":
@@ -146,7 +148,8 @@ def classic_catalog(src, sha):
 
 def unesc(s):
     # JS source carries '\n' as two bytes; the catalog has a real newline
-    return s.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+    return (s.replace("\\n", "\n").replace("\\t", "\t")
+             .replace('\\"', '"').replace("\\'", "'"))
 
 
 def uplift_literals():
@@ -160,7 +163,7 @@ def uplift_literals():
     for js in _static_js():
         src = js[1]
         for m in re.finditer(
-                r"C\.tf\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)", src):
+                r"C\.tf\(\s*'([^']+)'\s*,\s*'((?:[^'\\]|\\.)*)'\s*\)", src):
             s = unesc(m.group(2))
             if len(s) >= MIN_LEN:
                 lits.setdefault(s, set()).add(

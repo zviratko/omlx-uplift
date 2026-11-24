@@ -75,8 +75,9 @@ test('route defaults to uplift and only reads "vanilla" from storage', () => {
     store({ [ROUTE]: 'nonsense' });  assert.strictEqual(api.speakRoute(), 'uplift');
 });
 
-/* The swap (omlx-tts-say retired, upstream PR #5076 vendored as
-   omlx-tts-macos-say) means the vanilla door no longer understands uplift's
+/* The swap (omlx-tts-say retired; PR #5076 merged upstream as 2bb2332d, its
+   vendored copy omlx-tts-macos-say retired in SYNC-1 run 35) means the vanilla
+   door no longer understands uplift's
    'say:<tail>' token: it has ONE model id and takes the voice in `voice`.
    These rows are the real store shapes on the devbox, not invented ones. */
 test('a macOS row maps onto the vanilla engine\'s single model id', () => {
