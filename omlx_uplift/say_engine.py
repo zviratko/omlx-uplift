@@ -26,9 +26,15 @@ Contract of this module:
   badged (we never claim 'System' for something we cannot prove);
 - synthesis writes the text to a temp file and runs
   `say -v NAME -f FILE -o OUT --data-format=LEI16@24000`, producing a
-  plain 24 kHz mono RIFF WAV. argv is a list, the voice name must
-  match an installed voice exactly, and the text is capped — no shell,
-  no injection surface, no unbounded work;
+  plain 24 kHz mono RIFF WAV. argv is a list and the voice name must
+  match an installed voice exactly, so the shell is never involved.
+  `say`'s input parser is a SECOND interpreter: it runs `[[...]]` in
+  the text as embedded commands (`[[slnc N]]` buys ~65 s of silence
+  per marker and the markers sum, so 1200 characters rendered 231 MB
+  of audio before this was closed). Every render therefore
+  neutralises that markup at the one choke point (`synth_wav`) and no
+  single render may come back over the audio ceiling; the text is
+  capped and the bytes are checked;
 - formats other than WAV are transcoded with the same optional ffmpeg
   the reference-clip path uses; without ffmpeg the call fails 415 with
   the reason instead of lying about the bytes;
@@ -104,6 +110,13 @@ _CACHE_TTL_S = 300
 _LINE_RE = re.compile(
     r"^(?P<name>.+?)\s+(?P<locale>[a-z]{2}(?:[-_][A-Za-z0-9]{2,6})*(?:-x)?)"
     r"\s+#\s*(?P<sample>.*)$")
+
+# `say` reads "[[...]]" in its input as embedded commands ([[slnc N]] in
+# particular buys unbounded silence for a handful of characters). Breaking
+# the opening pair is upstream #5076's neutralisation, mirrored so both
+# engines speak the same text. Applied ONLY in synth_wav - the one choke
+# point every render passes.
+_EMBED_CMD = re.compile(r"\[(?=\[)")
 
 _TIERS = (("premium", "(Premium)"), ("enhanced", "(Enhanced)"),
           ("personal", "(Personal)"))
@@ -1134,13 +1147,21 @@ def wav_header(sample_rate: int, channels: int = 1, sample_width: int = 2,
 
 def synth_wav(text: str, target: str = "", speed=None) -> bytes:
     """Render one string with an ALREADY resolved voice address. No routing,
-    no limits: the segmentation path resolves the voice once for the whole
-    reply and calls this per piece, because re-detecting the language
+    no length limits: the segmentation path resolves the voice once for the
+    whole reply and calls this per piece, because re-detecting the language
     sentence by sentence would hand one Czech answer three different voices.
-    `target` empty drops -v and lets `say` use the system voice."""
+    `target` empty drops -v and lets `say` use the system voice. The markup
+    neutralisation and the one-render byte ceiling DO apply here: this is
+    the single choke point every `say` render passes."""
     text = (text or "").strip()
     if not text:
         raise RuntimeError("nothing to say")
+    # `say` reads [[...]] in its input as embedded commands ([[slnc N]] in
+    # particular buys ~65 s of silence per marker and the markers sum, so
+    # 1200 characters once rendered 231 MB of audio). Same neutralisation
+    # upstream #5076 ships in omlx/utils/macos_say.py; it must stay on
+    # EVERY say path.
+    text = _EMBED_CMD.sub("[ ", text)
     args = ["say"] + (["-v", str(target)] if target else [])
     wpm = _speed_wpm(speed)
     if wpm:
@@ -1161,6 +1182,20 @@ def synth_wav(text: str, target: str = "", speed=None) -> bytes:
         if p.returncode != 0 or not dst.is_file() or dst.stat().st_size < 100:
             reason = (p.stderr or "").strip()[:200] or "no audio produced"
             raise RuntimeError("macOS say: %s" % reason)
+        # The ceiling means the same thing on BOTH response branches: no
+        # single render may come back bigger than the whole reply is
+        # allowed to be. Checked on the file's size, so an oversized
+        # render never lands in RAM (spool_wav's cumulative check only
+        # fires between segments, after each one is already materialised).
+        size = dst.stat().st_size
+        ceiling = max_audio_mb() * 1000000
+        if size > ceiling:
+            raise RuntimeError(
+                "this reply crossed the %d MB ceiling of one spoken "
+                "answer while it was still rendering - this voice "
+                "speaks slower than the pre-check promises. Ask for a "
+                "shorter reply, or set %s to raise the ceiling"
+                % (ceiling // 1000000, MAX_AUDIO_ENV))
         return dst.read_bytes()
 
 

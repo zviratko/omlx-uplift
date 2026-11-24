@@ -313,6 +313,52 @@ def test_synth_builds_safe_argv(monkeypatch, on_mac):
     assert all(";" not in str(a) for a in cmd)
 
 
+def test_say_embedded_commands_never_reach_the_synthesiser(monkeypatch, on_mac):
+    """Security finding 2026-11-24: `say` reads "[[...]]" in its INPUT as
+    embedded commands. [[slnc N]] buys ~65 s of silence per marker and the
+    markers sum, so 1200 characters once rendered 231 MB of audio - the
+    shell was safe, the synthesiser's own parser was not. The pin mirrors
+    upstream #5076's discipline: assert the bytes that reach `say`, not
+    the Response."""
+    _as_say(on_mac)
+    seen = {}
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["text"] = Path(cmd[cmd.index("-f") + 1]).read_text()
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 200)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    on_mac.synth_bytes("Zuzana", "Dobrý [[den]] a[[slnc 60000]]b")
+    assert seen["text"] == "Dobrý [ [den]] a[ [slnc 60000]]b"
+    # the finding's amplification payload: 80 markers, still no command
+    on_mac.synth_bytes("Zuzana", "x[[slnc 60000]]" * 80)
+    assert "[[" not in seen["text"]
+    assert seen["text"].count("x") == 80          # the words survive
+
+
+def test_one_render_over_the_ceiling_is_refused_before_ram(monkeypatch, on_mac):
+    """The ceiling must mean the same thing on BOTH response branches: the
+    short path used to read_bytes() whatever `say` produced with no check
+    at all (spool_wav's cumulative guard fires only between segments)."""
+    _as_say(on_mac)
+    monkeypatch.setenv(SE.MAX_AUDIO_ENV, "1")
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"RIFF" + b"\0" * 2000000)
+        return P()
+    monkeypatch.setattr(SE.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="ceiling"):
+        on_mac.synth_bytes("Zuzana", "hi")
+
+
 def test_synth_guards(monkeypatch, on_mac):
     _as_say(on_mac)
     with pytest.raises(RuntimeError):
