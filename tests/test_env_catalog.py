@@ -168,6 +168,21 @@ def test_managed_and_dead_rows_are_flagged():
     assert rows["OMLX_NAX_JIT_ATTENTION"]["settable"] is True
 
 
+def test_exec_path_names_are_never_editable():
+    """Security finding 2026-11-24 #3: PUT /env-overrides writes
+    os.environ[name] live for effect=immediate, so a name that is an
+    interpreter or binary path lets a request field name something the
+    server execs. These three lost their read sites upstream in 09d7e2d9
+    (#4396) and stay dead here even if a later sync re-documents them."""
+    for name in ("OMLX_CLUSTER_CONTROL_PROXY_PYTHON",
+                 "OMLX_JACCL_SIDE_CHANNEL_PYTHON",
+                 "OMLX_TAILSCALE_CLI"):
+        assert name not in et.ALLOWED, name + " must never be editable"
+        assert et.CATALOG[name].get("dead") is True, name + " must stay dead"
+        assert et.not_editable_reason(name) == \
+            "no live oMLX code path reads this variable"
+
+
 def test_catalog_route():
     import asyncio
 

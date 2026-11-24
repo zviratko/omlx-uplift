@@ -690,7 +690,10 @@ CATALOG: dict[str, dict] = {
     "OMLX_CLUSTER_CONTROL_TRANSPORT": {"group": "cluster", "effect": "immediate", "default": "auto",
         "desc": "Cluster control-plane transport: auto | unix | tcp."},
     "OMLX_CLUSTER_CONTROL_PROXY_PYTHON": {"group": "cluster", "effect": "immediate", "default": "/usr/bin/python3",
-        "desc": "Interpreter used by the system-socket control proxy helper."},
+        "dead": True,
+        "desc": "Interpreter used by the system-socket control proxy helper. Upstream "
+                "dropped the read sites in 09d7e2d9 (#4396, 2026-10-09) — dead on kegs "
+                "built at/after it; a request field must never name a live exec path."},
     "OMLX_CLUSTER_STATE_DIR": {"group": "cluster", "effect": "immediate", "default": "~/.omlx/cluster/runtime",
         "desc": "Runtime state directory for cluster workers and probes."},
     "OMLX_CLUSTER_LAUNCHER_LEASE": {"group": "cluster", "effect": "immediate", "default": "",
@@ -706,13 +709,19 @@ CATALOG: dict[str, dict] = {
     "OMLX_JACCL_SIDE_CHANNEL_TRANSPORT": {"group": "cluster", "effect": "immediate", "default": "auto",
         "desc": "Side-channel transport: auto | direct | sidecar."},
     "OMLX_JACCL_SIDE_CHANNEL_PYTHON": {"group": "cluster", "effect": "immediate", "default": "/usr/bin/python3",
-        "desc": "Interpreter for the side-channel sidecar process."},
+        "dead": True,
+        "desc": "Interpreter for the side-channel sidecar process. Upstream dropped the "
+                "read sites in 09d7e2d9 (#4396, 2026-10-09) — dead on kegs built "
+                "at/after it; a request field must never name a live exec path."},
     "OMLX_JACCL_SIDE_CHANNEL_TRACE": {"group": "cluster", "effect": "immediate", "default": "0",
         "desc": "1 writes a trace of side-channel frames for debugging."},
     "OMLX_DISTRIBUTED_REQUEST_READ_TIMEOUT": {"group": "cluster", "effect": "model", "default": "300.0",
         "desc": "Seconds a distributed engine waits for a peer read before failing the step."},
     "OMLX_TAILSCALE_CLI": {"group": "cluster", "effect": "immediate", "default": "",
-        "desc": "Path to the tailscale CLI used for cluster discovery."},
+        "dead": True,
+        "desc": "Path to the tailscale CLI used for cluster discovery. Upstream dropped "
+                "the read sites in 09d7e2d9 (#4396, 2026-10-09); discovery now uses a "
+                "fixed app path — dead on kegs built at/after it."},
     "OMLX_DISCOVERY": {"group": "cluster", "effect": "server", "default": "1",
         "desc": "0 disables always-on cluster peer discovery (mDNS + multicast + manual + Tailscale)."},
     "OMLX_BONJOUR": {"group": "cluster", "effect": "server", "default": "1",
