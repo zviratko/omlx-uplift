@@ -16,7 +16,15 @@ settings, so the first save after an upgrade materializes dataclass defaults
 that were absent from the file (upstream c8213a1 #5337: splash_activations
 ='bf16'). Classic's own saves do exactly the same, so a key that only APPEARS
 with the value the GET reported as effective is not payload drift and passes
-with a note. Any value change, deletion or new section still fails.
+with a note.
+
+SYNC-1 run 35 exception, the retire direction: when a vendored patch is
+retired and its fields deleted from the server (upstream merged our #5076 as
+a single toggle; the PR draft's language keys died with it), the stale keys
+stay in settings.json until the first save drops them. A key that DISAPPEARS
+while the GET never reported it is the file converging to the server's own
+state - accepted with a note, like materialization. Any value change, any
+deletion of a key the server still reports, and any new section still fails.
 
 The test only rewrites settings.json with its own content via the API.
 On any post-save failure or mismatch it restores the original bytes and
@@ -113,11 +121,14 @@ def main():
                 if k not in b and k in a and norm(a[k]) == norm(g.get(k)):
                     notes.append(f"{sec}.{k} materialized (server default)")
                     continue
+                if k in b and k not in a and k not in g:
+                    notes.append(f"{sec}.{k} dropped (server no longer owns it)")
+                    continue
                 ok = False
                 notes.append(f"{sec}.{k} changed or removed")
         if ok and notes:
             passed = True
-            print("PASS: round-trip only materialized server defaults: "
+            print("PASS: round-trip only converged to the server's own keys: "
                   + ", ".join(notes))
             return 0
         print("FAIL: settings.json changed after unchanged round-trip; original bytes restored")

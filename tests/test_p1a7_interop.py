@@ -120,7 +120,7 @@ def test_materialized_server_default_passes_with_note(tmp_path, monkeypatch, cap
     rc, out, settings = _drive_round_trip(tmp_path, monkeypatch, capsys,
                                           original, got, apply_post)
     assert rc == 0
-    assert "materialized server defaults" in out
+    assert "converged to the server's own keys" in out
     assert "integrations.splash_activations" in out
     assert json.loads(settings.read_text())["integrations"]["splash_activations"] == "bf16"
 
@@ -140,4 +140,52 @@ def test_added_key_with_foreign_value_still_fails(tmp_path, monkeypatch, capsys)
                                           original, got, apply_post)
     assert rc == 1
     assert "integrations.splash_activations changed or removed" in out
+    assert settings.read_bytes() == original
+
+
+def test_dropped_key_the_server_no_longer_owns_passes_with_note(tmp_path, monkeypatch, capsys):
+    # SYNC-1 run 35: a vendored patch was retired and its fields deleted from
+    # the server (upstream merged #5076 as a single toggle; the PR draft's
+    # language keys died with it). The stale keys sit in settings.json from
+    # the patch era; the server does not report them in the GET and its save
+    # drops them - that is the file converging to the server's own state, the
+    # same one-time effect classic's own first save causes. Must pass, name
+    # the key, and keep the cleaned file.
+    original = json.dumps({"integrations": {
+        "macos_say_enabled": True,
+        "macos_say_autodetect": True,
+        "macos_say_language": "en-GB"}}).encode()
+    got = {"integrations": {"macos_say_enabled": True}}
+
+    def apply_post(settings):
+        d = json.loads(settings.read_text())
+        del d["integrations"]["macos_say_autodetect"]
+        del d["integrations"]["macos_say_language"]
+        settings.write_text(json.dumps(d))
+
+    rc, out, settings = _drive_round_trip(tmp_path, monkeypatch, capsys,
+                                          original, got, apply_post)
+    assert rc == 0
+    assert "converged to the server's own keys" in out
+    assert "integrations.macos_say_autodetect dropped" in out
+    assert "integrations.macos_say_language dropped" in out
+    assert "macos_say_autodetect" not in settings.read_text()
+
+
+def test_dropped_key_the_server_still_reports_still_fails(tmp_path, monkeypatch, capsys):
+    # The exception is ONLY for keys the server no longer owns: a key the GET
+    # still reports that vanishes from disk is payload drift and stays RED.
+    original = json.dumps({"integrations": {
+        "splash_kv_format": "int8", "splash_ane_prefill": True}}).encode()
+    got = {"integrations": {"splash_kv_format": "int8", "splash_ane_prefill": True}}
+
+    def apply_post(settings):
+        d = json.loads(settings.read_text())
+        del d["integrations"]["splash_ane_prefill"]
+        settings.write_text(json.dumps(d))
+
+    rc, out, settings = _drive_round_trip(tmp_path, monkeypatch, capsys,
+                                          original, got, apply_post)
+    assert rc == 1
+    assert "integrations.splash_ane_prefill changed or removed" in out
     assert settings.read_bytes() == original
