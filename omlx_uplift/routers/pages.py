@@ -182,8 +182,36 @@ async def _gate(request: Request, back_base: str) -> Optional[RedirectResponse]:
     return None
 
 
+# SYNC-1 run 39 (user request): this document used to link
+# ./uplift.css?v=BUILD. VER-1 (5f2286d) dropped that never-stamped query from
+# all 17 asset refs in the bundle and missed this one, so the literal BUILD was
+# never a token anything substituted here. The link was broken twice over: the
+# Uplift static route requires an admin session, which a login page by
+# definition has not passed, so it answered 401 whether or not anyone was
+# signed in. Every var() in the rules below therefore resolved to nothing and
+# the card lost its border, its background and the field outline - measured
+# live: border '0px none', background 'rgba(0, 0, 0, 0)'.
+# The page is now self-contained: it declares the nine base tokens its own
+# rules consume, copied from uplift.css's :root and pinned by
+# tests/login-selfcontained.test.cjs so the copy cannot drift. A pre-auth page
+# must not depend on a post-auth asset. Skin overrides are deliberately not
+# followed: with no session there is no way to know the operator's theme, and
+# the base ground is the app's own default look.
 _LOGIN_STYLE = """
-body { display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+:root {
+  --bg: #232427; --card: #2b2c30; --field: #1b1c1f; --edge: #3a3b40;
+  --ink: #f2f0ea; --dim: #a5a096; --red: #c9243b;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+/* The ground and text rules mirror uplift.css's own :root and body verbatim
+   (the app's body font is 300 14px/1.5), so the login page reads as the same
+   product. The red institution strip is deliberately NOT copied: the broken
+   link meant the login page never showed one, and adding it here would change
+   what the operator sees beyond the defect under repair. */
+body { background:var(--bg); color:var(--ink); font:300 14px/1.5 var(--sans);
+  display:flex; align-items:center; justify-content:center;
+  min-height:100vh; margin:0; }
 .login-card { width:min(360px, 90vw); border:1px solid var(--ink); background:var(--card); padding:28px; }
 .login-card h1 { font:500 13px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; margin:0 0 20px; }
 .login-card input { width:100%; box-sizing:border-box; background:var(--field); border:1px solid var(--edge);
@@ -210,7 +238,8 @@ def _login_doc(title: str, body: str, script: str) -> str:
             f"<title>{title} - Uplift</title>\n"
             "<link rel=\"icon\" href=\"/admin/static/favicon.svg\" "
             "type=\"image/svg+xml\">\n"
-            "<link rel=\"stylesheet\" href=\"./uplift.css?v=BUILD\">\n"
+            # no uplift.css here: the static route is session-gated and this
+            # document is the pre-auth page (see _LOGIN_STYLE above)
             f"<style>{_LOGIN_STYLE}</style></head>\n"
             f"<body class=\"top-glyphs\"><div class=\"login-card\">{body}</div>"
             f"<script>{_LOGIN_NEXT_JS}{script}</script></body></html>")
