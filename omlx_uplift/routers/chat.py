@@ -317,7 +317,17 @@ def _clean_message(m: dict) -> dict:
 @api_router.get("/chat/key")
 async def chat_key(is_admin: bool = Depends(require_admin)):
     """Admin-gated API key handout (NAT-1 auth verdict: session gate,
-    NOT template injection; exposure surface equal to classic's)."""
+    NOT template injection).
+
+    The NAT-1 note "exposure surface equal to classic's" held until upstream
+    b1fbfff3 (#5496, sync run 39): classic pulled the master key off its polled
+    GETs (/admin/api/stats now reports api_key_set, the settings GET reports
+    auth.api_key_set) and moved the reveal to an explicit
+    POST /admin/api/auth/api-key. This route is still a GET, so it is now a
+    WIDER surface than classic's for the same secret. Left as-is on purpose:
+    the chat and STT panels authenticate their own sockets with this value, so
+    the verb change is an auth-boundary decision, not a payload mirror. See
+    SYNC-1 run-39 watch item 8."""
     key = ""
     try:
         from omlx.server import _server_state
