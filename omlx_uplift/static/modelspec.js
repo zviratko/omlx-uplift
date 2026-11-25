@@ -133,6 +133,11 @@
         'qwen35_ane_prefill_cpu_fraction', 'qwen35_ane_prefill_cpu_down_fraction',
         'qwen35_ane_prefill_cpu_gdn_fraction', 'qwen35_ane_prefill_cpu_threads',
         'qwen35_ane_prefill_cpu_shared_resource',
+        // SYNC-1 run 38 (upstream 6ff0b269 #5640): the LoopCD block lives in
+        // classic's ms-experimental section, which sits behind the same
+        // llm/vlm non-diffusion gate as its Index Cache neighbour
+        // (_modal_model_settings.html:1418) - so a type flip strips the pair.
+        'loopcd_enabled', 'loopcd_skip_thinking',
     ]);
     /* UP-54 (upstream 153aaee #4826; the embedding twin predates it):
        classic's ms-basic rows the context window for EMBEDDING and
@@ -167,6 +172,12 @@
         if (on(s.deepseek_v41_ced_prefill_enabled)) out.push('deepseek_v41_ced_prefill_enabled');
         if (on(s.deepseek_v41_engram_ssd_offload)) out.push('deepseek_v41_engram_ssd_offload');
         if (on(s.hy4_engram_ssd_offload)) out.push('hy4_engram_ssd_offload');
+        // SYNC-1 run 38 (upstream 6ff0b269 #5640): the server's LoopCD gate
+        // reads the CHECKPOINT's config_model_type, not the family override
+        // (admin/routes.py:3629), so an inkling2_loop checkpoint flipped to a
+        // non-generation family keeps decoding through LoopCD while the editor
+        // hides the row. Name it, exactly like the other sticky masters.
+        if (on(s.loopcd_enabled)) out.push('loopcd_enabled');
         if (s.chat_template_kwargs && Object.keys(s.chat_template_kwargs).length)
             out.push('chat_template_kwargs');
         return out;
@@ -443,6 +454,12 @@
             // applied on top of these weights. '' = none (classic:2358 clears
             // it for a diffusion model, where the row never renders).
             lora_adapter: diffusion ? '' : (s.lora_adapter || ''),
+            // SYNC-1 run 38 (upstream 6ff0b269 #5640): LoopCD contrastive
+            // decoding (classic dashboard.js:2363-2364, in
+            // buildModelSettingsState). Plain bools, unset means OFF; the
+            // row itself renders only for config_model_type inkling2_loop.
+            loopcd_enabled: s.loopcd_enabled === true,
+            loopcd_skip_thinking: s.loopcd_skip_thinking === true,
             ctKwargEntries: buildCtKwargEntries(s.chat_template_kwargs, s.forced_ct_kwargs, diffusion),
             is_diffusion_model: diffusion,
         };
@@ -726,6 +743,15 @@
             // adapter in the always-sent base (dashboard.js:3734), so an
             // empty pick is an explicit null that CLEARS a stored adapter.
             lora_adapter: ms.lora_adapter || null,
+            // SYNC-1 run 38 (upstream 6ff0b269 #5640): classic puts the
+            // LoopCD pair in the ALWAYS-SENT base (dashboard.js:3744-3745,
+            // right after the adapter), not in a row-visibility conditional.
+            // The server does the type gate itself: a sent loopcd_enabled
+            // sticks only while config_model_type is inkling2_loop
+            // (admin/routes.py:3627-3632), so an off-family model cannot be
+            // polluted by it and clearing it here is a real clear.
+            loopcd_enabled: !!ms.loopcd_enabled,
+            loopcd_skip_thinking: !!ms.loopcd_skip_thinking,
             trust_remote_code: !!ms.trust_remote_code,
         };
         // MT-1: classic sends the embedding-audio pair ONLY for models the
@@ -994,6 +1020,14 @@
         // picking or clearing one rebuilds the engine - the row is RELOAD
         // material, exactly like its hint says.
         add('lora_adapter', d.lora_adapter || null);
+        // SYNC-1 run 38 (upstream 6ff0b269 #5640): engine_pool signs the
+        // LoopCD master UNCONDITIONALLY and the dependent knob only while the
+        // master is on (engine_pool.py:1512-1515, right after the adapter) -
+        // the same shape as the embedding-audio pair above. LoopCD rewrites
+        // the decode path at load, so a flip rebuilds a loaded engine.
+        const loopcdOn = !!d.loopcd_enabled;
+        add('loopcd_enabled', loopcdOn);
+        if (loopcdOn) add('loopcd_skip_thinking', !!d.loopcd_skip_thinking);
         return sig;
     }
     /* Keys that feed the runtime signature (drives the per-field RELOAD
@@ -1043,6 +1077,10 @@
         // engine load, so it rides the deferred store + RESTART MODEL like the
         // rest of the signature material instead of reloading on a plain SAVE.
         'lora_adapter',
+        // SYNC-1 run 38 (upstream 6ff0b269 #5640): engine_pool signs the
+        // LoopCD pair, so both keys are runtime material - the master
+        // always, the knob while the master is on (see sigMasterKey).
+        'loopcd_enabled', 'loopcd_skip_thinking',
         // NOT listed here on purpose: max_context_window. It is signature
         // material only where the window passes the native one (YaRN), so the
         // editor classifies it per model + per queued value through
@@ -1101,6 +1139,11 @@
             dflash_verify_mode: 'dflash_enabled',
             vlm_mtp_draft_model: 'vlm_mtp_enabled',
             vlm_mtp_draft_block_size: 'vlm_mtp_enabled',
+            // SYNC-1 run 38 (upstream 6ff0b269 #5640): engine_pool carries
+            // the LoopCD knob only while the master is on (1512-1515), so a
+            // skip-thinking difference with both masters off is not a
+            // difference at all (DIV-1).
+            loopcd_skip_thinking: 'loopcd_enabled',
         };
         if (EXPLICIT[k]) return EXPLICIT[k];
         if (k === 'qwen35_ane_prefill_enabled' || k === 'qwen35_ane_prefill_cpu_enabled')

@@ -1991,6 +1991,28 @@ function renderEditorFields(container) {
                 })(),
                 [seBind('number', 'index_cache_freq',
                     { label: C.tf('modal.model_settings.index_cache_freq', 'Frequency (every Nth layer keeps indexer)'), min: 2, max: 16, step: 1 })]);
+    /* SYNC-1 run 38 (upstream 6ff0b269 #5640): LoopCD contrastive decoding.
+       Classic renders the block for ONE config type only
+       (_modal_model_settings.html:1758: config_model_type === 'inkling2_loop')
+       and shows the second switch only while the master is on - the same
+       always-rendered-and-gated shape uplift's seFam bands use (UX-2).
+       Labels and hints reuse classic's own i18n keys through the mounted
+       catalog, so all 12 classic locales translate them with zero uplift
+       locale edits (run-13 doctrine). Classic also paints an arXiv link
+       beside the hint; the se-hint element is text-only, so the link is the
+       one classic affordance this side does not carry. */
+    if (!S.isDiffusion(m) &&
+            S.normType(m && m.config_model_type) === 'inkling2_loop')
+        seFam(g, 'loopcd_enabled',
+            seBind('bool', 'loopcd_enabled', {
+                label: C.tf('modal.model_settings.loopcd', 'LoopCD'),
+                hint: C.tf('modal.model_settings.loopcd_hint',
+                    'Contrasts the last loop pass with the first when choosing each token. Can improve answers, but runs the final layers twice, so it is slower and uses more memory.') }),
+            [seBind('bool', 'loopcd_skip_thinking', {
+                label: C.tf('modal.model_settings.loopcd_skip_thinking',
+                    'Exclude thinking blocks'),
+                hint: C.tf('modal.model_settings.loopcd_skip_thinking_hint',
+                    'Leaves thinking and block or tool-call markers as is and applies LoopCD only to the answer and tool-call contents. The LoopCD authors recommend this for coding agents.') })]);
     // ANE prompt processing lives in the same section as classic
     const gAne = document.createElement('div');
     gAne.className = 'pair'; sect.__body.append(gAne);
