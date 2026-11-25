@@ -2457,13 +2457,40 @@ function gsBodySanitize() {
     // UP-19 (6): classic gives the API-key row an eye button. Uplift keeps
     // its stricter diff-masking (the CHANGES rail never prints the value);
     // this only reveals the field the user is typing into.
+    //
+    // SYNC-1 run 39 (upstream b1fbfff3 #5496): the settings GET no longer
+    // returns auth.api_key - it reports auth.api_key_set and the value comes
+    // from POST /admin/api/auth/api-key on demand. Flipping the input type
+    // alone therefore showed an EMPTY box on a server that does have a key,
+    // which reads as "my API key is gone". The eye now fetches on reveal and
+    // drops the value again on hide, like classic's toggleShowApiKey() with
+    // revealedStoredApiKey (dashboard.js:4369-4383).
     for (const inp of document.querySelectorAll('#gs-body input[type=password]')) {
         if (inp.__revealDone) continue;
         inp.__revealDone = true;
+        const isStoredKey =
+            (inp.closest('[data-flat]') || { dataset: {} }).dataset.flat === 'api_key';
         const eye = document.createElement('button');
         eye.type = 'button'; eye.className = 'se-btn gs-eye'; eye.textContent = '👁';
         eye.title = 'Show / hide the value';
-        eye.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; };
+        eye.onclick = () => {
+            if (inp.type !== 'password') {
+                inp.type = 'password';
+                // never leave a fetched secret sitting in the DOM
+                if (inp.__revealedKey) { inp.value = ''; inp.__revealedKey = null; }
+                return;
+            }
+            if (!isStoredKey || inp.value || !(GS.auth || {}).api_key_set) {
+                inp.type = 'text';
+                return;
+            }
+            eye.disabled = true;
+            GLUE.postJson(`${API}/admin/api/auth/api-key`, {}).then(d => {
+                const k = (d || {}).api_key || '';
+                if (k) { inp.value = k; inp.__revealedKey = k; }
+            }).catch(e => GLUE.toast(D.errText(e), 'error'))
+              .finally(() => { eye.disabled = false; inp.type = 'text'; });
+        };
         const cell = inp.closest('.gctl') || inp.parentElement;
         if (cell) cell.append(eye);
     }

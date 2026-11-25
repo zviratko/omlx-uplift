@@ -92,9 +92,20 @@ test('f18: claudeCodeCommand mask variant hides the key, keeps the shape', () =>
 test('f18: the helper row renders the masked form and copies the real one', () => {
     assert.match(helper, /display: GSPEC\.claudeCodeCommand\(ccSec, ccConn, \{ mask: true \}\)/);
     assert.match(helper, /cmdLine\(c\.cmd, c\.display\)/);
-    // the <code> text/title take the display variant; clipboard takes cmd
-    assert.match(helper, /const shown = display === undefined \? cmd : display;/);
-    assert.match(helper, /code\.textContent = shown;[\s\S]{0,700}navigator\.clipboard\.writeText\(cmd\)/);
+    // the <code> text/title take the display variant; clipboard takes cmd.
+    // Run 39 (upstream b1fbfff3 #5496) made `cmd` deferrable: the server no
+    // longer puts the key in any polled GET, so the real command is built on
+    // copy. A thunk must never reach the screen, and the copied value is the
+    // RESOLVED text, not the function.
+    assert.match(helper,
+        /const shown = display === undefined \? \(thunk \? '' : cmd\) : display;/);
+    assert.match(helper,
+        /code\.textContent = shown;[\s\S]{0,900}navigator\.clipboard\.writeText\(text\)/);
+    // the Claude row is the deferred one, and it fetches the stored key
+    assert.match(helper, /\{ cmd: ccReal,/,
+        'the Claude Code row must defer its command to copy time');
+    assert.match(helper, /\/admin\/api\/auth\/api-key/,
+        'the secret must come from the explicit POST classic added');
 });
 test('displayHostFor mirrors classic formatDisplayHost (dashboard.js:3655)', () => {
     assert.strictEqual(G.displayHostFor(''), '127.0.0.1');

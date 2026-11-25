@@ -183,13 +183,18 @@ def _busy_embed() -> Optional[bool]:
 
 def _busy_throughput() -> Optional[bool]:
     """bench_engine has no module-level registry of its own: the run object
-    lives in classic's registry, and `active_summary()` is its accessor
-    (it reads `_engine().get_active_run()`, omlx.admin.benchmark)."""
+    lives in classic's registry, and `classic_busy()` is its accessor.
+
+    Run 39 (upstream f8f165bc #4918) moved this probe off
+    `active_summary()['running']` on purpose: classic can now park runs in a
+    queue and launch them from the finishing run's own task, so the active
+    flag alone reads free while a throughput run is still certain to start.
+    `classic_busy()` reports both signals, exactly like classic's route."""
     m = _mod("bench_engine")
     if m is None:
         return None
     try:
-        return bool(m.active_summary().get("running"))
+        return bool(m.classic_busy())
     except Exception:
         return None
 
@@ -264,7 +269,10 @@ _REASONS = {
     "decision": "a decision benchmark is running",
     "embed": "an embeddings/reranker benchmark is running (or its mteb env "
              "is being built)",
-    "throughput": "a throughput benchmark is running",
+    # run 39 (#4918): the probe now also reports classic's pending queue, so
+    # the reason text has to cover waiting as well as running
+    "throughput": "a throughput benchmark is running, or one is waiting in "
+                  "the classic dashboard's queue",
     "context": "a context probe is running",
     "ane": "an ANE tuning is running",
     "prefill": "a custom benchmark is running",

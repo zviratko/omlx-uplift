@@ -182,9 +182,9 @@ async function renderHelperModels() {
         eng = (gs.external_engines || {}).splash || {};
         ccSec = gs.claude_code || {};     // UP-26(2): the env-command half
     } catch (_) {}
-    // UP-26(2): classic renders launch commands from stats (cli_prefix,
-    // host, port, api_key — dashboard.js:4231/3832/3838, /admin/api/stats
-    // carries all four); one extra GET, honest degradation on a miss.
+    // UP-26(2): classic renders launch commands from stats (cli_prefix, host,
+    // port and, since run 39, only the api_key_set FLAG - dashboard.js:4318);
+    // one extra GET, honest degradation on a miss.
     try { stats = await HG.fetchJson(`${API}/admin/api/stats`) || {}; } catch (_) {}
     modelList = models;
 
@@ -348,7 +348,13 @@ async function renderHelperModels() {
     // DISPLAY variant (the Claude Code auth token). The <code> text AND its
     // title show `display`; the copy button still copies the real `cmd`.
     const cmdLine = (cmd, display) => {
-        const shown = display === undefined ? cmd : display;
+        // SYNC-1 run 39 (upstream b1fbfff3 #5496): `cmd` may be a THUNK that
+        // resolves to the command text at click time. The server stopped
+        // delivering the master API key on the polled stats GET, so the real
+        // Claude Code line can only be built when the operator actually copies
+        // it. `display` (always given for a thunk) is what the screen shows.
+        const thunk = typeof cmd === 'function';
+        const shown = display === undefined ? (thunk ? '' : cmd) : display;
         const line = document.createElement('div'); line.className = 'up-appcmd';
         const code = document.createElement('code'); code.textContent = shown;
         code.title = shown;
@@ -359,9 +365,17 @@ async function renderHelperModels() {
         cp.onclick = () => {
             const flash = () => { cp.textContent = '\u2713';
                 setTimeout(() => { cp.textContent = '\u29C9'; }, 2000); };
-            if (navigator.clipboard && navigator.clipboard.writeText)
-                navigator.clipboard.writeText(cmd).then(flash).catch(flash);
-            else flash();
+            const copy = (text) => {
+                if (navigator.clipboard && navigator.clipboard.writeText)
+                    navigator.clipboard.writeText(text).then(flash).catch(flash);
+                else flash();
+            };
+            if (!thunk) { copy(cmd); return; }
+            // classic's rule: a failed key fetch must NOT paint the copied mark.
+            // Nothing else changes on screen - the masked line stays truthful,
+            // and no new locale key is invented for a silent no-op.
+            Promise.resolve().then(cmd).then(text => { if (text) copy(text); },
+                () => {});
         };
         line.append(code, cp);
         return line;
@@ -389,9 +403,24 @@ async function renderHelperModels() {
     for (const m of modelList) {
         const o2 = document.createElement('option'); o2.value = m.id || m.name || ''; cliDl.append(o2);
     }
-    const ccConn = { host: stats.host, port: stats.port, apiKey: stats.api_key };
+    // SYNC-1 run 39 (upstream b1fbfff3 #5496): /admin/api/stats dropped the
+    // `api_key` field and now reports only `api_key_set`; the secret is fetched
+    // once per explicit copy from POST /admin/api/auth/api-key. The masked line
+    // renders from the flag, so the card still shows a real command with no
+    // secret in the page; the copy button resolves the thunk below.
+    const ccConn = { host: stats.host, port: stats.port,
+                     apiKeySet: !!stats.api_key_set };
+    const ccReal = () => {
+        // cloud mode needs no token at all - classic's builder returns the bare
+        // `env -u ...` line, so skip the secret fetch entirely
+        if ((ccSec || {}).mode === 'cloud')
+            return Promise.resolve(GSPEC.claudeCodeCommand(ccSec, ccConn));
+        return HG.postJson(`${API}/admin/api/auth/api-key`, {})
+            .then(d => GSPEC.claudeCodeCommand(ccSec, Object.assign({}, ccConn,
+                { apiKey: (d && d.api_key) || '' })));
+    };
     cliRow(C.tf('status.integrations.claude_code', 'Claude Code'), null,
-        [{ cmd: GSPEC.claudeCodeCommand(ccSec, ccConn),
+        [{ cmd: ccReal,
            display: GSPEC.claudeCodeCommand(ccSec, ccConn, { mask: true }) },
          GSPEC.launchCommand('claude', { cliPrefix: stats.cli_prefix })]);
     cliRow('GitHub Copilot', [cliPick('copilot_model')],

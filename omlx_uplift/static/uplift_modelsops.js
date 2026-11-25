@@ -174,6 +174,8 @@ function renderQuantizer() {
             b.onclick = () => {
                 dtype.v = d;
                 for (const x of dtypes.children) x.classList.toggle('on', x.textContent === d);
+                // run 39 (0de7c92f #5566): the dtype now prices the estimate
+                refreshEst();
             };
             dtypes.append(b);
         }
@@ -216,17 +218,34 @@ function renderQuantizer() {
         };
 
         let estTimer = null;
+        let estRev = 0;     // run 39: classic's _oqEstimateRevision guard
         function refreshEst() {
             clearTimeout(estTimer);
             const m = st.models.find(x => x.path === selModel.value);
-            if (!m) { est.textContent = '\u2014'; return; }
+            // classic nulls the estimate AND the error the moment any export
+            // option moves (0de7c92f #5566): a number that still describes the
+            // PREVIOUS selection is worse than a dash.
+            est.textContent = '\u2014';
+            const rev = ++estRev;
+            if (!m) return;
             estTimer = setTimeout(() => {
+                // SYNC-1 run 39 (upstream 0de7c92f #5566): the estimate endpoint
+                // gained text_only, dtype and mtp_assistant_model_path and now
+                // prices the export with them. Omitting them made this preview
+                // quietly disagree with the Start payload the same form sends.
                 const params = new URLSearchParams({
                     model_path: m.path, oq_level: selLevel.value,
+                    text_only: cbText.checked ? 'true' : 'false',
+                    dtype: dtype.v,
                     preserve_mtp: (m.has_mtp_heads && cbMtp.checked) ? 'true' : 'false',
                     preserve_ngram_table: (m.model_type === 'deepseek_v41' && cbNgram.checked) ? 'true' : 'false',
+                    // selCombine only ever holds a candidate the current model
+                    // accepts (updateConditional refills it and clears the pick),
+                    // and 'None' is value '' - classic's .some() membership test
+                    mtp_assistant_model_path: selCombine.value || '',
                 });
                 QG.fetchJson(`${API}/admin/api/oq/estimate?${params}`).then(e => {
+                    if (rev !== estRev) return;   // a newer request already won
                     let mem = e.memory_streaming_formatted || '';
                     const sens = st.all.find(x => x.path === selSens.value);
                     if (sens) {   // client-side approximation, same as classic page
@@ -237,7 +256,10 @@ function renderQuantizer() {
                     }
                     est.textContent = `est: ${e.output_size_formatted || C.fmtBytes(e.output_size_bytes)}` +
                         ` \u00b7 ${e.effective_bpw} bpw \u00b7 stream ${mem}`;
-                }).catch(err => { est.textContent = 'estimate: ' + D.errText(err); });
+                }).catch(err => {
+                    if (rev !== estRev) return;
+                    est.textContent = 'estimate: ' + D.errText(err);
+                });
             }, 300);
         }
 
@@ -350,6 +372,9 @@ function renderQuantizer() {
 
         selModel.onchange = updateConditional;
         selSens.onchange = refreshEst;
+        // run 39 (0de7c92f #5566): the MTP donor/assistant now prices the
+        // estimate too (mtp_assistant_model_path), so a pick must refresh it
+        selCombine.onchange = refreshEst;
         selLevel.onchange = () => {
             // classic re-arms its policy effect on every level change:
             // oQ4 has no use for a sensitivity model on V4.1

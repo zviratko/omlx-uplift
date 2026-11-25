@@ -21,9 +21,10 @@ module, omlx/admin/benchmark.py):
   wrapper defaults to SKIP and only runs classic's unmodified upload path
   when the caller passes upload:true. Implementation = module-attribute
   swap of B._upload_to_omlx_ai RESTORED in finally: safe to scope because
-  throughput runs are 1-at-a-time ACROSS both paths (classic's start
-  checks the same get_active_run registry this module writes to), and the
-  classic source file stays untouched. External-endpoint runs never
+  throughput runs are 1-at-a-time ACROSS both paths (classic's start checks
+  the same get_active_run registry this module writes to, and since #4918
+  classic_busy() adds classic's queue to that claim - see classic_busy()),
+  and the classic source file stays untouched. External-endpoint runs never
   upload — classic's own rule (benchmark.py:2285), we do not override it.
 """
 from __future__ import annotations
@@ -306,6 +307,13 @@ async def start(body: dict, pool: Any, *, upload: bool = False,
         raise Conflict(
             "A throughput benchmark is already running "
             f"(bench_id={active.bench_id}, model_id={active.request.model_id}).")
+    # SYNC-1 run 39 (upstream f8f165bc #4918): classic can hold runs in its own
+    # queue and launch them from the finishing run's task, so the active check
+    # above is no longer the whole story. bench_queue._busy_throughput() keeps
+    # the pump off this window; this is the race backstop, and a Conflict is
+    # retried by the pump exactly like the other contention guards.
+    if classic_busy():
+        raise Conflict("Throughput benchmarks are waiting in the queue.")
     try:
         from omlx.admin import context_benchmark as CTX
         if CTX.get_active_run() is not None:
@@ -448,6 +456,32 @@ async def _runner(run, pool: Any, upload_allowed: bool,
 # --------------------------------------------------------------------------
 # read/control surface (classic route contract shapes)
 # --------------------------------------------------------------------------
+
+def classic_busy() -> bool:
+    """True while classic owns the throughput slot, in either sense.
+
+    SYNC-1 run 39 (upstream f8f165bc #4918): classic grew a queue. A start
+    that arrives while a run is active is parked in `_queue` and launched by
+    the FINISHING run's own `run_queue` task. That opens a window where
+    `get_active_run()` already reads None (the run flipped to done, uploads
+    still streaming) while a parked run is certain to start. Classic's own
+    route guards it with `queue_busy()` alongside the active check, and the
+    same two signals guard Uplift's pump: claiming the slot on the active
+    check alone would run two throughput benches on one engine, and would
+    break the 1-at-a-time assumption that scopes the `_upload_to_omlx_ai`
+    swap in start() (see this module's header).
+
+    An engine older than #4918 has no `queue_busy`; it owns nothing beyond
+    the active run, so the answer degrades to the active check.
+    """
+    B = _engine()
+    if B.get_active_run() is not None:
+        return True
+    probe = getattr(B, "queue_busy", None)
+    if probe is None:
+        return False
+    return bool(probe())
+
 
 def active_summary() -> dict:
     B = _engine()

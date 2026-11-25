@@ -396,14 +396,19 @@ const CLAUDE_CLOUD_UNSET = 'env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN '
 // SYNC-1 fire 18 (upstream 579db64 #5055): the on-screen variant masks the
 // auth token (sub-key style bullets) so a shared screen or a screenshot never
 // carries the API key; the copy button still copies the REAL command.
-// Classic's mask value is `api_key ? '••••••••' : ''`.
+// Classic's mask value is `api_key_set ? '••••••••' : ''`.
+// SYNC-1 run 39 (upstream b1fbfff3 #5496): the polled GETs no longer carry the
+// secret - /admin/api/stats reports only `api_key_set`, and the real key comes
+// from POST /admin/api/auth/api-key on an explicit copy. So the mask must read
+// the FLAG (conn.apiKeySet), never the token: a caller that only knows the
+// flag still paints bullets, and a caller that fetched the secret can pass it.
 function claudeCodeCommand(cc, conn, opts) {
     if ((cc || {}).mode === 'cloud') return CLAUDE_CLOUD_UNSET;
     const c = conn || {};
     const mask = !!(opts && opts.mask);
     const port = c.port || 8000;
     const ph = 'select-a-model';
-    const token = mask ? (c.apiKey ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : '') : c.apiKey;
+    const token = mask ? ((c.apiKey || c.apiKeySet) ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : '') : c.apiKey;
     const parts = [
         `${shellEnv('ANTHROPIC_BASE_URL', 'http://' + displayHostFor(c.host) + ':' + port)}`,
     ];
